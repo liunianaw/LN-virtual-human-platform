@@ -1,0 +1,19 @@
+# Local credentials and experiment results
+.codex/
+**/.idea/
+**/.vscode/
+*.iml
+**/config.local.json
+**/.env
+**/.env.*
+!**/.env.example
+validation/workspace/
+**/__pycache__/
+**/.venv/
+**/node_modules/
+**/.npm-cache/
+**/dist/
+**/test-results/
+**/.pytest_cache/
+# Pristine upstream checkouts; pinned sources are recorded in docs/framework-bootstrap.md
+upstream/
