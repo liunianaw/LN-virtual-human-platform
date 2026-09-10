@@ -26,10 +26,6 @@
                         <div class="pull-right">{{ state.user.email }}</div>
                      </li>
                      <li class="list-group-item">
-                        <svg-icon icon-class="tree" />所属部门
-                        <div class="pull-right" v-if="state.user.dept">{{ state.user.dept.deptName }} / {{ state.postGroup }}</div>
-                     </li>
-                     <li class="list-group-item">
                         <svg-icon icon-class="peoples" />所属角色
                         <div class="pull-right">{{ state.roleGroup }}</div>
                      </li>
@@ -75,20 +71,17 @@ const selectedTab = ref<string>("userinfo")
 interface UserProfileState {
   user: SysUser
   roleGroup: string
-  postGroup: string
 }
 
 const state = reactive<UserProfileState>({
   user: {} as SysUser,
   roleGroup: '',
-  postGroup: ''
 })
 
 function getUser() {
   getUserProfile().then(response => {
     state.user = response.data
     state.roleGroup = response.roleGroup
-    state.postGroup = response.postGroup
   })
 }
 

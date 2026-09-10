@@ -9,7 +9,7 @@
       :show-file-list="false"
       :headers="headers"
       class="editor-img-uploader"
-      v-if="type == 'url'"
+      v-if="type == 'url' && action"
     >
       <i ref="uploadRef" class="editor-img-uploader"></i>
     </el-upload>
@@ -36,12 +36,13 @@ import type { UploadFileResult } from '@/types/api/common'
 const { proxy } = getCurrentInstance()
 
 const quillEditorRef = ref()
-const uploadUrl = ref(import.meta.env.VITE_APP_BASE_API + "/file/upload") // 上传的图片服务器地址
+
 const headers = ref({
   Authorization: "Bearer " + getToken()
 })
 
 const props = defineProps({
+  action: { type: String, default: "" },
   /* 编辑器的内容 */
   modelValue: {
     type: String,
@@ -72,6 +73,8 @@ const props = defineProps({
     default: "url",
   }
 })
+
+const uploadUrl = computed(() => import.meta.env.VITE_APP_BASE_API + props.action)
 
 const options = ref({
   theme: "snow",
@@ -121,6 +124,7 @@ onMounted(() => {
     let toolbar = quill.getModule("toolbar")
     toolbar.addHandler("image", (value: boolean) => {
       if (value) {
+        if (!props.action) { proxy.$modal.msgWarning("请配置图片上传接口"); return }
         proxy.$refs.uploadRef.click()
       } else {
         quill.format("image", false)
@@ -132,6 +136,7 @@ onMounted(() => {
 
 // 上传前校检格式和大小
 function handleBeforeUpload(file: File) {
+  if (!props.action) return false
   const type = ["image/jpeg", "image/jpg", "image/png", "image/svg"]
   const isJPG = type.includes(file.type)
   //检验文件格式
@@ -188,6 +193,7 @@ function handlePasteCapture(e: ClipboardEvent) {
 }
 
 function insertImage(file: File) {
+  if (!file || !handleBeforeUpload(file)) return
   const formData = new FormData()
   formData.append("file", file)
   axios.post(uploadUrl.value, formData, { headers: { "Content-Type": "multipart/form-data", Authorization: headers.value.Authorization } }).then((res: { data: UploadFileResult }) => {

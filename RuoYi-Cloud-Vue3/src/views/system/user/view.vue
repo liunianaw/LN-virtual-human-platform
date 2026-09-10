@@ -10,12 +10,6 @@
             <span class="info-value plaintext">{{ info.nickName }}</span>
           </div>
         </el-col>
-        <el-col :span="12">
-          <div class="info-item">
-            <label class="info-label">归属部门：</label>
-            <span class="info-value plaintext">{{ (info.dept && info.dept.deptName) }}</span>
-          </div>
-        </el-col>
       </el-row>
       <el-row :gutter="20" class="mb8">
         <el-col :span="12">
@@ -48,12 +42,6 @@
         </el-col>
       </el-row>
       <el-row :gutter="20" class="mb8">
-        <el-col :span="12">
-          <div class="info-item">
-            <label class="info-label">岗位：</label>
-            <span class="info-value plaintext">{{ postNames || '无岗位' }}</span>
-          </div>
-        </el-col>
         <el-col :span="12">
           <div class="info-item">
             <label class="info-label">用户性别：</label>
@@ -129,22 +117,16 @@
 import { getUser } from '@/api/system/user'
 import type { SysUser } from '@/types/api/system/user'
 import type { SysRole } from '@/types/api/system/role'
-import type { SysPost } from '@/types/api/system/post'
 
 const visible = ref<boolean>(false)
 const loading = ref<boolean>(false)
 const info = reactive<SysUser>({})
-const postOptions = ref<SysPost[]>([])
 const roleOptions = ref<SysRole[]>([])
 
 const { sys_user_sex } = useDict("sys_user_sex")
 
 const sexLabel = computed(() => selectDictLabel(sys_user_sex.value, info.sex) || '-')
 
-const postNames = computed<string>(() => {
-  if (!postOptions.value.length || !info.postIds) return ''
-  return postOptions.value.filter((p: SysPost) => info.postIds?.includes(p.postId)).map((p: SysPost) => p.postName).join('、') || ''
-})
 
 const roleNames = computed<string>(() => {
   if (!roleOptions.value.length || !info.roleIds) return ''
@@ -157,9 +139,7 @@ const open = async (userId: number): Promise<void> => {
   try {
     const res = await getUser(userId)
     Object.assign(info, res.data || {})
-    postOptions.value = res.posts || []
     roleOptions.value = res.roles || []
-    info.postIds = res.postIds || []
     info.roleIds = res.roleIds || []
   } catch (error) {
     console.error('获取用户信息失败:', error)

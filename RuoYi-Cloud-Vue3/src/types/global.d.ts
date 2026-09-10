@@ -21,6 +21,7 @@ declare module 'element-plus'
 
 // vue
 declare module 'vue' {
+  export { createApp, type App } from '@vue/runtime-dom'
   interface ComponentInternalInstance { proxy: any }
 }
 

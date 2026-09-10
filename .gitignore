@@ -17,3 +17,6 @@ validation/workspace/
 **/.pytest_cache/
 # Pristine upstream checkouts; pinned sources are recorded in docs/framework-bootstrap.md
 upstream/
+
+# Maven build outputs
+**/target/

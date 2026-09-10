@@ -20,18 +20,18 @@
 
 ## 已拉取源码
 
-当前源码位置：Java后端在RuoYi-Cloud/，Vue3后台在RuoYi-Cloud-Vue3/，直接作为改造主体；upstream/仅保留LiveTalking、MuseTalk、TalkingHead三个参考项目。保留各仓库历史与LICENSE。后端构建及模块组织均从RuoYi-Cloud/pom.xml出发，不把模块移动到项目根目录。
+当前源码位置：Java后端在RuoYi-Cloud/，Vue3后台在RuoYi-Cloud-Vue3/，直接作为改造主体；upstream/仅保留LiveTalking、MuseTalk、TalkingHead三个参考项目。参考项目保留各仓库历史与LICENSE；若依源码按负责人要求已去除嵌套Git，保留LICENSE和本页来源SHA。后端构建及模块组织均从RuoYi-Cloud/pom.xml出发，不把模块移动到项目根目录。
 
 | 用途 | 官方仓库 | 分支 | 当前提交 |
 |---|---|---|---|
 | Java 微服务基础 | https://github.com/yangzongzhuan/RuoYi-Cloud | springboot3 | 4d93505f7f87ebd358c56c766bdec59be01f74c6 |
 | Vue 3 / TypeScript 后台 | https://github.com/yangzongzhuan/RuoYi-Cloud-Vue3 | typescript | 52a100c8439951dfb860809f3cce48a0752a8c6a |
 
-均为浅克隆，LICENSE 为 MIT，已核对工作区无修改。构建、依赖制品可用性及登录联调尚未验证，因此这些 SHA 是源码基线，不是已验证的生产版本。
+均为浅克隆，LICENSE 为 MIT，已核对工作区无修改。拉取时未验证构建；当前构建结果见裁剪记录。登录联调尚未验证，因此这些SHA是上游源码基线，不是生产验收版本。
 
 后端 POM 声明：RuoYi 3.6.8、Java 17、Spring Boot 3.5.16、Spring Cloud 2025.0.2、Spring Cloud Alibaba 2025.0.0.0。
 
-前端 package.json 声明：RuoYi 3.6.8、Vue 3.5.26、TypeScript 5.6.3、Vite 6.4.1、Element Plus 2.13.1、Pinia 3.0.4。安装时仍需生成/核对锁文件并实际构建。
+前端 package.json 声明：RuoYi 3.6.8、Vue 3.5.26、TypeScript 5.6.3、Vite 6.4.1、Element Plus 2.13.1、Pinia 3.0.4。本轮已生成package-lock.json并完成构建，详见裁剪记录。
 
 ## 其他开源组件如何引入
 
@@ -55,4 +55,4 @@
 5. 独立Voice配置、官方及第三方TTS → 最小SPEAK_ONLY调试 → 声音与speaking动作、停止。
 6. 真实业务演示及重复提交、故障恢复、越权和清理验收，完成M2。
 
-现有validation保留供手动验证；开源功能按实际需求移植到若依及新增模块，详细来源见开源复用清单。当前仍是方案阶段，未执行初始化、裁剪或付费调用。
+现有validation保留供手动验证；开源功能按实际需求移植到若依及新增模块，详细来源见开源复用清单。2026-09-11：根仓库已初始化，模块裁剪已执行；未进行付费调用。构建与配置记录见[若依裁剪记录](ruoyi-module-trimming.md)。

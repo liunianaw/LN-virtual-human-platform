@@ -20,11 +20,9 @@ import com.ruoyi.common.log.annotation.Log;
 import com.ruoyi.common.log.enums.BusinessType;
 import com.ruoyi.common.security.annotation.RequiresPermissions;
 import com.ruoyi.common.security.utils.SecurityUtils;
-import com.ruoyi.system.api.domain.SysDept;
 import com.ruoyi.system.api.domain.SysRole;
 import com.ruoyi.system.api.domain.SysUser;
 import com.ruoyi.system.domain.SysUserRole;
-import com.ruoyi.system.service.ISysDeptService;
 import com.ruoyi.system.service.ISysRoleService;
 import com.ruoyi.system.service.ISysUserService;
 
@@ -43,8 +41,6 @@ public class SysRoleController extends BaseController
     @Autowired
     private ISysUserService userService;
 
-    @Autowired
-    private ISysDeptService deptService;
 
     @RequiresPermissions("system:role:list")
     @GetMapping("/list")
@@ -92,6 +88,9 @@ public class SysRoleController extends BaseController
         {
             return error("新增角色'" + role.getRoleName() + "'失败，角色权限已存在");
         }
+        role.setDataScope("1");
+        role.setDeptIds(null);
+        role.setDeptCheckStrictly(true);
         role.setCreateBy(SecurityUtils.getUsername());
         return toAjax(roleService.insertRole(role));
 
@@ -115,22 +114,13 @@ public class SysRoleController extends BaseController
         {
             return error("修改角色'" + role.getRoleName() + "'失败，角色权限已存在");
         }
+        role.setDataScope(null);
+        role.setDeptIds(null);
+        role.setDeptCheckStrictly(true);
         role.setUpdateBy(SecurityUtils.getUsername());
         return toAjax(roleService.updateRole(role));
     }
 
-    /**
-     * 修改保存数据权限
-     */
-    @RequiresPermissions("system:role:edit")
-    @Log(title = "角色管理", businessType = BusinessType.UPDATE)
-    @PutMapping("/dataScope")
-    public AjaxResult dataScope(@RequestBody SysRole role)
-    {
-        roleService.checkRoleAllowed(role);
-        roleService.checkRoleDataScope(role.getRoleId());
-        return toAjax(roleService.authDataScope(role));
-    }
 
     /**
      * 状态修改
@@ -142,6 +132,9 @@ public class SysRoleController extends BaseController
     {
         roleService.checkRoleAllowed(role);
         roleService.checkRoleDataScope(role.getRoleId());
+        role.setDataScope(null);
+        role.setDeptIds(null);
+        role.setDeptCheckStrictly(true);
         role.setUpdateBy(SecurityUtils.getUsername());
         return toAjax(roleService.updateRoleStatus(role));
     }
@@ -224,16 +217,4 @@ public class SysRoleController extends BaseController
         return toAjax(roleService.insertAuthUsers(roleId, userIds));
     }
 
-    /**
-     * 获取对应角色部门树列表
-     */
-    @RequiresPermissions("system:role:query")
-    @GetMapping(value = "/deptTree/{roleId}")
-    public AjaxResult deptTree(@PathVariable("roleId") Long roleId)
-    {
-        AjaxResult ajax = AjaxResult.success();
-        ajax.put("checkedKeys", deptService.selectDeptListByRoleId(roleId));
-        ajax.put("depts", deptService.selectDeptTreeList(new SysDept()));
-        return ajax;
-    }
 }

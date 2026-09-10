@@ -113,7 +113,7 @@
 
 <script setup lang="ts">
 const { proxy } = getCurrentInstance()
-import type { SysOperLog } from '@/types/api/monitor/operlog'
+import type { SysOperLog } from '@/types/api/system/operlog'
 
 const props = defineProps<{
   visible: boolean

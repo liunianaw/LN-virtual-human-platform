@@ -1,0 +1,26 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL:jdbc:mysql://localhost:3306/ry-cloud?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD}
+    druid:
+      initial-size: 2
+      min-idle: 2
+      max-active: 10
+      max-wait: 60000
+      stat-view-servlet:
+        enabled: false
+mybatis:
+  typeAliasesPackage: com.ruoyi.system
+  mapperLocations: classpath:mapper/**/*.xml
+springdoc:
+  gatewayUrl: ${GATEWAY_URL:http://localhost:8080}/system
+  api-docs:
+    enabled: true
+  info:
+    title: 系统模块接口文档
+    description: 系统模块接口描述
+    contact:
+      name: RuoYi
+      url: https://ruoyi.vip

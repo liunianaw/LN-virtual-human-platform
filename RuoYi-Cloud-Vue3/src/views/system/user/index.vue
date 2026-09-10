@@ -1,6 +1,5 @@
 <template>
-  <div class="app-container tree-sidebar-manage-wrap">
-    <tree-panel title="组织机构" :tree-data="deptOptions" search-placeholder="请输入部门名称" storage-key="dept-sidebar-width" :defaultExpandAll="true" @node-click="handleNodeClick" @refresh="getDeptTree" ref="deptTreeRef" />
+  <div class="app-container">
     <div class="tree-sidebar-content">
       <div class="content-inner">
         <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch" label-width="68px">
@@ -52,7 +51,6 @@
             </template>
          </el-table-column>
           <el-table-column label="用户昵称" align="center" key="nickName" prop="nickName" v-if="columns.nickName.visible" :show-overflow-tooltip="true" />
-          <el-table-column label="部门" align="center" key="deptName" prop="dept.deptName" v-if="columns.deptName.visible" :show-overflow-tooltip="true" />
           <el-table-column label="手机号码" align="center" key="phonenumber" prop="phonenumber" v-if="columns.phonenumber.visible" width="120" />
           <el-table-column label="状态" align="center" key="status" v-if="columns.status.visible">
             <template #default="scope">
@@ -98,11 +96,6 @@
               <el-input v-model="form.nickName" placeholder="请输入用户昵称" maxlength="30" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item label="归属部门" prop="deptId">
-              <el-tree-select v-model="form.deptId" :data="enabledDeptOptions" :props="{ value: 'id', label: 'label', children: 'children' }" value-key="id" placeholder="请选择归属部门" clearable check-strictly />
-            </el-form-item>
-          </el-col>
         </el-row>
         <el-row>
           <el-col :span="12">
@@ -146,13 +139,6 @@
         </el-row>
         <el-row>
           <el-col :span="12">
-            <el-form-item label="岗位">
-              <el-select v-model="form.postIds" multiple placeholder="请选择">
-                <el-option v-for="item in postOptions" :key="item.postId" :label="item.postName" :value="item.postId" :disabled="item.status == 1"></el-option>
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
             <el-form-item label="角色">
               <el-select v-model="form.roleIds" multiple placeholder="请选择">
                 <el-option v-for="item in roleOptions" :key="item.roleId" :label="item.roleName" :value="item.roleId" :disabled="item.status == 1"></el-option>
@@ -184,15 +170,13 @@
 </template>
 
 <script setup lang="ts" name="User">
-import TreePanel from "@/components/TreePanel/index.vue"
 import ExcelImportDialog from "@/components/ExcelImportDialog/index.vue"
 import UserViewDrawer from "./view.vue"
 import { usePasswordRule } from "@/utils/passwordRule"
-import { changeUserStatus, listUser, resetUserPwd, delUser, getUser, updateUser, addUser, deptTreeSelect } from "@/api/system/user"
+import { changeUserStatus, listUser, resetUserPwd, delUser, getUser, updateUser, addUser } from "@/api/system/user"
 import type { SysUser, UserQueryParams, UserFormDataResult } from '@/types/api/system/user'
 import type { SysRole } from '@/types/api/system/role'
-import type { SysPost } from '@/types/api/system/post'
-import type { TreeSelect, TableShowColumns, AjaxResult } from '@/types/api/common'
+import type { TableShowColumns, AjaxResult } from '@/types/api/common'
 
 const router = useRouter()
 const { proxy } = getCurrentInstance()
@@ -209,17 +193,13 @@ const multiple = ref<boolean>(true)
 const total = ref<number>(0)
 const title = ref<string>("")
 const dateRange = ref<string[]>([])
-const deptOptions = ref<TreeSelect[] | undefined>(undefined)
-const enabledDeptOptions = ref<TreeSelect[] | undefined>(undefined)
 const initPassword = ref<string | undefined>(undefined)
-const postOptions = ref<SysPost[]>([])
 const roleOptions = ref<SysRole[]>([])
 // 列显隐信息
 const columns = ref<Record<string, TableShowColumns>>({
   userId: { label: '用户编号', visible: true },
   userName: { label: '用户名称', visible: true },
   nickName: { label: '用户昵称', visible: true },
-  deptName: { label: '部门', visible: true },
   phonenumber: { label: '手机号码', visible: true },
   status: { label: '状态', visible: true },
   createTime: { label: '创建时间', visible: true }
@@ -233,7 +213,6 @@ const data = reactive({
     userName: undefined,
     phonenumber: undefined,
     status: undefined,
-    deptId: undefined
   } as UserQueryParams,
   rules: {
     userName: [{ required: true, message: "用户名称不能为空", trigger: "blur" }, { min: 2, max: 20, message: "用户名称长度必须介于 2 和 20 之间", trigger: "blur" }],
@@ -255,32 +234,8 @@ function getList() {
   })
 }
 
-/** 查询部门下拉树结构 */
-function getDeptTree() {
-  deptTreeSelect().then(response => {
-    deptOptions.value = response.data
-    enabledDeptOptions.value = filterDisabledDept(JSON.parse(JSON.stringify(response.data)))
-  })
-}
 
-/** 过滤禁用的部门 */
-function filterDisabledDept(deptList: TreeSelect[]) {
-  return deptList.filter(dept => {
-    if (dept.disabled) {
-      return false
-    }
-    if (dept.children && dept.children.length) {
-      dept.children = filterDisabledDept(dept.children)
-    }
-    return true
-  })
-}
 
-/** 节点单击事件 */
-function handleNodeClick(data: any) {
-  queryParams.value.deptId = data.id
-  handleQuery()
-}
 
 /** 搜索按钮操作 */
 function handleQuery() {
@@ -292,8 +247,6 @@ function handleQuery() {
 function resetQuery() {
   dateRange.value = []
   proxy.resetForm("queryRef")
-  queryParams.value.deptId = undefined
-  proxy.$refs.deptTreeRef.setCurrentKey(null)
   handleQuery()
 }
 
@@ -382,7 +335,6 @@ function handleImport() {
 function reset() {
   form.value = {
     userId: undefined,
-    deptId: undefined,
     userName: undefined,
     nickName: undefined,
     password: undefined,
@@ -391,7 +343,6 @@ function reset() {
     sex: undefined,
     status: "0",
     remark: undefined,
-    postIds: [],
     roleIds: []
   }
   proxy.resetForm("userRef")
@@ -407,7 +358,6 @@ function cancel() {
 function handleAdd() {
   reset()
   getUser().then(response => {
-    postOptions.value = response.posts
     roleOptions.value = response.roles
     open.value = true
     title.value = "添加用户"
@@ -421,9 +371,7 @@ function handleUpdate(row?: SysUser) {
   const userId = row?.userId || ids.value[0]
   getUser(userId).then(response => {
     form.value = response.data!
-    postOptions.value = response.posts
     roleOptions.value = response.roles
-    form.value.postIds = response.postIds
     form.value.roleIds = response.roleIds
     open.value = true
     title.value = "修改用户"
@@ -453,7 +401,6 @@ function submitForm() {
 }
 
 onMounted(() => {
-  getDeptTree()
   getList()
   proxy.getConfigKey("sys.user.initPassword").then((response: AjaxResult) => {
     initPassword.value = response.msg
