@@ -1,0 +1,9 @@
+spring:
+  security:
+    user:
+      name: ${MONITOR_USER:admin}
+      password: ${MONITOR_PASSWORD}
+  boot:
+    admin:
+      ui:
+        title: LN 服务状态监控

@@ -9,26 +9,22 @@ spring:
     name: ruoyi-gateway
   profiles:
     # 环境配置
-    active: dev
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   cloud:
     nacos:
       discovery:
         # 服务注册地址
-        server-addr: 127.0.0.1:8848
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
       config:
         # 配置中心地址
-        server-addr: 127.0.0.1:8848
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
     sentinel:
-      # 取消控制台懒加载
-      eager: true
-      transport:
-        # 控制台地址
-        dashboard: 127.0.0.1:8718
+      # 使用 Nacos 规则，默认不连接 Sentinel 控制台。
       # nacos配置持久化
       datasource:
         ds1:
           nacos:
-            server-addr: 127.0.0.1:8848
+            server-addr: ${NACOS_ADDR:127.0.0.1:8848}
             dataId: sentinel-ruoyi-gateway
             groupId: DEFAULT_GROUP
             data-type: json

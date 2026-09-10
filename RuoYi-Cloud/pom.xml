@@ -25,12 +25,11 @@
         <kaptcha.version>2.3.3</kaptcha.version>
         <pagehelper.boot.version>2.1.1</pagehelper.boot.version>
         <druid.version>1.2.28</druid.version>
-        <dynamic-ds.version>4.5.0</dynamic-ds.version>
         <commons.io.version>2.22.0</commons.io.version>
         <velocity.version>2.3</velocity.version>
         <fastjson.version>2.0.64</fastjson.version>
         <jjwt.version>0.9.1</jjwt.version>
-        <minio.version>8.2.2</minio.version>
+        <cos.version>5.6.240</cos.version>
         <poi.version>5.5.1</poi.version>
         <springdoc.version>2.9.0</springdoc.version>
         <transmittable-thread-local.version>2.14.5</transmittable-thread-local.version>
@@ -184,12 +183,7 @@
                 <version>${ruoyi.version}</version>
             </dependency>
 
-            <!-- 分布式事务 -->
-            <dependency>
-                <groupId>com.ruoyi</groupId>
-                <artifactId>ruoyi-common-seata</artifactId>
-                <version>${ruoyi.version}</version>
-            </dependency>
+
 
             <!-- 日志记录 -->
             <dependency>
@@ -218,11 +212,16 @@
     <modules>
         <module>ruoyi-auth</module>
         <module>ruoyi-gateway</module>
-        <module>ruoyi-visual</module>
         <module>ruoyi-modules</module>
         <module>ruoyi-api</module>
         <module>ruoyi-common</module>
     </modules>
+    <profiles>
+        <profile>
+            <id>monitoring</id>
+            <modules><module>ruoyi-visual</module></modules>
+        </profile>
+    </profiles>
     <packaging>pom</packaging>
 
     <dependencies>

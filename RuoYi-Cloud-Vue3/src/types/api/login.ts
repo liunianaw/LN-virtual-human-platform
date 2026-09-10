@@ -11,6 +11,7 @@ export interface LoginInfoResult extends AjaxResult {
 
 /** 用户信息响应 */
 export interface UserInfoResult extends AjaxResult {
+  pwdChrtype: string;
   /** 用户信息 */
   user: SysUser
   /** 角色数据 */

@@ -1,7 +1,7 @@
 package com.ruoyi.system.controller;
 
-import java.util.Arrays;
 import java.util.Map;
+import com.ruoyi.system.storage.AccountIconService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -11,19 +11,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
-import com.ruoyi.common.core.domain.R;
 import com.ruoyi.common.core.utils.DateUtils;
 import com.ruoyi.common.core.utils.StringUtils;
-import com.ruoyi.common.core.utils.file.FileTypeUtils;
-import com.ruoyi.common.core.utils.file.MimeTypeUtils;
 import com.ruoyi.common.core.web.controller.BaseController;
 import com.ruoyi.common.core.web.domain.AjaxResult;
 import com.ruoyi.common.log.annotation.Log;
 import com.ruoyi.common.log.enums.BusinessType;
 import com.ruoyi.common.security.service.TokenService;
 import com.ruoyi.common.security.utils.SecurityUtils;
-import com.ruoyi.system.api.RemoteFileService;
-import com.ruoyi.system.api.domain.SysFile;
 import com.ruoyi.system.api.domain.SysUser;
 import com.ruoyi.system.api.model.LoginUser;
 import com.ruoyi.system.service.ISysUserService;
@@ -44,7 +39,7 @@ public class SysProfileController extends BaseController
     private TokenService tokenService;
     
     @Autowired
-    private RemoteFileService remoteFileService;
+    private AccountIconService iconService;
 
     /**
      * 个人信息
@@ -54,9 +49,9 @@ public class SysProfileController extends BaseController
     {
         String username = SecurityUtils.getUsername();
         SysUser user = userService.selectUserByUserName(username);
+        user.setAvatar(iconService.readUrl(user.getUserId(), user.getAvatar()));
         AjaxResult ajax = AjaxResult.success(user);
         ajax.put("roleGroup", userService.selectUserRoleGroup(username));
-        ajax.put("postGroup", userService.selectUserPostGroup(username));
         return ajax;
     }
 
@@ -122,42 +117,37 @@ public class SysProfileController extends BaseController
         return error("修改密码异常，请联系管理员");
     }
     
-    /**
-     * 头像上传
-     */
+    /** 账号头像上传。对象键持久保存，签名地址只用于当前响应。 */
     @Log(title = "用户头像", businessType = BusinessType.UPDATE)
     @PostMapping("/avatar")
     public AjaxResult avatar(@RequestParam("avatarfile") MultipartFile file)
     {
-        if (!file.isEmpty())
+        LoginUser loginUser = SecurityUtils.getLoginUser();
+        Long accountId = loginUser.getUserid();
+        String oldKey = userService.selectUserById(accountId).getAvatar();
+        String newKey = iconService.upload(accountId, file);
+        // 数据库异常时不贸然删除新对象：写入是否成功可能未知，待文件账本接管后统一核对。
+        if (!userService.updateUserAvatar(accountId, newKey))
         {
-            LoginUser loginUser = SecurityUtils.getLoginUser();
-            String extension = FileTypeUtils.getExtension(file);
-            if (!StringUtils.equalsAnyIgnoreCase(extension, MimeTypeUtils.IMAGE_EXTENSION))
-            {
-                return error("文件格式不正确，请上传" + Arrays.toString(MimeTypeUtils.IMAGE_EXTENSION) + "格式");
-            }
-            R<SysFile> fileResult = remoteFileService.upload(file);
-            if (StringUtils.isNull(fileResult) || StringUtils.isNull(fileResult.getData()))
-            {
-                return error("文件服务异常，请联系管理员");
-            }
-            String url = fileResult.getData().getUrl();
-            if (userService.updateUserAvatar(loginUser.getUserid(), url))
-            {
-                String oldAvatarUrl = loginUser.getSysUser().getAvatar();
-                if (StringUtils.isNotEmpty(oldAvatarUrl))
-                {
-                    remoteFileService.delete(oldAvatarUrl);
-                }
-                AjaxResult ajax = AjaxResult.success();
-                ajax.put("imgUrl", url);
-                // 更新缓存用户头像
-                loginUser.getSysUser().setAvatar(url);
-                tokenService.setLoginUser(loginUser);
-                return ajax;
-            }
+            cleanupIcon(accountId, newKey);
+            return error("修改头像失败");
         }
-        return error("上传图片异常，请联系管理员");
+        loginUser.getSysUser().setAvatar(newKey);
+        tokenService.setLoginUser(loginUser);
+        cleanupIcon(accountId, oldKey);
+        AjaxResult ajax = AjaxResult.success();
+        ajax.put("imgUrl", iconService.readUrl(accountId, newKey));
+        return ajax;
+    }
+
+    private void cleanupIcon(Long accountId, String key)
+    {
+        if (StringUtils.isEmpty(key)) return;
+        try { iconService.delete(accountId, key); }
+        catch (RuntimeException e)
+        {
+            // 不输出凭证、签名链接或上游响应，不让旧图清理失败覆盖已成功的头像更新。
+            org.slf4j.LoggerFactory.getLogger(getClass()).warn("账号 {} 的旧头像未清理", accountId);
+        }
     }
 }

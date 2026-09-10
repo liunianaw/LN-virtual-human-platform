@@ -9,7 +9,14 @@
     "dev": "vite",
     "build:prod": "vite build",
     "build:stage": "vite build --mode staging",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.mjs",
+    "typecheck": "vue-tsc --noEmit",
+    "dev:tools": "vite --mode devtools",
+    "build:devtools": "vite build --mode devtools",
+    "prebuild:prod": "node scripts/clean-dist.mjs",
+    "prebuild:stage": "node scripts/clean-dist.mjs",
+    "prebuild:devtools": "node scripts/clean-dist.mjs"
   },
   "repository": {
     "type": "git",

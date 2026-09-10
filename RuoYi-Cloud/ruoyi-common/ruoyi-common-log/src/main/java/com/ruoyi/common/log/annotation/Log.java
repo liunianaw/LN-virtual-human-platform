@@ -37,12 +37,12 @@ public @interface Log
     /**
      * 是否保存请求的参数
      */
-    public boolean isSaveRequestData() default true;
+    public boolean isSaveRequestData() default false;
 
     /**
      * 是否保存响应的参数
      */
-    public boolean isSaveResponseData() default true;
+    public boolean isSaveResponseData() default false;
 
     /**
      * 排除指定的请求参数

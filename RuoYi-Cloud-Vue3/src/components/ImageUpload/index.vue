@@ -63,7 +63,7 @@ const props = defineProps({
   // 上传接口地址
   action: {
     type: String,
-    default: "/file/upload"
+    required: true
   },
   // 上传携带的参数
   data: {
@@ -108,7 +108,7 @@ const uploadList = ref<UploadImageItem[]>([])
 const dialogImageUrl = ref("")
 const dialogVisible = ref(false)
 const baseUrl = import.meta.env.VITE_APP_BASE_API
-const uploadImgUrl = ref(baseUrl + props.action)
+const uploadImgUrl = computed(() => baseUrl + props.action)
 const headers = ref({ Authorization: "Bearer " + getToken() })
 const fileList = ref<UploadImageItem[]>([])
 const showTip = computed(

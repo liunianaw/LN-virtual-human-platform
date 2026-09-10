@@ -17,6 +17,7 @@ export interface DictTypeQueryParams extends PageDomain {
 
 /** 字典数据查询参数 */
 export interface DictDataQueryParams extends PageDomain {
+  dictType?: string;
   /** 字典名称 */
   dictName?: string;
   /** 字典标签 */

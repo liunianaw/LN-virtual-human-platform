@@ -8,11 +8,11 @@
         <version>3.6.8</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
-    
+
     <artifactId>ruoyi-common-datasource</artifactId>
 
     <description>
-        ruoyi-common-datasource多数据源
+        ruoyi-common-datasource单数据源连接池
     </description>
 
     <dependencies>
@@ -24,12 +24,7 @@
             <version>${druid.version}</version>
         </dependency>
 
-        <!-- Dynamic DataSource -->
-        <dependency>
-            <groupId>com.baomidou</groupId>
-            <artifactId>dynamic-datasource-spring-boot3-starter</artifactId>
-            <version>${dynamic-ds.version}</version>
-        </dependency>
+
 
     </dependencies>
 </project>

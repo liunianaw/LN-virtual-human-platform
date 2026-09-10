@@ -1,6 +1,8 @@
 package com.ruoyi.system.controller;
 
 import java.io.IOException;
+import org.springframework.beans.BeanUtils;
+import com.ruoyi.system.storage.AccountIconService;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
@@ -32,14 +34,11 @@ import com.ruoyi.common.security.annotation.InnerAuth;
 import com.ruoyi.common.security.annotation.RequiresPermissions;
 import com.ruoyi.common.security.service.TokenService;
 import com.ruoyi.common.security.utils.SecurityUtils;
-import com.ruoyi.system.api.domain.SysDept;
 import com.ruoyi.system.api.domain.SysRole;
 import com.ruoyi.system.api.domain.SysUser;
 import com.ruoyi.system.api.model.LoginUser;
 import com.ruoyi.system.service.ISysConfigService;
-import com.ruoyi.system.service.ISysDeptService;
 import com.ruoyi.system.service.ISysPermissionService;
-import com.ruoyi.system.service.ISysPostService;
 import com.ruoyi.system.service.ISysRoleService;
 import com.ruoyi.system.service.ISysUserService;
 
@@ -56,13 +55,12 @@ public class SysUserController extends BaseController
     private ISysUserService userService;
 
     @Autowired
+    private AccountIconService iconService;
+
+    @Autowired
     private ISysRoleService roleService;
 
-    @Autowired
-    private ISysDeptService deptService;
 
-    @Autowired
-    private ISysPostService postService;
 
     @Autowired
     private ISysPermissionService permissionService;
@@ -80,6 +78,7 @@ public class SysUserController extends BaseController
     @GetMapping("/list")
     public TableDataInfo list(SysUser user)
     {
+        user.setDeptId(null);
         startPage();
         List<SysUser> list = userService.selectUserList(user);
         return getDataTable(list);
@@ -90,6 +89,7 @@ public class SysUserController extends BaseController
     @PostMapping("/export")
     public void export(HttpServletResponse response, SysUser user)
     {
+        user.setDeptId(null);
         List<SysUser> list = userService.selectUserList(user);
         ExcelUtil<SysUser> util = new ExcelUtil<SysUser>(SysUser.class);
         util.exportExcel(response, list, "用户数据");
@@ -186,7 +186,10 @@ public class SysUserController extends BaseController
             tokenService.refreshToken(loginUser);
         }
         AjaxResult ajax = AjaxResult.success();
-        ajax.put("user", user);
+        SysUser view = new SysUser();
+        BeanUtils.copyProperties(user, view);
+        view.setAvatar(iconService.readUrl(user.getUserId(), user.getAvatar()));
+        ajax.put("user", view);
         ajax.put("roles", roles);
         ajax.put("permissions", permissions);
         ajax.put("pwdChrtype", getSysAccountChrtype());
@@ -238,12 +241,10 @@ public class SysUserController extends BaseController
             userService.checkUserDataScope(userId);
             SysUser sysUser = userService.selectUserById(userId);
             ajax.put(AjaxResult.DATA_TAG, sysUser);
-            ajax.put("postIds", postService.selectPostListByUserId(userId));
             ajax.put("roleIds", sysUser.getRoles().stream().map(SysRole::getRoleId).collect(Collectors.toList()));
         }
         List<SysRole> roles = roleService.selectRoleAll();
         ajax.put("roles", SecurityUtils.isAdmin(userId) ? roles : roles.stream().filter(r -> !r.isAdmin()).collect(Collectors.toList()));
-        ajax.put("posts", postService.selectPostAll());
         return ajax;
     }
 
@@ -255,7 +256,6 @@ public class SysUserController extends BaseController
     @PostMapping
     public AjaxResult add(@Validated @RequestBody SysUser user)
     {
-        deptService.checkDeptDataScope(user.getDeptId());
         roleService.checkRoleDataScope(user.getRoleIds());
         if (!userService.checkUserNameUnique(user))
         {
@@ -284,7 +284,6 @@ public class SysUserController extends BaseController
     {
         userService.checkUserAllowed(user);
         userService.checkUserDataScope(user.getUserId());
-        deptService.checkDeptDataScope(user.getDeptId());
         roleService.checkRoleDataScope(user.getRoleIds());
         if (!userService.checkUserNameUnique(user))
         {
@@ -356,7 +355,10 @@ public class SysUserController extends BaseController
         AjaxResult ajax = AjaxResult.success();
         SysUser user = userService.selectUserById(userId);
         List<SysRole> roles = roleService.selectRolesByUserId(userId);
-        ajax.put("user", user);
+        SysUser view = new SysUser();
+        BeanUtils.copyProperties(user, view);
+        view.setAvatar(iconService.readUrl(user.getUserId(), user.getAvatar()));
+        ajax.put("user", view);
         ajax.put("roles", SecurityUtils.isAdmin(userId) ? roles : roles.stream().filter(r -> !r.isAdmin()).collect(Collectors.toList()));
         return ajax;
     }
@@ -375,13 +377,4 @@ public class SysUserController extends BaseController
         return success();
     }
 
-    /**
-     * 获取部门树列表
-     */
-    @RequiresPermissions("system:user:list")
-    @GetMapping("/deptTree")
-    public AjaxResult deptTree(SysDept dept)
-    {
-        return success(deptService.selectDeptTreeList(dept));
-    }
 }

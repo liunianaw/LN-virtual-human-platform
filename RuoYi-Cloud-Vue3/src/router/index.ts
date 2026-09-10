@@ -150,7 +150,7 @@ export const dynamicRoutes = [
       }
     ]
   },
-  {
+  ...(import.meta.env.VITE_ENABLE_DEVTOOLS === 'true' ? [{
     path: '/tool/gen-edit',
     component: Layout,
     hidden: true,
@@ -163,7 +163,7 @@ export const dynamicRoutes = [
         meta: { title: '修改生成配置', activeMenu: '/tool/gen' }
       }
     ]
-  }
+  }] : [])
 ]
 
 const router = createRouter({

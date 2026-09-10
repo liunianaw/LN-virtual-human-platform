@@ -129,9 +129,3 @@ export function updateAuthRole(data: SysUserRoles): Promise<AjaxResult> {
 }
 
 // 查询部门下拉树结构
-export function deptTreeSelect(): Promise<AjaxResult<TreeSelect>> {
-  return request({
-    url: '/system/user/deptTree',
-    method: 'get'
-  })
-}

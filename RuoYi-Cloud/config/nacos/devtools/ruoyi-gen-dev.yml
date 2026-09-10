@@ -1,0 +1,32 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${TOOL_DB_URL}
+    username: ${TOOL_DB_USER}
+    password: ${TOOL_DB_PASSWORD}
+    druid:
+      initial-size: 2
+      min-idle: 2
+      max-active: 10
+      max-wait: 60000
+      stat-view-servlet:
+        enabled: false
+mybatis:
+  typeAliasesPackage: com.ruoyi.gen.domain
+  mapperLocations: classpath:mapper/**/*.xml
+springdoc:
+  gatewayUrl: ${GATEWAY_URL:http://localhost:8080}/code
+  api-docs:
+    enabled: true
+  info:
+    title: 代码生成接口文档
+    description: 代码生成接口描述
+    contact:
+      name: RuoYi
+      url: https://ruoyi.vip
+gen:
+  author: ruoyi
+  packageName: com.ruoyi.system
+  autoRemovePre: false
+  tablePrefix: sys_
+  allowOverwrite: false

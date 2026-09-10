@@ -10,6 +10,7 @@ export interface MenuQueryParams {
 
 /** 菜单信息 */
 export interface SysMenu extends BaseEntity {
+  children?: SysMenu[];
   /** 菜单编号 */
   menuId?: number;
   /** 父菜单ID */
@@ -47,4 +48,9 @@ export interface RoleMenuTreeselectResult extends AjaxResult {
   checkedKeys: number[]
   /** 菜单树形结构 */
   menus: TreeSelect[]
+}
+
+export interface MenuSortParams {
+  menuIds: string;
+  orderNums: string;
 }

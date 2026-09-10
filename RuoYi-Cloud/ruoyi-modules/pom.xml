@@ -10,10 +10,15 @@
 
     <modules>
         <module>ruoyi-system</module>
-        <module>ruoyi-gen</module>
         <module>ruoyi-job</module>
-        <module>ruoyi-file</module>
     </modules>
+
+    <profiles>
+        <profile>
+            <id>devtools</id>
+            <modules><module>ruoyi-gen</module></modules>
+        </profile>
+    </profiles>
 
     <artifactId>ruoyi-modules</artifactId>
     <packaging>pom</packaging>

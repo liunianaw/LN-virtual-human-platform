@@ -260,6 +260,9 @@ public class SysUserServiceImpl implements ISysUserService
     @Transactional(rollbackFor = Exception.class)
     public int insertUser(SysUser user)
     {
+        // 组织结构仅保留数据库兼容，外部输入不能设置部门或岗位。
+        user.setDeptId(null);
+        user.setPostIds(null);
         // 新增用户信息
         int rows = userMapper.insertUser(user);
         // 新增用户岗位关联
@@ -278,6 +281,9 @@ public class SysUserServiceImpl implements ISysUserService
     @Override
     public boolean registerUser(SysUser user)
     {
+        // 组织结构仅保留数据库兼容，外部输入不能设置部门或岗位。
+        user.setDeptId(null);
+        user.setPostIds(null);
         return userMapper.insertUser(user) > 0;
     }
 
@@ -291,6 +297,9 @@ public class SysUserServiceImpl implements ISysUserService
     @Transactional(rollbackFor = Exception.class)
     public int updateUser(SysUser user)
     {
+        // 组织结构仅保留数据库兼容，外部输入不能设置部门或岗位。
+        user.setDeptId(null);
+        user.setPostIds(null);
         Long userId = user.getUserId();
         // 删除用户与角色关联
         userRoleMapper.deleteUserRoleByUserId(userId);
@@ -508,12 +517,14 @@ public class SysUserServiceImpl implements ISysUserService
         {
             try
             {
+                // 导入不接受组织关联。
+                user.setDeptId(null);
+                user.setPostIds(null);
                 // 验证是否存在这个用户
                 SysUser u = userMapper.selectUserByUserName(user.getUserName());
                 if (StringUtils.isNull(u))
                 {
                     BeanValidators.validateWithException(validator, user);
-                    deptService.checkDeptDataScope(user.getDeptId());
                     String password = configService.selectConfigByKey("sys.user.initPassword");
                     user.setPassword(SecurityUtils.encryptPassword(password));
                     user.setCreateBy(operName);
@@ -526,7 +537,6 @@ public class SysUserServiceImpl implements ISysUserService
                     BeanValidators.validateWithException(validator, user);
                     checkUserAllowed(u);
                     checkUserDataScope(u.getUserId());
-                    deptService.checkDeptDataScope(user.getDeptId());
                     user.setUserId(u.getUserId());
                     user.setDeptId(u.getDeptId());
                     user.setUpdateBy(operName);
