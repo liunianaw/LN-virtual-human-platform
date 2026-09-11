@@ -105,4 +105,3 @@ Stage `.gitignore`, `application.yml`, `application-local.yml.example`, and the 
 ```text
 feat(storage): [M1-DB-001] 配置本地COS私密凭据文件
 ```
-
