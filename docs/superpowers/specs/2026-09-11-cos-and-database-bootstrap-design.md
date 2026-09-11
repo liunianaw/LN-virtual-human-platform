@@ -24,7 +24,7 @@
 
 1. 保留现有 `CosObjectStorage` 和腾讯云官方 SDK；不新建上传协议、文件服务器或另一套对象存储抽象。
 2. 在 system 的 `application.yml` 中固定非秘密连接信息（启用开关、区域、桶名、签名 URL 时长），并导入一个可选的本地 YAML 文件。
-3. 该本地文件固定为 `RuoYi-Cloud/ruoyi-modules/ruoyi-system/config/local/cos.yml`，通过 `.gitignore` 排除；仓库只提供不含凭据的 `cos.yml.example`。负责人将在实施完成后手工把 SecretId 与 SecretKey 填入忽略文件，服务重启后生效。
+3. 该本地文件固定为 `RuoYi-Cloud/ruoyi-modules/ruoyi-system/src/main/resources/application-local.yml`，通过 `.gitignore` 排除；仓库只提供不含凭据的 `application-local.yml.example`。负责人将在实施完成后手工把 SecretId 与 SecretKey 填入忽略文件，服务重启后生效。
 4. 配置未填写时，COS 保持禁用或在上传时给出明确配置错误；不以空字符串或伪密钥启动已启用的 COS 客户端。
 
 ## 执行顺序与验证
