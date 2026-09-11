@@ -1,3 +1,7 @@
+spring:
+  config:
+    import: optional:classpath:application-local.yml
+
 # Credentials supplied by process environment.
 platform:
   storage:
