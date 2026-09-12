@@ -7,6 +7,7 @@
 - [ ] 验证 COS 实际配置加载、私有桶上传/签名读取及测试对象清理。长期密钥的 session-token 保持空值。
 - [x] 生成双库 SQL：`0703ede`；静态核对平台库 51 表、会话库 13 表，共 716 个业务字段。
 - [x] 本机 MySQL 已建立双库并完成重复执行验证：`platform_db` 51 表、`session_db` 13 表；MySQL 8 仅提示旧整数显示宽度弃用。`s_api_idempotency.resource_type` 按设计“按接口白名单扩展”，不增加固定 CHECK。
+- [x] 本机后端核心链路已启动：Nacos 3.2.4 server 模式、Redis、system（9201）、auth（9200）与 gateway（8080）；网关转发 system 文档返回 HTTP 200。Nacos 开发配置已导入 `public` / `DEFAULT_GROUP`。
 - [ ] 后续 M1：版本化迁移、数据源及 MySQL/Redis/Nacos 联调、登录权限和计划服务入口。
 - [ ] 后续 M2：素材上传、制作加工、预览验收、Avatar 发布、声线配置/试听；不含声音克隆。
 
