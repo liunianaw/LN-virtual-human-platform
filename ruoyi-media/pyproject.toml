@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ruoyi-media"
+version = "0.1.0"
+description = "Independent media-service API and worker entrypoints for the LN virtual-human platform"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.116.1",
+    "uvicorn==0.35.0",
+]
+
+[project.scripts]
+ruoyi-media-api = "ruoyi_media.api.app:run"
+ruoyi-media-worker = "ruoyi_media.worker.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
