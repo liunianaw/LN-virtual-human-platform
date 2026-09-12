@@ -10,20 +10,20 @@ spring:
   profiles:
     # 环境配置
     active: ${SPRING_PROFILES_ACTIVE:dev}
-  cloud:
-    nacos:
+  nacos:
+    username: ${NACOS_USERNAME:}
+    password: ${NACOS_PASSWORD:}
+    discovery:
       username: ${NACOS_USERNAME:}
       password: ${NACOS_PASSWORD:}
-      discovery:
-        username: ${NACOS_USERNAME:}
-        password: ${NACOS_PASSWORD:}
-        # 服务注册地址
-        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
-      config:
-        username: ${NACOS_USERNAME:}
-        password: ${NACOS_PASSWORD:}
-        # 配置中心地址
-        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      # 服务注册地址
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+    config:
+      username: ${NACOS_USERNAME:}
+      password: ${NACOS_PASSWORD:}
+      # 配置中心地址
+      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+  cloud:
     sentinel:
       # 使用 Nacos 规则，默认不连接 Sentinel 控制台。
       # nacos配置持久化
