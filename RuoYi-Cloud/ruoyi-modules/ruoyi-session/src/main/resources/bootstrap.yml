@@ -5,17 +5,18 @@ spring:
     name: ruoyi-session
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
-  nacos:
-    username: ${NACOS_USERNAME:}
-    password: ${NACOS_PASSWORD:}
-    discovery:
+  cloud:
+    nacos:
       username: ${NACOS_USERNAME:}
       password: ${NACOS_PASSWORD:}
-      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
-    config:
-      username: ${NACOS_USERNAME:}
-      password: ${NACOS_PASSWORD:}
-      server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      discovery:
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+      config:
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
   config:
     file-extension: yml
     import:
