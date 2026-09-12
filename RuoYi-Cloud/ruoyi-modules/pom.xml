@@ -10,6 +10,7 @@
 
     <modules>
         <module>ruoyi-system</module>
+        <module>ruoyi-session</module>
         <module>ruoyi-job</module>
     </modules>
 
