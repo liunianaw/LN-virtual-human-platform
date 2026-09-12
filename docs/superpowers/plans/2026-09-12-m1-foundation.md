@@ -183,6 +183,7 @@ git commit -m "feat(media): [M1-MEDIA-001] add API and worker health skeleton"
 - Modify: `RuoYi-Cloud/docker/docker-compose.yml`
 - Create: `RuoYi-Cloud/docker/.env.example`
 - Create: `RuoYi-Cloud/bin/check-m1-services.ps1`
+- Create: `RuoYi-Cloud/bin/publish-nacos-config.ps1`
 
 **Interfaces:**
 - Consumes: 启动顺序 MySQL/Redis → Nacos → RabbitMQ → system/session → auth/gateway → media API/Worker → Vue。
@@ -212,7 +213,18 @@ Run: `powershell -ExecutionPolicy Bypass -File .\bin\check-m1-services.ps1` from
 
 Expected: 失败服务和未就绪依赖明确列出，所有目标就绪时以退出码 0 结束；不打印环境变量敏感值。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: 先演练再发布 Nacos 配置；令牌只由环境变量提供**
+
+```powershell
+.\bin\publish-nacos-config.ps1 -DataId ruoyi-session-dev.yml
+$env:NACOS_ACCESS_TOKEN = '<provided outside the repository>'
+.\bin\publish-nacos-config.ps1 -DataId ruoyi-session-dev.yml -Apply
+Remove-Item Env:NACOS_ACCESS_TOKEN
+```
+
+Expected: 默认命令不发网络写请求；`-Apply` 在读取 `NACOS_ACCESS_TOKEN` 后才发布，并以 Client GET 的 SHA-256 与本地 YAML 一致作为单项成功证据。
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add RuoYi-Cloud/config/nacos RuoYi-Cloud/docker RuoYi-Cloud/bin

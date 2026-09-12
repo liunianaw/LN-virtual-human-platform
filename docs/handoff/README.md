@@ -2,7 +2,7 @@
 
 更新：2026-09-12。分支：`feat/m1-db-cos-bootstrap`。恢复时先读 AGENTS.md 和本清单，再查相关 Git commit；实现与验证细节以提交正文为准。
 
-本轮已落地的前置提交：平台库 V1 `d5c9530`、会话服务与 13 表 V1 `568adaa`、媒体 API/Worker `09edbb1`、system Flyway 接线 `e243c7d`、M1 HTTP 健康检查 `731fb44`。这些均待隔离空库与完整服务组联调，不等同 M1 通过。详细执行步骤见 `docs/superpowers/plans/2026-09-12-m1-foundation.md`。
+本轮已落地的前置提交：平台库 V1 `d5c9530`、会话服务与 13 表 V1 `568adaa`、媒体 API/Worker `09edbb1`、system Flyway 接线 `e243c7d`、M1 HTTP 健康检查 `731fb44`、受保护的 Nacos 发布工具 `e7a4d5c`。这些均待隔离空库与完整服务组联调，不等同 M1 通过。详细执行步骤见 `docs/superpowers/plans/2026-09-12-m1-foundation.md`。
 
 - [x] 精简 AGENTS.md：直接沟通、独立任务并行、按成果提交、复用验证结果；本轮仅调整规范与交接。
 - [x] COS 本地配置文件与忽略规则已创建：`f44e189`。用户已手填密钥；现有适配器测试通过。
@@ -14,7 +14,7 @@
 - [ ] **M1-PLAT-001**：将已验证的 51 张 `platform_db` 表与本地管理员种子迁入 `ruoyi-system` 的 Flyway V1；空库、重启与 checksum 负向检查在隔离库验收。
 - [ ] **M1-SESS-001**：纳入 `ruoyi-session` 服务并将 13 张 `session_db` 表迁入 Flyway V1；服务经 Nacos 启动且仅连接会话库。
 - [ ] **M1-MEDIA-001**：实现 `ruoyi-media` 独立 API/Worker 的最小健康入口与可复现安装；不接真实供应商、MQ 或业务库。
-- [ ] **M1-CONFIG-001**：补齐 system/session 数据源、Redis、RabbitMQ 和 Compose/本机配置模板；秘密只通过本地或部署注入，严格验证库写入边界。
+- [ ] **M1-CONFIG-001**：system/session 双库模板与 guarded Nacos 发布工具已提交；发布需 `NACOS_ACCESS_TOKEN`。待补 RabbitMQ/Compose 配置并验证库写入边界。
 - [ ] **M1-LOGIN-001**：前端仅做登录、退出、错误/停用账号、角色菜单和直接越权请求的最小浏览器验证；不做页面美化或额外前端功能。
 - [ ] **M1-OPS-001**：`check-m1-services.ps1` 已提交；完成干净检出构建、全部服务启动、重启保持数据和迁移故障保护的 M1 记录。当前 gateway/auth/system 与 gateway→system OpenAPI 为 HTTP 200，session/media 尚未启动。
 - [ ] **M2-ASSET-001**：参考图私有 COS 上传、文件授权与制作任务幂等/额度/Outbox 基础。
