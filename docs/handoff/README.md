@@ -6,7 +6,7 @@
 - [x] COS 本地配置文件与忽略规则已创建：`f44e189`。用户已手填密钥；现有适配器测试通过。
 - [ ] 验证 COS 实际配置加载、私有桶上传/签名读取及测试对象清理。长期密钥的 session-token 保持空值。
 - [x] 生成双库 SQL：`0703ede`；静态核对平台库 51 表、会话库 13 表，共 716 个业务字段。
-- [ ] 完成本机 MySQL 实际建库与结构/重复执行验证。用户已授权；目前尚未执行。SQL 审查还留有一项待判断：`s_api_idempotency.resource_type` 是否需按设计添加 CHECK。
+- [x] 本机 MySQL 已建立双库并完成重复执行验证：`platform_db` 51 表、`session_db` 13 表；MySQL 8 仅提示旧整数显示宽度弃用。`s_api_idempotency.resource_type` 按设计“按接口白名单扩展”，不增加固定 CHECK。
 - [ ] 后续 M1：版本化迁移、数据源及 MySQL/Redis/Nacos 联调、登录权限和计划服务入口。
 - [ ] 后续 M2：素材上传、制作加工、预览验收、Avatar 发布、声线配置/试听；不含声音克隆。
 
