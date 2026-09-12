@@ -35,6 +35,12 @@ $env:NACOS_ACCESS_TOKEN = 'obtain-this-from-your-secret-store'
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Windows PowerShell 5.1 does not load System.Net.Http by default, whereas
+# PowerShell 7 does. Load it only when the HTTP client type is unavailable.
+if ($null -eq ('System.Net.Http.HttpClient' -as [type])) {
+    Add-Type -AssemblyName System.Net.Http
+}
+
 function Get-TextSha256 {
     param([Parameter(Mandatory)] [string]$Text)
 
@@ -78,7 +84,7 @@ function Invoke-NacosRequest {
     $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
     $httpMethod = if ($Method -eq 'POST') { [System.Net.Http.HttpMethod]::Post } else { [System.Net.Http.HttpMethod]::Get }
     $request = [System.Net.Http.HttpRequestMessage]::new($httpMethod, $Url)
-    $request.Headers.Authorization = [System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $AccessToken)
+    [void]$request.Headers.TryAddWithoutValidation('accessToken', $AccessToken)
     if ($Method -eq 'POST') {
         $request.Content = [System.Net.Http.StringContent]::new(
             $FormBody,
