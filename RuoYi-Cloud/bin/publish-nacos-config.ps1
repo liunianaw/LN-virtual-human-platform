@@ -181,7 +181,16 @@ try {
         if ($verifyResult.StatusCode -ne 200) {
             throw "Verification failed for $($file.Name): HTTP $($verifyResult.StatusCode). Verified before failure: $($verifiedDataIds -join ', ')."
         }
-        if ((Get-TextSha256 $verifyResult.Content) -ne $localHash) {
+        try {
+            $verifyPayload = $verifyResult.Content | ConvertFrom-Json
+        }
+        catch {
+            throw "Verification failed for $($file.Name): Nacos returned invalid JSON. Verified before failure: $($verifiedDataIds -join ', ')."
+        }
+        if ($verifyPayload.code -ne 0 -or $null -eq $verifyPayload.data -or $verifyPayload.data.success -ne $true -or $null -eq $verifyPayload.data.content) {
+            throw "Verification failed for $($file.Name): Nacos did not return successful configuration content. Verified before failure: $($verifiedDataIds -join ', ')."
+        }
+        if ((Get-TextSha256 ([string]$verifyPayload.data.content)) -ne $localHash) {
             throw "Verification hash mismatch for $($file.Name). Verified before failure: $($verifiedDataIds -join ', ')."
         }
 
