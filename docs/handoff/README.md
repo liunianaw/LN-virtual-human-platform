@@ -12,17 +12,17 @@
 - [x] 本机后端核心链路已启动：Nacos 3.2.4 server 模式、Redis、system（9201）、auth（9200）与 gateway（8080）；网关转发 system 文档返回 HTTP 200。Nacos 开发配置已导入 `public` / `DEFAULT_GROUP`。
 - [x] 本地初始管理员与系统权限种子已写入：`admin` 可登录并经网关读取菜单；种子脚本可重复执行，生产环境须重置默认密码。
 - [ ] **M1-PLAT-001**：将已验证的 51 张 `platform_db` 表与本地管理员种子迁入 `ruoyi-system` 的 Flyway V1；空库、重启与 checksum 负向检查在隔离库验收。
-- [ ] **M1-SESS-001**：纳入 `ruoyi-session` 服务并将 13 张 `session_db` 表迁入 Flyway V1；服务经 Nacos 启动且仅连接会话库。
-- [ ] **M1-MEDIA-001**：实现 `ruoyi-media` 独立 API/Worker 的最小健康入口与可复现安装；不接真实供应商、MQ 或业务库。
+- [x] **M1-SESS-001**：`ruoyi-session` 经 Nacos 启动并在 `9202/actuator/health` 返回 `UP`；带时间戳的隔离库首次 Flyway V1 创建 13 张会话表，重启后 history 仍仅一条成功 V1。启动时只注入会话库环境变量。
+- [x] **M1-MEDIA-001**：`ruoyi-media` API 在 `8002/health` 返回 200/ready，有限 Worker smoke 输出 ready 与 heartbeat，3 项单元测试通过；未连接供应商、MQ 或业务库。
 - [ ] **M1-CONFIG-001**：system/session 双库模板与 guarded Nacos 发布工具已提交；发布需 `NACOS_ACCESS_TOKEN`。待补 RabbitMQ/Compose 配置并验证库写入边界。
 - [ ] **M1-LOGIN-001**：前端仅做登录、退出、错误/停用账号、角色菜单和直接越权请求的最小浏览器验证；不做页面美化或额外前端功能。
-- [ ] **M1-OPS-001**：`check-m1-services.ps1` 已提交；完成干净检出构建、全部服务启动、重启保持数据和迁移故障保护的 M1 记录。当前 gateway/auth/system 与 gateway→system OpenAPI 为 HTTP 200，session/media 尚未启动。
+- [ ] **M1-OPS-001**：`check-m1-services.ps1` 已提交；完成干净检出构建、全部服务启动、重启保持数据和迁移故障保护的 M1 记录。当前 gateway/auth/system 与 gateway→system OpenAPI 为 HTTP 200，session `9202` 与 media `8002` 也已就绪；仍缺 platform 隔离迁移、全组冷启动和 checksum 负向验收。
 - [ ] **M2-ASSET-001**：参考图私有 COS 上传、文件授权与制作任务幂等/额度/Outbox 基础。
 - [ ] **M2-PROCESS-001**：外部生成编排、CPU 素材加工、八动作图集与 manifest 校验、失败/未知/Worker 重启恢复。
 - [ ] **M2-PUBLISH-001**：后台预览、人工验收、不可变 Avatar 发布版本及跨账号引用限制。
 - [ ] **M2-VOICE-001**：官方与 Relay Voice 配置、最小 `SPEAK_ONLY` 调试 Session、分段播放、stop 与临时音频清理；不做声音克隆。
 - [ ] **M2-ACCEPT-001**：真实成功路径与受控故障验收、Linux Compose 和本机浏览器记录、正式样品包与已知问题收口。
 
-当前执行顺序：`M1-PLAT-001`、`M1-SESS-001`、`M1-MEDIA-001` 可并行；三者完成后执行 `M1-CONFIG-001`，再做 `M1-LOGIN-001` 与 `M1-OPS-001`。M2 必须在 M1 验收通过后开始。当前已开始前三项；本清单为唯一恢复入口。用户确认当前前后端均已正常启动、数据库已初始化；复用该基线，只补未覆盖的迁移和新服务验收。前端不做美化。MySQL 8.0.46 可登录是上轮实测，执行前只需刷新目标库状态；不要回显私密配置。
+当前执行顺序：先完成 `M1-PLAT-001` 隔离迁移，再补 `M1-CONFIG-001` 的 RabbitMQ/Compose 与配置边界，最后做 `M1-LOGIN-001` 和 `M1-OPS-001`。M2 必须在 M1 验收通过后开始。当前 Nacos 已启用认证；Java 服务冷启动时由进程环境传入 Nacos 登录凭据，绝不写入仓库或 Nacos 配置。用户确认当前前后端均已正常启动、数据库已初始化；复用该基线，只补未覆盖的迁移和新服务验收。前端不做美化。MySQL 8.0.46 可登录是上轮实测，执行前只需刷新目标库状态；不要回显私密配置。
 
 Git：COS 与 SQL 已本地提交，未推送、未合并。此次仅文档修改，不重写历史。历史资料按需查阅：[M1-DB-001](tasks/M1-DB-001.md)、[GOV-001](tasks/GOV-001.md)、[模块裁剪](../ruoyi-module-trimming.md)、[第一阶段方案](../superpowers/specs/2026-09-09-phase-one-design.md)。
