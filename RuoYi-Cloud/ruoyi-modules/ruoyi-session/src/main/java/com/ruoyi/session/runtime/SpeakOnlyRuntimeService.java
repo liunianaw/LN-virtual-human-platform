@@ -22,13 +22,16 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
 {
     private final VoiceRuntimeProperties properties;
     private final TemporaryAudioCleanupQueue cleanupQueue;
+    private final PersistentRuntimeStore persistentStore;
     private final Map<String, TurnState> turns = new ConcurrentHashMap<>();
     private final Map<Long, String> activeTurnBySession = new ConcurrentHashMap<>();
 
-    public SpeakOnlyRuntimeService(VoiceRuntimeProperties properties, TemporaryAudioCleanupQueue cleanupQueue)
+    public SpeakOnlyRuntimeService(VoiceRuntimeProperties properties, TemporaryAudioCleanupQueue cleanupQueue,
+            PersistentRuntimeStore persistentStore)
     {
         this.properties = properties;
         this.cleanupQueue = cleanupQueue;
+        this.persistentStore = persistentStore;
     }
 
     public SpeechStarted start(RuntimePrincipal principal, String requestId, String text)
@@ -41,7 +44,8 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         {
             stop(principal, priorTurnId);
         }
-        TurnState state = new TurnState(principal, requestId, chunks);
+        long persistentTurnId = persistentStore.createSpeakTurn(principal, requestId, chunks);
+        TurnState state = new TurnState(principal, persistentTurnId, chunks);
         turns.put(state.turnId, state);
         activeTurnBySession.put(principal.sessionId(), state.turnId);
         synchronized (state)
@@ -67,6 +71,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 cleanupQueue.schedule(input.temporaryAudio());
                 return AudioReadyResult.ignored();
             }
+            persistentStore.markAudioReady(Long.parseLong(state.turnId), input.ordinal(), principal, input.temporaryAudio(), input.bytes());
             return new AudioReadyResult(true, state.drainOrderedEvents(), List.of());
         }
     }
@@ -84,6 +89,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
             {
                 return PlaybackUpdated.ignored();
             }
+            persistentStore.playback(Long.parseLong(turn.turnId), turn.ordinalOf(segmentId), state);
             if (state == PlaybackState.FAILED || state == PlaybackState.SKIPPED)
             {
                 finishStopped(turn);
@@ -113,20 +119,42 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 return new StopResult(turnId, true);
             }
             turn.stop(cleanupQueue);
-            finishStopped(turn);
+            finishStopped(turn, "USER_STOP");
             return new StopResult(turnId, false);
+        }
+    }
+
+    /** Called by trusted logout/revocation/expiry handling; it never trusts browser input. */
+    public void revokeSession(long sessionId)
+    {
+        String turnId = activeTurnBySession.get(sessionId);
+        TurnState turn = turnId == null ? null : turns.get(turnId);
+        if (turn == null)
+        {
+            return;
+        }
+        synchronized (turn)
+        {
+            finishStopped(turn, "REVOKED");
         }
     }
 
     private void finishStopped(TurnState turn)
     {
+        finishStopped(turn, "USER_STOP");
+    }
+
+    private void finishStopped(TurnState turn, String reason)
+    {
         turn.stop(cleanupQueue);
+        persistentStore.stop(Long.parseLong(turn.turnId), reason);
         turns.remove(turn.turnId, turn);
         activeTurnBySession.remove(turn.principal.sessionId(), turn.turnId);
     }
 
     private void finishCompleted(TurnState turn)
     {
+        persistentStore.complete(Long.parseLong(turn.turnId));
         turns.remove(turn.turnId, turn);
         activeTurnBySession.remove(turn.principal.sessionId(), turn.turnId);
     }
@@ -204,7 +232,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
     private final class TurnState
     {
         private final RuntimePrincipal principal;
-        private final String turnId = UUID.randomUUID().toString();
+        private final String turnId;
         private final long generation = 1L;
         private final List<SegmentState> segments;
         private final Map<String, SegmentState> byId;
@@ -212,9 +240,10 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         private int nextDelivery;
         private boolean stopped;
 
-        private TurnState(RuntimePrincipal principal, String requestId, List<String> chunks)
+        private TurnState(RuntimePrincipal principal, long turnId, List<String> chunks)
         {
             this.principal = principal;
+            this.turnId = Long.toString(turnId);
             this.segments = new ArrayList<>();
             this.byId = new HashMap<>();
             for (int ordinal = 0; ordinal < chunks.size(); ordinal++)
@@ -299,6 +328,16 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 return true;
             }
             return false;
+        }
+
+        private int ordinalOf(String segmentId)
+        {
+            SegmentState segment = byId.get(segmentId);
+            if (segment == null)
+            {
+                throw new IllegalArgumentException("Unknown segment");
+            }
+            return segment.ordinal;
         }
 
         private boolean isCompleted()

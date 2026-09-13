@@ -10,10 +10,17 @@ import org.springframework.stereotype.Component;
 @Component
 public class TemporaryAudioCleanupQueue
 {
+    private final PersistentRuntimeStore store;
     private final ConcurrentLinkedQueue<TemporaryAudioReference> pending = new ConcurrentLinkedQueue<>();
+
+    public TemporaryAudioCleanupQueue(PersistentRuntimeStore store)
+    {
+        this.store = store;
+    }
 
     public void schedule(TemporaryAudioReference reference)
     {
+        store.scheduleCleanup(reference);
         pending.offer(reference);
     }
 
