@@ -200,7 +200,8 @@ $accounts = @(
     [pscustomobject]@{ Id = 910103; Username = 'm1disabled'; Status = '1'; PasswordHash = New-M1BcryptHash $DisabledAccountPassword; RoleId = $null; NickName = 'M1停用账号' }
 )
 
-$existing = @(Invoke-M1MySql "SELECT CONCAT(user_id, '|', user_name, '|', status, '|', del_flag) FROM sys_user WHERE user_id IN (910101, 910102, 910103) OR user_name IN ('m1devread', 'm1devops', 'm1disabled') ORDER BY user_id;")
+$existingOutput = Invoke-M1MySql "SELECT CONCAT(user_id, '|', user_name, '|', status, '|', del_flag) FROM sys_user WHERE user_id IN (910101, 910102, 910103) OR user_name IN ('m1devread', 'm1devops', 'm1disabled') ORDER BY user_id;"
+$existing = @($existingOutput -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $expectedExisting = @('910101|m1devread|0|0', '910102|m1devops|0|0', '910103|m1disabled|1|0')
 if ($existing.Count -ne 0 -and (@(Compare-Object -ReferenceObject $expectedExisting -DifferenceObject $existing)).Count -ne 0) {
     throw 'Existing M1 login acceptance account identifiers do not match the reserved test-account boundary. No data was changed.'

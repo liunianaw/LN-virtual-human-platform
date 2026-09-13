@@ -36,6 +36,9 @@ if ($provisioner -notmatch 'Read-Host\s+.*-AsSecureString' -or $provisioner -not
 if ($provisioner -notmatch '\[string\]\$MySqlClientPath' -or $provisioner -notmatch 'function\s+Get-M1MySqlClient' -or $provisioner -notmatch 'Get-CimInstance\s+Win32_Service' -or $provisioner -notmatch 'mysqld\.exe' -or $provisioner -notmatch 'function\s+Get-M1JavaExecutable') {
     throw 'The M1 account provisioner must support an explicit MySQL client, service-adjacent mysql.exe discovery, and Java PATH fallback.'
 }
+if ($provisioner -notmatch 'IsNullOrWhiteSpace\(\$_\)' -or $provisioner -notmatch '\$existingOutput') {
+    throw 'The M1 account provisioner must normalize a blank MySQL query result to an empty account collection.'
+}
 if ($gatewayBootstrap -notmatch '(?s)sentinel:.*?datasource:.*?username:\s*\$\{NACOS_USERNAME:\}.*?password:\s*\$\{NACOS_PASSWORD:\}') {
     throw 'Sentinel Nacos datasource credentials must inherit the environment-provided Nacos credentials.'
 }
