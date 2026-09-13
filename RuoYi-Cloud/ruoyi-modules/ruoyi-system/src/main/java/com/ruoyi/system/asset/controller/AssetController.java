@@ -1,6 +1,7 @@
 package com.ruoyi.system.asset.controller;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -13,7 +14,9 @@ import com.ruoyi.common.log.annotation.Log;
 import com.ruoyi.common.log.enums.BusinessType;
 import com.ruoyi.common.security.utils.SecurityUtils;
 import com.ruoyi.system.asset.dto.CreateGenerationTaskRequest;
+import com.ruoyi.system.asset.dto.PublishAvatarVersionRequest;
 import com.ruoyi.system.asset.service.AssetService;
+import com.ruoyi.system.asset.service.AvatarPublicationService;
 
 /** 已登录账号的私有参考图与 Avatar 制作任务 API。 */
 @RestController
@@ -21,10 +24,12 @@ import com.ruoyi.system.asset.service.AssetService;
 public class AssetController
 {
     private final AssetService assetService;
+    private final AvatarPublicationService publicationService;
 
-    public AssetController(AssetService assetService)
+    public AssetController(AssetService assetService, AvatarPublicationService publicationService)
     {
         this.assetService = assetService;
+        this.publicationService = publicationService;
     }
 
     @Log(title = "参考图上传", businessType = BusinessType.INSERT)
@@ -53,5 +58,27 @@ public class AssetController
     public AjaxResult readGenerationTask(@PathVariable Long taskId)
     {
         return AjaxResult.success(assetService.readGenerationTask(SecurityUtils.getUserId(), taskId));
+    }
+
+    @GetMapping("/avatars/{avatarId}/versions/{versionId}/preview")
+    public AjaxResult previewAvatarVersion(@PathVariable Long avatarId, @PathVariable Long versionId)
+    {
+        return AjaxResult.success(publicationService.preview(SecurityUtils.getUserId(), avatarId, versionId));
+    }
+
+    @Log(title = "Avatar 版本发布", businessType = BusinessType.UPDATE)
+    @PostMapping("/avatars/{avatarId}/versions/{versionId}/publish")
+    public AjaxResult publishAvatarVersion(@PathVariable Long avatarId, @PathVariable Long versionId,
+        @RequestBody PublishAvatarVersionRequest request)
+    {
+        return AjaxResult.success(publicationService.publish(SecurityUtils.getUserId(), avatarId, versionId, request));
+    }
+
+    @Log(title = "Avatar 删除", businessType = BusinessType.DELETE)
+    @DeleteMapping("/avatars/{avatarId}")
+    public AjaxResult deleteAvatar(@PathVariable Long avatarId)
+    {
+        publicationService.deleteAvatar(SecurityUtils.getUserId(), avatarId);
+        return AjaxResult.success();
     }
 }
