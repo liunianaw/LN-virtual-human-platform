@@ -31,6 +31,8 @@ spring:
         ds1:
           nacos:
             server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+            username: ${NACOS_USERNAME:}
+            password: ${NACOS_PASSWORD:}
             dataId: sentinel-ruoyi-gateway
             groupId: DEFAULT_GROUP
             data-type: json
