@@ -182,9 +182,11 @@ try {
         }
         # Nacos Client reads can briefly expose the prior value after a successful
         # Admin publish. Re-read the same scope until it becomes visible, bounded
-        # by the caller's existing timeout and without changing failure semantics.
+        # by the caller's existing timeout. HTTP and malformed JSON still fail
+        # immediately because they are not an eventual-consistency condition.
         $verificationDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
         $verificationSucceeded = $false
+        $verificationReady = $false
         do {
             $verifyResult = Invoke-NacosRequest -Method GET -Url "$clientUrl`?$query" -AccessToken $accessToken -TimeoutSeconds $TimeoutSeconds
             if ($verifyResult.StatusCode -ne 200) {
@@ -196,15 +198,25 @@ try {
             catch {
                 throw "Verification failed for $($file.Name): Nacos returned invalid JSON. Verified before failure: $($verifiedDataIds -join ', ')."
             }
-            if ($verifyPayload.code -ne 0 -or $null -eq $verifyPayload.data -or $verifyPayload.data.success -ne $true -or $null -eq $verifyPayload.data.content) {
-                throw "Verification failed for $($file.Name): Nacos did not return successful configuration content. Verified before failure: $($verifiedDataIds -join ', ')."
+
+            # Nacos may return a valid 200/JSON response before the Client API has
+            # exposed the just-published value. That is a not-ready read, not a
+            # terminal error; keep polling within the established deadline.
+            $verificationReady = $verifyPayload.code -eq 0 -and
+                $null -ne $verifyPayload.data -and
+                $verifyPayload.data.success -eq $true -and
+                $null -ne $verifyPayload.data.content
+            if ($verificationReady) {
+                $verificationSucceeded = (Get-TextSha256 ([string]$verifyPayload.data.content)) -eq $localHash
             }
-            $verificationSucceeded = (Get-TextSha256 ([string]$verifyPayload.data.content)) -eq $localHash
             if (-not $verificationSucceeded -and [DateTime]::UtcNow -lt $verificationDeadline) {
                 Start-Sleep -Milliseconds 250
             }
         } while (-not $verificationSucceeded -and [DateTime]::UtcNow -lt $verificationDeadline)
         if (-not $verificationSucceeded) {
+            if (-not $verificationReady) {
+                throw "Verification failed for $($file.Name): Nacos did not return successful configuration content before the timeout. Verified before failure: $($verifiedDataIds -join ', ')."
+            }
             throw "Verification hash mismatch for $($file.Name). Verified before failure: $($verifiedDataIds -join ', ')."
         }
 
