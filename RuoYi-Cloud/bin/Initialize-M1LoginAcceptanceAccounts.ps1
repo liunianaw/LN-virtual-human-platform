@@ -6,7 +6,8 @@ Creates the three local-only M1 browser-acceptance accounts after Flyway V2 has 
 The account identifiers are fixed: m1devread, m1devops, and m1disabled. Passwords are
 requested as SecureString values at execution time, BCrypt-hashed in memory, and never
 written to source, output, or configuration. PLATFORM_DB_PASSWORD must be present only in
-the invoking process environment.
+the invoking process environment. MySQL client discovery accepts -MySqlClientPath, then
+uses PATH, then checks the directory of a running mysqld.exe Windows service.
 #>
 [CmdletBinding()]
 param(
@@ -16,7 +17,8 @@ param(
     [string]$MySqlHost = ${env:PLATFORM_DB_HOST},
     [int]$MySqlPort = $(if (${env:PLATFORM_DB_PORT}) { [int]${env:PLATFORM_DB_PORT} } else { 3306 }),
     [string]$MySqlDatabase = $(if (${env:PLATFORM_DB_NAME}) { ${env:PLATFORM_DB_NAME} } else { 'platform_db' }),
-    [string]$MySqlUser = $(if (${env:PLATFORM_DB_USER}) { ${env:PLATFORM_DB_USER} } else { 'root' })
+    [string]$MySqlUser = $(if (${env:PLATFORM_DB_USER}) { ${env:PLATFORM_DB_USER} } else { 'root' }),
+    [string]$MySqlClientPath
 )
 
 Set-StrictMode -Version Latest
@@ -54,13 +56,53 @@ function ConvertTo-M1PlainText {
     }
 }
 
+function Get-M1JavaExecutable {
+    if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+        $javaHomeCandidate = Join-Path $env:JAVA_HOME 'bin\java.exe'
+        if (Test-Path -LiteralPath $javaHomeCandidate -PathType Leaf) {
+            return $javaHomeCandidate
+        }
+    }
+    foreach ($commandName in @('java.exe', 'java')) {
+        $command = Get-Command $commandName -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $command -and (Test-Path -LiteralPath $command.Source -PathType Leaf)) {
+            return $command.Source
+        }
+    }
+    throw 'A JDK with java.exe is required to generate local M1 test-account BCrypt hashes. Set JAVA_HOME or add java.exe to PATH.'
+}
+
+function Get-M1MySqlClient {
+    param([string]$ConfiguredPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($ConfiguredPath)) {
+        if (Test-Path -LiteralPath $ConfiguredPath -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $ConfiguredPath).Path
+        }
+        throw "The explicit MySQL client path does not exist: $ConfiguredPath"
+    }
+    $pathCommand = Get-Command mysql.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $pathCommand -and (Test-Path -LiteralPath $pathCommand.Source -PathType Leaf)) {
+        return $pathCommand.Source
+    }
+    $mySqlServices = Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | Where-Object { $_.PathName -match '(?i)mysqld\.exe' }
+    foreach ($service in $mySqlServices) {
+        $serverMatch = [regex]::Match($service.PathName, '(?i)(?<server>[A-Z]:\\.+?\\mysqld\.exe)')
+        if (-not $serverMatch.Success) {
+            continue
+        }
+        $clientCandidate = Join-Path (Split-Path -Parent $serverMatch.Groups['server'].Value) 'mysql.exe'
+        if (Test-Path -LiteralPath $clientCandidate -PathType Leaf) {
+            return $clientCandidate
+        }
+    }
+    throw 'mysql.exe was not found. Supply -MySqlClientPath, add mysql.exe to PATH, or run a MySQL service with mysql.exe next to mysqld.exe.'
+}
+
 function New-M1BcryptHash {
     param([System.Security.SecureString]$Password)
 
-    $java = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin\java.exe' } else { (Get-Command java -ErrorAction Stop).Source }
-    if (-not (Test-Path -LiteralPath $java)) {
-        throw 'A JDK with java.exe is required to generate local M1 test-account BCrypt hashes.'
-    }
+    $java = Get-M1JavaExecutable
     $cryptoJar = Get-ChildItem -Path (Join-Path $env:USERPROFILE '.m2\repository\org\springframework\security\spring-security-crypto') -Recurse -Filter 'spring-security-crypto-*.jar' -ErrorAction SilentlyContinue |
         Sort-Object FullName -Descending |
         Select-Object -First 1 -ExpandProperty FullName
@@ -117,7 +159,7 @@ class M1Bcrypt {
 
 function Invoke-M1MySql {
     param([string]$Sql)
-    $mysql = (Get-Command mysql.exe -ErrorAction Stop).Source
+    $mysql = Get-M1MySqlClient -ConfiguredPath $MySqlClientPath
     $previousMySqlPassword = $env:MYSQL_PWD
     try {
         $env:MYSQL_PWD = $env:PLATFORM_DB_PASSWORD
