@@ -13,6 +13,12 @@ The package boundaries are intentional: `api` owns HTTP entrypoints, `worker` ow
 
 This adapts the in-repository `validation/avatar_lab/media.py` CPU matte and six-frame checks into the formal action-atlas contract from `接口设计说明书01.md` §5.4. It deliberately excludes provider calls, local config/secrets, RabbitMQ, database access, preview/GIF generation, and version-wide foot-anchor normalization; those require the task orchestration and review stages.
 
+## M2 controlled worker boundary
+
+`GenerationWorker` accepts a versioned `AVATAR_GENERATION_REQUESTED` task event and asks the internal platform port to claim the next action step. The platform claim supplies the lease epoch, an assigned object-key prefix, fixed provider inputs and temporary reference bytes; it is the only authority for attempts, progress and result persistence. Before an official call the Worker records a PREPARED attempt through that port, and every progress/result payload carries the lease epoch. A stale lease is ignored, never allowed to overwrite a newer run. Definite provider rejection produces `FAILED`; any timeout, unreadable response, post-call artifact/upload uncertainty, or unknown upstream state produces non-retryable `UNKNOWN` for reconciliation, never an implicit paid retry.
+
+The Qwen adapter only loads `RUOYI_MEDIA_QWEN_API_KEY` and optional approved `RUOYI_MEDIA_QWEN_ENDPOINT` from the running process environment. It does not read local key files, log request/response bodies or credentials, and allows only the official HTTPS endpoint. The adapter is not constructed by the M1 probe and this repository change does not make a provider request. The result contract returns validated action manifest data plus SHA-256-bound object keys; the platform remains responsible for authorizing the prefix and registering file IDs.
+
 ## Reproducible setup
 
 Use Python 3.12 or newer. The checked-in `requirements.lock` pins the complete M1 runtime dependency set.
