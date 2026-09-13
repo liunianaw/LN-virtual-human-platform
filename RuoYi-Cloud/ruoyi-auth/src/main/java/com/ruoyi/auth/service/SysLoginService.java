@@ -1,5 +1,6 @@
 package com.ruoyi.auth.service;
 
+import jakarta.validation.Validator;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import com.ruoyi.common.core.constant.CacheConstants;
@@ -39,6 +40,9 @@ public class SysLoginService
     @Autowired
     private RedisService redisService;
 
+    @Autowired
+    private Validator validator;
+
     /**
      * 登录
      */
@@ -57,9 +61,8 @@ public class SysLoginService
             recordLogService.recordLogininfor(username, Constants.LOGIN_FAIL, "用户密码不在指定范围");
             throw new ServiceException("用户密码不在指定范围");
         }
-        // 用户名不在指定范围内 错误
-        if (username.length() < UserConstants.USERNAME_MIN_LENGTH
-                || username.length() > UserConstants.USERNAME_MAX_LENGTH)
+        // 用户名或邮箱不在指定范围内 错误
+        if (!isLoginIdentifierValid(username))
         {
             recordLogService.recordLogininfor(username, Constants.LOGIN_FAIL, "用户名不在指定范围");
             throw new ServiceException("用户名不在指定范围");
@@ -95,6 +98,18 @@ public class SysLoginService
         recordLogService.recordLogininfor(username, Constants.LOGIN_SUCCESS, "登录成功");
         recordLoginInfo(user.getUserId());
         return userInfo;
+    }
+
+    private boolean isLoginIdentifierValid(String identifier)
+    {
+        if (identifier.length() >= UserConstants.USERNAME_MIN_LENGTH
+                && identifier.length() <= UserConstants.USERNAME_MAX_LENGTH)
+        {
+            return true;
+        }
+        SysUser user = new SysUser();
+        user.setEmail(identifier);
+        return validator.validateProperty(user, "email").isEmpty();
     }
 
     /**
