@@ -8,7 +8,6 @@ public class GenerationServiceConfig
     private String providerCode;
     private String endpoint;
     private String modelId;
-    private Long secretId;
     private String parameters;
     private Long revision;
 
@@ -22,8 +21,6 @@ public class GenerationServiceConfig
     public void setEndpoint(String value) { endpoint = value; }
     public String getModelId() { return modelId; }
     public void setModelId(String value) { modelId = value; }
-    public Long getSecretId() { return secretId; }
-    public void setSecretId(Long value) { secretId = value; }
     public String getParameters() { return parameters; }
     public void setParameters(String value) { parameters = value; }
     public Long getRevision() { return revision; }

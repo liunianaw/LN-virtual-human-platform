@@ -40,7 +40,6 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <result property="providerCode" column="provider_code"/>
         <result property="endpoint" column="endpoint"/>
         <result property="modelId" column="model_id"/>
-        <result property="secretId" column="secret_id"/>
         <result property="parameters" column="parameters"/>
         <result property="revision" column="revision"/>
     </resultMap>
@@ -70,7 +69,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </select>
 
     <select id="selectActiveAvatarGenerationService" resultMap="GenerationServiceResult">
-        select id, name, provider_code, endpoint, model_id, secret_id, parameters, revision
+        select id, name, provider_code, endpoint, model_id, parameters, revision
         from p_official_service
         where id = #{serviceId} and capability = 'AVATAR_GENERATION' and status = 'ACTIVE'
     </select>

@@ -247,7 +247,6 @@ public class AssetService
         snapshot.put("providerCode", service.getProviderCode());
         snapshot.put("endpoint", service.getEndpoint());
         snapshot.put("modelId", service.getModelId());
-        snapshot.put("secretId", service.getSecretId());
         snapshot.put("parameters", service.getParameters());
         snapshot.put("revision", service.getRevision());
         return json(snapshot);
