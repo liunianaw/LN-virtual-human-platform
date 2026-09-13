@@ -11,11 +11,13 @@ param(
 
 <#
 .SYNOPSIS
-Plans or guardedly publishes root Nacos YAML configuration files.
+Plans or guardedly publishes root Nacos YAML and Sentinel JSON configuration files.
 
 .DESCRIPTION
-Without -Apply, this script only lists the selected root *.yml files and their
-SHA-256 values. With -Apply, it reads NACOS_ACCESS_TOKEN from the process
+Without -Apply, this script only lists the selected root *.yml and *.json files
+and their SHA-256 values. YAML file names are their Data IDs; JSON file names
+without the .json suffix are their Data IDs, matching the Sentinel bootstrap.
+With -Apply, it reads NACOS_ACCESS_TOKEN from the process
 environment, publishes each selected file through the Nacos 3.2 Admin API,
 then reads it through the Client API and compares the returned content hash.
 The script never accepts a token as a parameter and never prints tokens or
@@ -71,6 +73,30 @@ function ConvertTo-FormUrlEncoded {
     }) -join '&')
 }
 
+function Get-NacosConfigDescriptor {
+    param([Parameter(Mandatory)] [System.IO.FileInfo]$File)
+
+    switch ($File.Extension.ToLowerInvariant()) {
+        '.yml' {
+            return [pscustomobject]@{
+                File = $File
+                DataId = $File.Name
+                ContentType = 'yaml'
+            }
+        }
+        '.json' {
+            return [pscustomobject]@{
+                File = $File
+                DataId = $File.BaseName
+                ContentType = 'json'
+            }
+        }
+        default {
+            throw "Unsupported Nacos configuration file type: $($File.Name)."
+        }
+    }
+}
+
 function Invoke-NacosRequest {
     param(
         [Parameter(Mandatory)] [ValidateSet('GET', 'POST')] [string]$Method,
@@ -114,30 +140,34 @@ function Invoke-NacosRequest {
 try {
     $configDirectory = Join-Path $PSScriptRoot '..\config\nacos'
     $configDirectory = (Resolve-Path -LiteralPath $configDirectory).Path
-    $availableFiles = @(Get-ChildItem -LiteralPath $configDirectory -File -Filter '*.yml' | Sort-Object Name)
-    if ($availableFiles.Count -eq 0) {
-        throw "No root .yml files found in $configDirectory."
+    $availableConfigs = @(Get-ChildItem -LiteralPath $configDirectory -File |
+            Where-Object { $_.Extension -in @('.yml', '.json') } |
+            ForEach-Object { Get-NacosConfigDescriptor $_ } |
+            Sort-Object DataId)
+    if ($availableConfigs.Count -eq 0) {
+        throw "No root .yml or .json files found in $configDirectory."
     }
 
     # A missing [string[]] parameter is $null under StrictMode, so normalize it
     # before accessing Count. Keep the caller's multiple-DataId semantics intact.
     $requestedDataIds = @($DataId | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    $selectedFiles = if ($requestedDataIds.Count -gt 0) {
-        $matches = @($availableFiles | Where-Object { $requestedDataIds -contains $_.Name })
-        $unknownIds = @($requestedDataIds | Where-Object { $_ -notin $availableFiles.Name })
+    $selectedConfigs = if ($requestedDataIds.Count -gt 0) {
+        $matches = @($availableConfigs | Where-Object { $requestedDataIds -contains $_.DataId })
+        $unknownIds = @($requestedDataIds | Where-Object { $_ -notin $availableConfigs.DataId })
         if ($unknownIds.Count -gt 0) {
             throw "No root configuration file matches DataId: $($unknownIds -join ', ')."
         }
         $matches
     }
     else {
-        $availableFiles
+        $availableConfigs
     }
 
-    $plan = foreach ($file in $selectedFiles) {
-        $content = Get-Content -LiteralPath $file.FullName -Raw
+    $plan = foreach ($config in $selectedConfigs) {
+        $content = Get-Content -LiteralPath $config.File.FullName -Raw
         [pscustomobject]@{
-            DataId = $file.Name
+            DataId = $config.DataId
+            Type = $config.ContentType
             Group = $GroupName
             Namespace = $NamespaceId
             Sha256 = Get-TextSha256 $content
@@ -160,23 +190,23 @@ try {
     $clientUrl = New-NacosUrl $NacosBaseUrl 'nacos/v3/client/cs/config'
     $verifiedDataIds = [System.Collections.Generic.List[string]]::new()
 
-    foreach ($file in $selectedFiles) {
-        $content = Get-Content -LiteralPath $file.FullName -Raw
+    foreach ($config in $selectedConfigs) {
+        $content = Get-Content -LiteralPath $config.File.FullName -Raw
         $localHash = Get-TextSha256 $content
         $formBody = ConvertTo-FormUrlEncoded @{
-            dataId = $file.Name
+            dataId = $config.DataId
             groupName = $GroupName
             namespaceId = $NamespaceId
             content = $content
-            type = 'yaml'
+            type = $config.ContentType
         }
         $publishResult = Invoke-NacosRequest -Method POST -Url $adminUrl -AccessToken $accessToken -FormBody $formBody -TimeoutSeconds $TimeoutSeconds
         if ($publishResult.StatusCode -lt 200 -or $publishResult.StatusCode -ge 300) {
-            throw "Publish failed for $($file.Name): HTTP $($publishResult.StatusCode). Verified before failure: $($verifiedDataIds -join ', ')."
+            throw "Publish failed for $($config.DataId): HTTP $($publishResult.StatusCode). Verified before failure: $($verifiedDataIds -join ', ')."
         }
 
         $query = ConvertTo-FormUrlEncoded @{
-            dataId = $file.Name
+            dataId = $config.DataId
             groupName = $GroupName
             namespaceId = $NamespaceId
         }
@@ -190,13 +220,13 @@ try {
         do {
             $verifyResult = Invoke-NacosRequest -Method GET -Url "$clientUrl`?$query" -AccessToken $accessToken -TimeoutSeconds $TimeoutSeconds
             if ($verifyResult.StatusCode -ne 200) {
-                throw "Verification failed for $($file.Name): HTTP $($verifyResult.StatusCode). Verified before failure: $($verifiedDataIds -join ', ')."
+                throw "Verification failed for $($config.DataId): HTTP $($verifyResult.StatusCode). Verified before failure: $($verifiedDataIds -join ', ')."
             }
             try {
                 $verifyPayload = $verifyResult.Content | ConvertFrom-Json
             }
             catch {
-                throw "Verification failed for $($file.Name): Nacos returned invalid JSON. Verified before failure: $($verifiedDataIds -join ', ')."
+                throw "Verification failed for $($config.DataId): Nacos returned invalid JSON. Verified before failure: $($verifiedDataIds -join ', ')."
             }
 
             # Nacos may return a valid 200/JSON response before the Client API has
@@ -215,12 +245,12 @@ try {
         } while (-not $verificationSucceeded -and [DateTime]::UtcNow -lt $verificationDeadline)
         if (-not $verificationSucceeded) {
             if (-not $verificationReady) {
-                throw "Verification failed for $($file.Name): Nacos did not return successful configuration content before the timeout. Verified before failure: $($verifiedDataIds -join ', ')."
+                throw "Verification failed for $($config.DataId): Nacos did not return successful configuration content before the timeout. Verified before failure: $($verifiedDataIds -join ', ')."
             }
-            throw "Verification hash mismatch for $($file.Name). Verified before failure: $($verifiedDataIds -join ', ')."
+            throw "Verification hash mismatch for $($config.DataId). Verified before failure: $($verifiedDataIds -join ', ')."
         }
 
-        $verifiedDataIds.Add($file.Name)
+        $verifiedDataIds.Add($config.DataId)
     }
 
     Write-Host "Published and verified $($verifiedDataIds.Count) Nacos configuration file(s)."
