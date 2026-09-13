@@ -72,3 +72,9 @@ git diff --check
 ```
 
 Task 1 仅完成静态结构核对，未连接或执行 MySQL。真实初始化、二次执行和结构验收由实施计划 Task 2 单独记录；服务数据源配置、管理员初始化、模块级 Flyway 接线、升级迁移以及 JSON/账号归属/发布状态的业务校验仍属后续 M1 工作。本脚本存在不代表可登录、业务接口已实现或 COS 已联通。
+
+## M1 迁移验收状态（2026-09-13）
+
+当前运行的平台库由 `ruoyi-system` Flyway 管理，历史为基线 V0、结构与管理员种子 V1、M1 账号角色边界 V2；会话库由 `ruoyi-session` Flyway 管理，历史为基线 V0 和会话结构 V1。已在隔离空库验证首次迁移和重启幂等；已在隔离库验证修改已执行 V1 会报 Flyway checksum mismatch。
+
+这些迁移路径不执行 `clean` 或 `repair`，也不应将 `init-platform-and-session.sql` 重放到已被 Flyway 管理的现有库。服务重启与完整本机验收证据见 [M1-RUN-001](../../docs/handoff/tasks/M1-RUN-001.md)。

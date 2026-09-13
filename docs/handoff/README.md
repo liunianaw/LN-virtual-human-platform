@@ -14,15 +14,15 @@
 - [x] **M1-PLAT-001**：将已验证的 51 张 `platform_db` 表与本地管理员种子迁入 `ruoyi-system` 的 Flyway V1；空库、重启与 checksum 负向检查均已在隔离库验收。既有本机库已安全登记 Flyway V0 基线并执行 V1，随后默认配置重启为 `UP`。
 - [x] **M1-SESS-001**：`ruoyi-session` 经 Nacos 启动并在 `9202/actuator/health` 返回 `UP`；带时间戳的隔离库首次 Flyway V1 创建 13 张会话表，重启后 history 仍仅一条成功 V1。启动时只注入会话库环境变量。
 - [x] **M1-MEDIA-001**：`ruoyi-media` API 在 `8002/health` 返回 200/ready，有限 Worker smoke 输出 ready 与 heartbeat，3 项单元测试通过；未连接供应商、MQ 或业务库。
-- [x] **M1-CONFIG-001**：Compose 已定义 RabbitMQ、system、session、media API/Worker 服务边界；Nacos guarded publisher 已实测通过认证写入并回读 6 份开发配置。`792de0c` 处理 Nacos Client API 瞬时未就绪响应。
-- [ ] **M1-LOGIN-001**：前端仅做登录、退出、错误/停用账号、角色菜单和直接越权请求的最小浏览器验证；不做页面美化或额外前端功能。
-- [ ] **M1-OPS-001**：`check-m1-services.ps1` 已提交；platform/session 均完成既有库基线后默认配置重启，完整 HTTP 组（gateway/auth/system/session/media API 及 gateway→system OpenAPI）均为 200，媒体 Worker 已出现 ready/heartbeat。仍待随登录验收收口记录。
+- [x] **M1-CONFIG-001**：Compose 已定义 RabbitMQ、system、session、media API/Worker 服务边界；Nacos guarded publisher 已实测通过认证写入并回读 7 份开发配置（含 Sentinel JSON 规则）。`792de0c` 处理 Nacos Client API 瞬时未就绪响应。
+- [x] **M1-LOGIN-001**：本机浏览器已完成 admin、只读开发者、运维开发者的登录/退出及菜单边界验证；只读开发者的邮箱标识已经真实登录复核；停用账号被登录页拒绝，直接越权 API 保持 403。未修改任何前端视觉或新增 UI 功能。详见 `tasks/M1-RUN-001.md`。
+- [x] **M1-OPS-001**：最终 `check-m1-services.ps1` 结果中 gateway/auth/system/session/media API 及 gateway→system OpenAPI 全部为 HTTP 200；Worker 持续输出 ready/heartbeat；Vue 生产构建、测试、类型检查均通过。详见 `tasks/M1-RUN-001.md`。
 - [ ] **M2-ASSET-001**：参考图私有 COS 上传、文件授权与制作任务幂等/额度/Outbox 基础。
 - [ ] **M2-PROCESS-001**：外部生成编排、CPU 素材加工、八动作图集与 manifest 校验、失败/未知/Worker 重启恢复。
 - [ ] **M2-PUBLISH-001**：后台预览、人工验收、不可变 Avatar 发布版本及跨账号引用限制。
 - [ ] **M2-VOICE-001**：官方与 Relay Voice 配置、最小 `SPEAK_ONLY` 调试 Session、分段播放、stop 与临时音频清理；不做声音克隆。
 - [ ] **M2-ACCEPT-001**：真实成功路径与受控故障验收、Linux Compose 和本机浏览器记录、正式样品包与已知问题收口。
 
-当前执行顺序：完成 `M1-LOGIN-001` 的最小浏览器验收并收口 `M1-OPS-001`；COS 真实私有桶验证仍作为独立前置缺口保留。M2 必须在 M1 验收通过后开始。当前 Nacos 已启用认证；Java 服务冷启动时由进程环境传入 Nacos 登录凭据，绝不写入仓库或 Nacos 配置。用户确认当前前后端均已正常启动、数据库已初始化；复用该基线，只补未覆盖的迁移和新服务验收。前端不做美化。MySQL 8.0.46 可登录是上轮实测，执行前只需刷新目标库状态；不要回显私密配置。
+当前执行顺序：**M1 本地验收已通过**，完整证据见 `tasks/M1-RUN-001.md`。下一阶段按 `M2-ASSET-001` 开始；COS 真实私有桶上传/签名读取/清理是 M2 的真实外部服务验证，未在 M1 执行。当前 Nacos 已启用认证；Java 服务冷启动时由进程环境传入 Nacos 登录凭据，绝不写入仓库或 Nacos 配置。前端只承担最小后端验证，不做美化。
 
 Git：COS 与 SQL 已本地提交，未推送、未合并。此次仅文档修改，不重写历史。历史资料按需查阅：[M1-DB-001](tasks/M1-DB-001.md)、[GOV-001](tasks/GOV-001.md)、[模块裁剪](../ruoyi-module-trimming.md)、[第一阶段方案](../superpowers/specs/2026-09-09-phase-one-design.md)。
