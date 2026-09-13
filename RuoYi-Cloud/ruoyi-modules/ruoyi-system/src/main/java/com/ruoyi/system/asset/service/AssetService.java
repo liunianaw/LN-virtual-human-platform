@@ -3,6 +3,7 @@ package com.ruoyi.system.asset.service;
 import java.io.ByteArrayInputStream;
 import java.security.MessageDigest;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -148,6 +149,8 @@ public class AssetService
         assetMapper.insertQuotaEntry(nextId(), accountId, reservationId, "generation:" + taskId + ":reserve:1");
         assetMapper.insertGenerationTask(taskId, accountId, avatarId, avatarVersionId, sourceFile.getId(), service.getId(),
             serviceSnapshot(service), PIPELINE_VERSION, reservationId, request.getRequestId());
+        for (String action : List.of("idle", "speaking", "listening", "thinking", "nod", "shake_head", "wave", "happy"))
+            assetMapper.insertGenerationActionStep(nextId(), accountId, taskId, "ACTION_" + action, action);
         String eventId = UUID.randomUUID().toString().replace("-", "");
         assetMapper.insertOutbox(nextId(), accountId, eventId, "AVATAR_GENERATION_REQUESTED", "GENERATION_TASK",
             taskId.toString(), UUID.randomUUID().toString().replace("-", ""), json(Map.of(
