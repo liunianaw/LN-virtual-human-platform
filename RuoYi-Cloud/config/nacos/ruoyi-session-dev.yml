@@ -18,3 +18,20 @@ management:
     health:
       probes:
         enabled: true
+
+# Runtime limits and enablement only. Provider credentials stay outside Nacos,
+# database rows, logs and public request DTOs; adapters read them from their
+# protected deployment environment when they are implemented.
+ln:
+  session:
+    voice:
+      max-code-points-per-segment: ${LN_SESSION_TTS_MAX_CODEPOINTS:200}
+      max-buffered-segments: ${LN_SESSION_TTS_MAX_BUFFERED_SEGMENTS:2}
+      max-audio-bytes: ${LN_SESSION_TTS_MAX_AUDIO_BYTES:5242880}
+      temporary-audio-ttl: ${LN_SESSION_TTS_TEMP_AUDIO_TTL:15m}
+      official:
+        enabled: ${LN_SESSION_TTS_OFFICIAL_ENABLED:false}
+        timeout: ${LN_SESSION_TTS_OFFICIAL_TIMEOUT:30s}
+      relay:
+        enabled: ${LN_SESSION_TTS_RELAY_ENABLED:false}
+        timeout: ${LN_SESSION_TTS_RELAY_TIMEOUT:30s}
