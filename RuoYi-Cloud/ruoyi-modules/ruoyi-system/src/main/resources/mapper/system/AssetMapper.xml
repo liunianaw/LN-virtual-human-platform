@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.asset.mapper.AssetMapper">
+    <resultMap id="AssetFileResult" type="com.ruoyi.system.asset.domain.AssetFile">
+        <id property="id" column="id"/>
+        <result property="accountId" column="account_id"/>
+        <result property="purpose" column="purpose"/>
+        <result property="storageProvider" column="storage_provider"/>
+        <result property="bucket" column="bucket"/>
+        <result property="objectKey" column="object_key"/>
+        <result property="originalName" column="original_name"/>
+        <result property="contentType" column="content_type"/>
+        <result property="sizeBytes" column="size_bytes"/>
+        <result property="sha256" column="sha256"/>
+        <result property="width" column="width"/>
+        <result property="height" column="height"/>
+        <result property="status" column="status"/>
+        <result property="rightsNoticeVersion" column="rights_notice_version"/>
+    </resultMap>
+
+    <resultMap id="GenerationTaskResult" type="com.ruoyi.system.asset.domain.GenerationTask">
+        <id property="id" column="id"/>
+        <result property="accountId" column="account_id"/>
+        <result property="avatarId" column="avatar_id"/>
+        <result property="avatarVersionId" column="avatar_version_id"/>
+        <result property="sourceFileId" column="source_file_id"/>
+        <result property="quotaReservationId" column="quota_reservation_id"/>
+        <result property="requestId" column="request_id"/>
+        <result property="status" column="status"/>
+        <result property="internalState" column="internal_state"/>
+        <result property="progress" column="progress"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <resultMap id="GenerationServiceResult" type="com.ruoyi.system.asset.domain.GenerationServiceConfig">
+        <id property="id" column="id"/>
+        <result property="name" column="name"/>
+        <result property="providerCode" column="provider_code"/>
+        <result property="endpoint" column="endpoint"/>
+        <result property="modelId" column="model_id"/>
+        <result property="secretId" column="secret_id"/>
+        <result property="parameters" column="parameters"/>
+        <result property="revision" column="revision"/>
+    </resultMap>
+
+    <select id="nextId" resultType="java.lang.Long">select uuid_short()</select>
+
+    <select id="selectAvailableFile" resultMap="AssetFileResult">
+        select id, account_id, purpose, storage_provider, bucket, object_key, original_name, content_type,
+               size_bytes, sha256, width, height, status, rights_notice_version
+        from p_file
+        where account_id = #{accountId} and id = #{fileId} and purpose = 'AVATAR_SOURCE' and status = 'AVAILABLE'
+    </select>
+
+    <sql id="taskColumns">
+        id, account_id, avatar_id, avatar_version_id, source_file_id, quota_reservation_id, request_id,
+        status, internal_state, progress, created_at
+    </sql>
+
+    <select id="selectTaskByAccountAndRequest" resultMap="GenerationTaskResult">
+        select <include refid="taskColumns"/> from p_generation_task
+        where account_id = #{accountId} and request_id = #{requestId}
+    </select>
+
+    <select id="selectTaskByAccountAndId" resultMap="GenerationTaskResult">
+        select <include refid="taskColumns"/> from p_generation_task
+        where account_id = #{accountId} and id = #{taskId}
+    </select>
+
+    <select id="selectActiveAvatarGenerationService" resultMap="GenerationServiceResult">
+        select id, name, provider_code, endpoint, model_id, secret_id, parameters, revision
+        from p_official_service
+        where id = #{serviceId} and capability = 'AVATAR_GENERATION' and status = 'ACTIVE'
+    </select>
+
+    <update id="reserveAvatarQuota">
+        update p_quota_balance
+        set reserved_units = reserved_units + 1, revision = revision + 1, updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and quota_type = 'AVATAR_COUNT'
+          and reserved_units &lt; granted_units - used_units
+    </update>
+
+    <insert id="insertFile" parameterType="com.ruoyi.system.asset.domain.AssetFile">
+        insert into p_file (id, created_at, updated_at, account_id, purpose, storage_provider, bucket, object_key,
+            original_name, content_type, size_bytes, sha256, width, height, status, rights_notice_version,
+            rights_confirmed_at, confirmed_by)
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{purpose}, #{storageProvider}, #{bucket},
+            #{objectKey}, #{originalName}, #{contentType}, #{sizeBytes}, #{sha256}, #{width}, #{height}, #{status},
+            #{rightsNoticeVersion}, utc_timestamp(3), #{accountId})
+    </insert>
+
+    <insert id="insertAvatar">
+        insert into p_avatar (id, created_at, updated_at, account_id, visibility, name, status, revision)
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, 'PRIVATE', #{name}, 'DRAFT', 1)
+    </insert>
+
+    <insert id="insertAvatarVersion">
+        insert into p_avatar_version (id, created_at, updated_at, account_id, avatar_id, version_no, status,
+            source_type, source_file_id, pipeline_version, generation_recipe, capabilities, qa_report, created_by)
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{avatarId}, 1, 'BUILDING', 'IMAGE',
+            #{sourceFileId}, #{pipelineVersion}, cast(#{generationRecipe} as json), json_object(), json_object(), #{accountId})
+    </insert>
+
+    <insert id="insertQuotaReservation">
+        insert into p_quota_reservation (id, created_at, updated_at, account_id, quota_type, business_type,
+            business_id, reservation_no, reserved_units, settled_units, state)
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, 'AVATAR_COUNT', 'GENERATION', #{businessId},
+            1, 1, 0, 'RESERVED')
+    </insert>
+
+    <insert id="insertQuotaEntry">
+        insert into p_quota_entry (id, created_at, updated_at, account_id, quota_type, reservation_id, event_key,
+            entry_type, delta_granted, delta_used, delta_reserved)
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, 'AVATAR_COUNT', #{reservationId}, #{eventKey},
+            'RESERVE', 0, 0, 1)
+    </insert>
+
+    <insert id="insertGenerationTask">
+        insert into p_generation_task (id, created_at, updated_at, account_id, avatar_id, avatar_version_id,
+            source_file_id, task_kind, status, internal_state, progress, official_service_id, service_snapshot,
+            pipeline_version, quota_reservation_id, request_id, reservation_no)
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{avatarId}, #{avatarVersionId},
+            #{sourceFileId}, 'GENERATE', 'QUEUED', 'READY', 0, #{officialServiceId}, cast(#{serviceSnapshot} as json),
+            #{pipelineVersion}, #{quotaReservationId}, #{requestId}, 1)
+    </insert>
+
+    <insert id="insertOutbox">
+        insert into p_outbox (id, created_at, updated_at, account_id, event_id, event_type, aggregate_type,
+            aggregate_id, schema_version, trace_id, payload, status, attempt_count, next_run_at)
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{eventId}, #{eventType}, #{aggregateType},
+            #{aggregateId}, 1, #{traceId}, cast(#{payload} as json), 'PENDING', 0, utc_timestamp(3))
+    </insert>
+</mapper>
