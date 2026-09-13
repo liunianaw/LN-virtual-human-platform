@@ -119,9 +119,12 @@ try {
         throw "No root .yml files found in $configDirectory."
     }
 
-    $selectedFiles = if ($DataId.Count -gt 0) {
-        $matches = @($availableFiles | Where-Object { $DataId -contains $_.Name })
-        $unknownIds = @($DataId | Where-Object { $_ -notin $availableFiles.Name })
+    # A missing [string[]] parameter is $null under StrictMode, so normalize it
+    # before accessing Count. Keep the caller's multiple-DataId semantics intact.
+    $requestedDataIds = @($DataId | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $selectedFiles = if ($requestedDataIds.Count -gt 0) {
+        $matches = @($availableFiles | Where-Object { $requestedDataIds -contains $_.Name })
+        $unknownIds = @($requestedDataIds | Where-Object { $_ -notin $availableFiles.Name })
         if ($unknownIds.Count -gt 0) {
             throw "No root configuration file matches DataId: $($unknownIds -join ', ')."
         }

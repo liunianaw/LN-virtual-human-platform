@@ -11,6 +11,7 @@ copy_jar() {
 copy_jar ../ruoyi-gateway/target/ruoyi-gateway.jar ./ruoyi/gateway
 copy_jar ../ruoyi-auth/target/ruoyi-auth.jar ./ruoyi/auth
 copy_jar ../ruoyi-modules/ruoyi-system/target/ruoyi-modules-system.jar ./ruoyi/modules/system
+copy_jar ../ruoyi-modules/ruoyi-session/target/ruoyi-modules-session.jar ./ruoyi/modules/session
 copy_jar ../ruoyi-modules/ruoyi-job/target/ruoyi-modules-job.jar ./ruoyi/modules/job
 for profile in "$@"; do
   case "$profile" in
