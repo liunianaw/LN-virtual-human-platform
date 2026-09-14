@@ -5,6 +5,7 @@ import org.apache.ibatis.annotations.Param;
 import com.ruoyi.system.asset.domain.AssetFile;
 import com.ruoyi.system.asset.domain.GenerationServiceConfig;
 import com.ruoyi.system.asset.domain.GenerationTask;
+import com.ruoyi.system.asset.dto.AvatarGenerationServiceResponse;
 
 /** M2 资产基础账本 Mapper。所有账户范围由调用方显式传入。 */
 public interface AssetMapper
@@ -20,6 +21,8 @@ public interface AssetMapper
     List<GenerationTask> selectRecentTasksByAccount(@Param("accountId") Long accountId);
 
     GenerationServiceConfig selectActiveAvatarGenerationService(@Param("serviceId") Long serviceId);
+
+    List<AvatarGenerationServiceResponse> selectActiveAvatarGenerationServices();
 
     int reserveAvatarQuota(@Param("accountId") Long accountId);
 

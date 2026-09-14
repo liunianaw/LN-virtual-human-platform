@@ -22,6 +22,7 @@ import com.ruoyi.system.asset.domain.AssetFile;
 import com.ruoyi.system.asset.domain.GenerationServiceConfig;
 import com.ruoyi.system.asset.domain.GenerationTask;
 import com.ruoyi.system.asset.dto.AssetFileResponse;
+import com.ruoyi.system.asset.dto.AvatarGenerationServiceResponse;
 import com.ruoyi.system.asset.dto.CreateGenerationTaskRequest;
 import com.ruoyi.system.asset.dto.GenerationTaskResponse;
 import com.ruoyi.system.asset.mapper.AssetMapper;
@@ -132,6 +133,13 @@ public class AssetService
     {
         requireAccount(accountId);
         return assetMapper.selectRecentTasksByAccount(accountId).stream().map(this::taskResponse).toList();
+    }
+
+    /** 返回当前账号可选的启用官方制作服务；Mapper 仅查询可公开展示的字段。 */
+    public List<AvatarGenerationServiceResponse> listAvatarGenerationServices(Long accountId)
+    {
+        requireAccount(accountId);
+        return assetMapper.selectActiveAvatarGenerationServices();
     }
 
     private GenerationTaskResponse createGenerationTaskInTransaction(Long accountId, CreateGenerationTaskRequest request)

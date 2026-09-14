@@ -81,6 +81,14 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         where id = #{serviceId} and capability = 'AVATAR_GENERATION' and status = 'ACTIVE'
     </select>
 
+    <select id="selectActiveAvatarGenerationServices"
+        resultType="com.ruoyi.system.asset.dto.AvatarGenerationServiceResponse">
+        select id as serviceId, name, provider_code as providerCode, model_id as modelId, revision
+        from p_official_service
+        where capability = 'AVATAR_GENERATION' and status = 'ACTIVE'
+        order by name, id
+    </select>
+
     <update id="reserveAvatarQuota">
         update p_quota_balance
         set reserved_units = reserved_units + 1, revision = revision + 1, updated_at = utc_timestamp(3)

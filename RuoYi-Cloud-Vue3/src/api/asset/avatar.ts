@@ -17,6 +17,14 @@ export interface CreateAvatarGenerationTaskRequest {
   name: string
 }
 
+export interface AvatarGenerationService {
+  serviceId: number
+  name: string
+  providerCode: string
+  modelId: string
+  revision: number
+}
+
 export interface AvatarGenerationTask {
   taskId: number
   avatarId: number
@@ -78,6 +86,13 @@ export function createAvatarGenerationTask(data: CreateAvatarGenerationTaskReque
 export function listAvatarGenerationTasks(): Promise<AjaxResult<AvatarGenerationTask[]>> {
   return request({
     url: '/system/asset/generation-tasks',
+    method: 'get'
+  })
+}
+
+export function listAvatarGenerationServices(): Promise<AjaxResult<AvatarGenerationService[]>> {
+  return request({
+    url: '/system/asset/generation-services',
     method: 'get'
   })
 }

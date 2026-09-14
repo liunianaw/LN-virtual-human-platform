@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <el-alert
-      title="任务列表仅显示当前账号最近 100 条记录；官方服务选择接口尚未提供。"
+      title="任务列表仅显示当前账号最近 100 条记录。"
       type="info"
       :closable="false"
       show-icon
@@ -48,12 +48,27 @@
             <el-form-item label="角色名称" required>
               <el-input v-model="taskForm.name" maxlength="100" placeholder="例如：赤霜" />
             </el-form-item>
-            <el-form-item label="官方服务 ID" required>
-              <el-input-number v-model="taskForm.officialServiceId" :min="1" :controls="false" class="full-width" />
-              <div class="form-tip">待后端提供可选官方服务列表；请填写管理员配置的有效 ID。</div>
+            <el-form-item label="官方服务" required>
+              <el-select v-model="taskForm.officialServiceId" :loading="generationServicesLoading" :disabled="!generationServices.length" class="full-width" placeholder="请选择已启用的官方服务">
+                <el-option
+                  v-for="service in generationServices"
+                  :key="service.serviceId"
+                  :label="service.name + '（' + service.modelId + '）'"
+                  :value="service.serviceId"
+                />
+              </el-select>
+              <div class="form-tip">仅显示当前可用的官方 Avatar 制作服务。</div>
+              <el-alert
+                v-if="!generationServicesLoading && !generationServices.length"
+                title="当前没有可用的官方 Avatar 制作服务，请联系管理员启用已验证的 qwen-image-3.0-pro 图像生成模型后再试。"
+                type="warning"
+                :closable="false"
+                show-icon
+                class="mt8"
+              />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" :loading="creating" :disabled="!reference" @click="createTask">开始制作</el-button>
+              <el-button type="primary" :loading="creating" :disabled="!reference || !taskForm.officialServiceId" @click="createTask">开始制作</el-button>
             </el-form-item>
           </el-form>
         </el-card>
@@ -166,10 +181,12 @@ import {
   createAvatarGenerationTask,
   getAvatarGenerationTask,
   getAvatarVersionPreview,
+  listAvatarGenerationServices,
   listAvatarGenerationTasks,
   publishAvatarVersion,
   uploadAvatarReference,
   type AvatarGenerationTask,
+  type AvatarGenerationService,
   type AvatarReferenceFile,
   type AvatarVersionPreview
 } from '@/api/asset/avatar'
@@ -181,10 +198,12 @@ const rightsConfirmed = ref(false)
 const rightsNoticeVersion = ref('avatar-reference-v1')
 const uploading = ref(false)
 const creating = ref(false)
+const generationServicesLoading = ref(false)
 const querying = ref(false)
 const publishing = ref(false)
 const taskIdToQuery = ref<number>()
 const tasks = ref<AvatarGenerationTask[]>([])
+const generationServices = ref<AvatarGenerationService[]>([])
 const previewOpen = ref(false)
 const previewLoading = ref(false)
 const preview = ref<AvatarVersionPreview>()
@@ -224,7 +243,7 @@ function submitReference() {
 
 function createTask() {
   if (!reference.value?.fileId || !taskForm.name.trim() || !taskForm.officialServiceId) {
-    proxy?.$modal.msgWarning('请先上传参考图，并填写角色名称和官方服务 ID。')
+    proxy?.$modal.msgWarning('请先上传参考图、填写角色名称并选择官方服务。')
     return
   }
   creating.value = true
@@ -273,6 +292,18 @@ function loadTasks() {
   })
 }
 
+function loadGenerationServices() {
+  generationServicesLoading.value = true
+  listAvatarGenerationServices().then(response => {
+    generationServices.value = response.data || []
+    if (!generationServices.value.some((service: AvatarGenerationService) => service.serviceId === taskForm.officialServiceId)) {
+      taskForm.officialServiceId = undefined
+    }
+  }).finally(() => {
+    generationServicesLoading.value = false
+  })
+}
+
 function upsertTask(task: AvatarGenerationTask) {
   const index = tasks.value.findIndex((item: AvatarGenerationTask) => item.taskId === task.taskId)
   if (index === -1) tasks.value.unshift(task)
@@ -315,12 +346,16 @@ function statusType(status: string): 'success' | 'warning' | 'danger' | 'info' {
   return 'info'
 }
 
-onMounted(loadTasks)
+onMounted(() => {
+  loadTasks()
+  loadGenerationServices()
+})
 </script>
 
 <style scoped>
 .full-width { width: 100%; }
 .form-tip, .table-tip { color: var(--el-text-color-secondary); font-size: 12px; line-height: 20px; }
+.mt8 { margin-top: 8px; }
 .task-query { margin-bottom: 8px; }
 .state-detail { margin-left: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
 .preview-image { width: 100%; min-height: 260px; border: 1px solid var(--el-border-color-lighter); }

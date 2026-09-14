@@ -66,6 +66,13 @@ public class AssetController
     }
 
     @RequiresPermissions("system:asset:list")
+    @GetMapping("/generation-services")
+    public AjaxResult listAvatarGenerationServices()
+    {
+        return AjaxResult.success(assetService.listAvatarGenerationServices(SecurityUtils.getUserId()));
+    }
+
+    @RequiresPermissions("system:asset:list")
     @GetMapping("/generation-tasks/{taskId}")
     public AjaxResult readGenerationTask(@PathVariable Long taskId)
     {
