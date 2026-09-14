@@ -31,6 +31,13 @@ public class VoiceController
     @GetMapping("/{voiceId}")
     public VoiceService.VoiceResponse read(@PathVariable long voiceId) { return voices.read(requireAccount(), voiceId); }
 
+    @PostMapping("/admin/official")
+    public VoiceService.VoiceResponse createOfficial(@RequestBody VoiceService.OfficialVoiceRequest request)
+    {
+        if (!SecurityUtils.isAdmin()) throw new com.ruoyi.common.core.exception.ServiceException("仅管理员可配置官方 Voice", 403);
+        return voices.createOfficial(requireAccount(), request);
+    }
+
     private static long requireAccount()
     {
         Long userId = SecurityUtils.getUserId();

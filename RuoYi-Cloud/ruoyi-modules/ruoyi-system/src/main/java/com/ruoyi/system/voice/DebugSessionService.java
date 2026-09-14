@@ -51,7 +51,7 @@ public class DebugSessionService
 
     private Binding binding(long accountId, long applicationId)
     {
-        Binding binding = jdbc.query("select c.id,c.voice_version_id,v.service_type,v.voice_code,v.relay_version_id,c.avatar_version_id from p_application a join p_app_config c on c.id = a.current_config_id join p_voice_version v on v.id = c.voice_version_id join p_voice voice on voice.id = v.voice_id where a.id = ? and a.account_id = ? and a.status = 'ACTIVE' and c.mode = 'SPEAK_ONLY' and voice.status = 'PUBLISHED' and (voice.account_id = a.account_id or voice.visibility = 'OFFICIAL')",
+        Binding binding = jdbc.query("select c.id,c.voice_version_id,v.service_type,v.voice_code,v.relay_version_id,c.avatar_version_id from p_application a join p_app_config c on c.id = a.current_config_id join p_voice_version v on v.id = c.voice_version_id join p_voice voice on voice.id = v.voice_id left join p_official_service official on official.id = v.official_service_id where a.id = ? and a.account_id = ? and a.status = 'ACTIVE' and c.mode = 'SPEAK_ONLY' and voice.status = 'PUBLISHED' and (voice.account_id = a.account_id or voice.visibility = 'OFFICIAL') and (v.service_type = 'RELAY' or (official.capability = 'TTS' and official.status = 'ACTIVE'))",
                 rs -> rs.next() ? new Binding(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getObject(5) == null ? null : rs.getString(5), rs.getLong(6)) : null,
                 applicationId, accountId);
         if (binding == null) throw new ServiceException("应用没有可用的 SPEAK_ONLY 已发布 Voice 配置", HttpStatus.CONFLICT.value());

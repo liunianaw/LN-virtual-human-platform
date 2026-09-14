@@ -19,6 +19,10 @@ import com.ruoyi.common.security.utils.SecurityUtils;
 public class VoiceService
 {
     private static final Set<String> PARAMETER_KEYS = Set.of("speed", "rate", "pitch", "volume");
+    /** The one M2 official TTS binding approved for local acceptance. Credentials remain process-only. */
+    private static final String DASH_SCOPE_BEIJING = "DASHSCOPE_BEIJING";
+    private static final String APPROVED_MODEL = "qwen3-tts-flash-realtime";
+    private static final String APPROVED_VOICE = "Cherry";
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
 
@@ -73,6 +77,39 @@ public class VoiceService
         return response;
     }
 
+    /**
+     * Creates and publishes an official Voice against a pre-registered official TTS service.
+     * This endpoint deliberately has no endpoint, header, key or arbitrary provider/model field:
+     * deployment registers the service and its secret separately, while a console administrator
+     * may only select the approved Beijing DashScope model and Cherry voice for this M2 path.
+     */
+    @Transactional
+    public VoiceResponse createOfficial(long administratorId, OfficialVoiceRequest request)
+    {
+        if (request == null || blank(request.name()) || request.name().trim().length() > 100
+                || request.officialServiceId() == null || request.officialServiceId() <= 0)
+        {
+            throw new ServiceException("官方 Voice 参数无效", HttpStatus.BAD_REQUEST.value());
+        }
+        OfficialService service = jdbc.query("select id,provider_code,model_id from p_official_service where id = ? and capability = 'TTS' and status = 'ACTIVE'",
+                rs -> rs.next() ? new OfficialService(rs.getLong(1), rs.getString(2), rs.getString(3)) : null,
+                request.officialServiceId());
+        if (service == null || !DASH_SCOPE_BEIJING.equals(service.providerCode()) || !APPROVED_MODEL.equals(service.modelId()))
+        {
+            throw new ServiceException("官方 TTS 服务未按北京 DashScope 固定模型启用", HttpStatus.CONFLICT.value());
+        }
+
+        long voiceId = nextId();
+        long versionId = nextId();
+        Instant now = Instant.now();
+        jdbc.update("insert into p_voice (id,created_at,updated_at,account_id,visibility,name,description,status,current_version_id,revision) values (?,?,?,?, 'OFFICIAL',?,?, 'PUBLISHED',?,1)",
+                voiceId, now, now, administratorId, request.name().trim(), blankToNull(request.description()), versionId);
+        jdbc.update("insert into p_voice_version (id,created_at,updated_at,account_id,voice_id,version_no,service_type,official_service_id,voice_code,language_code,model_id,parameters,official_config_snapshot,created_by) values (?,?,?,?,?,?, 'OFFICIAL',?,?,?,?,?,?,?)",
+                versionId, now, now, administratorId, voiceId, 1, service.id(), APPROVED_VOICE, "zh-CN", APPROVED_MODEL,
+                parameters(Map.of()), officialSnapshot(), administratorId);
+        return new VoiceResponse(voiceId, versionId, "PUBLISHED", "OFFICIAL", APPROVED_VOICE, 1);
+    }
+
     private void validate(VoiceRequest request, long accountId)
     {
         if (request == null || blank(request.name()) || request.name().trim().length() > 100 || blank(request.serviceType())
@@ -90,6 +127,12 @@ public class VoiceService
         catch (JsonProcessingException e) { throw new ServiceException("Voice 参数无法序列化", HttpStatus.BAD_REQUEST.value()); }
     }
 
+    private String officialSnapshot()
+    {
+        try { return objectMapper.writeValueAsString(Map.of("providerCode", DASH_SCOPE_BEIJING, "region", "beijing")); }
+        catch (JsonProcessingException e) { throw new IllegalStateException("官方 Voice 快照无法序列化", e); }
+    }
+
     private long nextId()
     {
         Long value = jdbc.queryForObject("select uuid_short()", Long.class);
@@ -100,7 +143,10 @@ public class VoiceService
     private static String blankToNull(String value) { return blank(value) ? null : value.trim(); }
     private static ServiceException forbidden(String message) { return new ServiceException(message, HttpStatus.FORBIDDEN.value()); }
 
+    private record OfficialService(long id, String providerCode, String modelId) { }
+
     public record VoiceRequest(String name, String description, String serviceType, Long relayVersionId, String voiceAlias,
             String language, String modelAlias, Map<String, Object> parameters) { }
+    public record OfficialVoiceRequest(String name, String description, Long officialServiceId) { }
     public record VoiceResponse(long voiceId, long versionId, String status, String serviceType, String voiceAlias, int versionNo) { }
 }
