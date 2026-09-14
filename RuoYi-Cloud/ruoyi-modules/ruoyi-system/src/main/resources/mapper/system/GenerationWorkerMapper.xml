@@ -12,7 +12,7 @@
     <sql id="claimColumns">
         s.id as step_id, t.id as task_id, t.account_id, t.avatar_version_id, t.source_file_id, f.object_key as source_object_key,
         s.action_code, s.attempt_no, s.lease_epoch, json_unquote(json_extract(t.service_snapshot, '$.modelId')) as model_id,
-        json_extract(t.service_snapshot, '$.parameters') as parameters
+        json_unquote(json_extract(t.service_snapshot, '$.parameters')) as parameters
     </sql>
     <select id="selectReadyActionForUpdate" resultMap="ClaimResult">
         select <include refid="claimColumns"/> from p_generation_step s

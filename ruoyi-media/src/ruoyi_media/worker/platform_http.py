@@ -196,12 +196,15 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=lease_seconds),
             reference_png=b"",
             layout_guide_png=None,
-            prompt=_action_prompt(action),
-            model=_safe_token(_required_string(data.get("model"), "model"), "model"),
-            parameters=_parameters(data.get("parametersJson")),
-            output_prefix=_output_prefix(_required_string(data.get("outputPrefix"), "outputPrefix")),
+            prompt="",
+            model="",
+            parameters={},
+            output_prefix="",
         )
         try:
+            model = _safe_token(_required_string(data.get("model"), "model"), "model")
+            parameters = _parameters(data.get("parametersJson"))
+            output_prefix = _output_prefix(_required_string(data.get("outputPrefix"), "outputPrefix"))
             reference_png = self._read_reference(_required_string(data.get("referenceUrl"), "referenceUrl"))
         except PlatformTransportError as error:
             # The platform lease is already RUNNING at this point, but no
@@ -220,10 +223,10 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             lease_expires_at=claim.lease_expires_at,
             reference_png=reference_png,
             layout_guide_png=claim.layout_guide_png,
-            prompt=claim.prompt,
-            model=claim.model,
-            parameters=claim.parameters,
-            output_prefix=claim.output_prefix,
+            prompt=_action_prompt(action),
+            model=model,
+            parameters=parameters,
+            output_prefix=output_prefix,
         )
 
     def prepare_attempt(self, claim: ClaimedActionStep, request_hash: str) -> PreparedAttempt:
@@ -403,7 +406,12 @@ def _safe_token(value: str, field: str) -> str:
 
 
 def _parameters(value: object) -> dict[str, object]:
-    if isinstance(value, str):
+    # The System side normally returns an object or a JSON object string.
+    # Existing task snapshots can contain a JSON string that was itself stored
+    # inside JSON, so unwrap at most one additional safe serialization layer.
+    for _ in range(2):
+        if not isinstance(value, str):
+            break
         try:
             value = json.loads(value)
         except json.JSONDecodeError as error:
@@ -460,6 +468,10 @@ class PreflightClaimFailure(RuntimeError):
 
 def _preflight_error_code(error: PlatformTransportError) -> str:
     message = str(error)
+    if message == "platform parameters are invalid":
+        return "PARAMETERS_INVALID"
+    if message in {"platform model is invalid", "platform output prefix is invalid"}:
+        return "CLAIM_CONFIGURATION_INVALID"
     if message == "platform reference URL is not a Tencent COS HTTPS URL":
         return "REFERENCE_URL_REJECTED"
     if message == "reference image is too large":
