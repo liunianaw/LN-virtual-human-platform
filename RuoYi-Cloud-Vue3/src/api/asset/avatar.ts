@@ -2,7 +2,7 @@ import request from '@/utils/request'
 import type { AjaxResult } from '@/types'
 
 export interface AvatarReferenceFile {
-  fileId: number
+  fileId: string
   contentType?: string
   sizeBytes?: number
   width?: number
@@ -11,14 +11,14 @@ export interface AvatarReferenceFile {
 }
 
 export interface CreateAvatarGenerationTaskRequest {
-  sourceFileId: number
-  officialServiceId: number
+  sourceFileId: string
+  officialServiceId: string
   requestId: string
   name: string
 }
 
 export interface AvatarGenerationService {
-  serviceId: number
+  serviceId: string
   name: string
   providerCode: string
   modelId: string
@@ -26,10 +26,10 @@ export interface AvatarGenerationService {
 }
 
 export interface AvatarGenerationTask {
-  taskId: number
-  avatarId: number
-  avatarVersionId: number
-  sourceFileId: number
+  taskId: string
+  avatarId: string
+  avatarVersionId: string
+  sourceFileId: string
   requestId: string
   status: string
   internalState?: string
@@ -48,8 +48,8 @@ export interface AvatarActionPreview {
 }
 
 export interface AvatarVersionPreview {
-  avatarId: number
-  versionId: number
+  avatarId: string
+  versionId: string
   status: string
   frameWidth?: number
   frameHeight?: number
@@ -97,14 +97,14 @@ export function listAvatarGenerationServices(): Promise<AjaxResult<AvatarGenerat
   })
 }
 
-export function getAvatarGenerationTask(taskId: number): Promise<AjaxResult<AvatarGenerationTask>> {
+export function getAvatarGenerationTask(taskId: string): Promise<AjaxResult<AvatarGenerationTask>> {
   return request({
     url: '/system/asset/generation-tasks/' + taskId,
     method: 'get'
   })
 }
 
-export function getAvatarVersionPreview(avatarId: number, versionId: number): Promise<AjaxResult<AvatarVersionPreview>> {
+export function getAvatarVersionPreview(avatarId: string, versionId: string): Promise<AjaxResult<AvatarVersionPreview>> {
   return request({
     url: '/system/asset/avatars/' + avatarId + '/versions/' + versionId + '/preview',
     method: 'get'
@@ -112,8 +112,8 @@ export function getAvatarVersionPreview(avatarId: number, versionId: number): Pr
 }
 
 export function publishAvatarVersion(
-  avatarId: number,
-  versionId: number,
+  avatarId: string,
+  versionId: string,
   data: PublishAvatarVersionRequest
 ): Promise<AjaxResult<AvatarVersionPreview>> {
   return request({

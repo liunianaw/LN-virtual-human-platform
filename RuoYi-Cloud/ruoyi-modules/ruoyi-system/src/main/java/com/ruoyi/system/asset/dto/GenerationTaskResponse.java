@@ -1,13 +1,19 @@
 package com.ruoyi.system.asset.dto;
 
 import java.time.LocalDateTime;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 
 /** 用户可查询的一次制作任务状态。 */
 public class GenerationTaskResponse
 {
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long taskId;
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long avatarId;
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long avatarVersionId;
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long sourceFileId;
     private String requestId;
     private String status;

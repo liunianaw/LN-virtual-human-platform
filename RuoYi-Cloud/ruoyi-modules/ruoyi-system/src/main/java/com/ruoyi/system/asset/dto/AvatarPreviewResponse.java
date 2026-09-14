@@ -2,11 +2,15 @@ package com.ruoyi.system.asset.dto;
 
 import java.math.BigDecimal;
 import java.util.List;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 
 /** 已授权所有者的候选或已发布版本预览。 */
 public class AvatarPreviewResponse
 {
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long avatarId;
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long versionId;
     private String status;
     private Integer frameWidth;

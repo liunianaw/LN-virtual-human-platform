@@ -1,8 +1,12 @@
 package com.ruoyi.system.asset.dto;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+
 /** Avatar 制作页可安全展示的官方生成服务标识，不包含连接地址或任何秘密。 */
 public class AvatarGenerationServiceResponse
 {
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long serviceId;
     private String name;
     private String providerCode;

@@ -1,8 +1,12 @@
 package com.ruoyi.system.asset.dto;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+
 /** 私有参考图读取响应；签名 URL 不进入 p_file。 */
 public class AssetFileResponse
 {
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long fileId;
     private String contentType;
     private Long sizeBytes;

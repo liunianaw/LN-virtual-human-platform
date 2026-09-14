@@ -78,7 +78,7 @@
         <el-card header="制作任务与候选验收" shadow="never">
           <el-form :inline="true" class="task-query">
             <el-form-item label="任务 ID">
-              <el-input-number v-model="taskIdToQuery" :min="1" :controls="false" />
+              <el-input v-model.trim="taskIdToQuery" inputmode="numeric" maxlength="19" placeholder="请输入任务 ID" />
             </el-form-item>
             <el-form-item>
               <el-button icon="Search" @click="queryTask">查询任务</el-button>
@@ -201,7 +201,7 @@ const creating = ref(false)
 const generationServicesLoading = ref(false)
 const querying = ref(false)
 const publishing = ref(false)
-const taskIdToQuery = ref<number>()
+const taskIdToQuery = ref('')
 const tasks = ref<AvatarGenerationTask[]>([])
 const generationServices = ref<AvatarGenerationService[]>([])
 const previewOpen = ref(false)
@@ -211,7 +211,7 @@ const reviewAccepted = ref(false)
 const reviewNote = ref('')
 const taskForm = reactive({
   name: '',
-  officialServiceId: undefined as number | undefined
+  officialServiceId: undefined as string | undefined
 })
 
 function handleReferenceChange(file: { raw?: File }) {
@@ -262,8 +262,8 @@ function createTask() {
 }
 
 function queryTask() {
-  if (!taskIdToQuery.value) {
-    proxy?.$modal.msgWarning('请输入任务 ID。')
+  if (!/^[1-9]\d*$/.test(taskIdToQuery.value)) {
+    proxy?.$modal.msgWarning('请输入有效的任务 ID。')
     return
   }
   refreshTaskById(taskIdToQuery.value)
@@ -273,7 +273,7 @@ function refreshTask(task: AvatarGenerationTask) {
   refreshTaskById(task.taskId)
 }
 
-function refreshTaskById(taskId: number) {
+function refreshTaskById(taskId: string) {
   querying.value = true
   getAvatarGenerationTask(taskId).then(response => {
     if (!response.data?.taskId) throw new Error('任务查询接口未返回任务数据')
