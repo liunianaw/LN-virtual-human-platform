@@ -109,8 +109,8 @@ public class PersistentRuntimeStore
 
     public void verifyConsoleGrant(TrustedConsoleDebugGrantClaims claims)
     {
-        Integer matches = jdbcTemplate.queryForObject("select count(1) from s_session_grant g join s_session s on s.id = g.session_id join s_principal p on p.id = g.principal_id where g.token_id = ? and g.grant_source = 'CONSOLE_DEBUG' and g.status = 'ACTIVE' and g.expires_at > utc_timestamp(3) and g.account_id = ? and g.application_id = ? and g.session_id = ? and g.account_epoch = ? and g.application_epoch = ? and g.principal_epoch = ? and g.session_epoch = ? and s.status = 'ACTIVE' and s.auth_epoch = ? and p.status = 'ACTIVE' and p.auth_epoch = ?",
-                Integer.class, claims.tokenId(), claims.accountId(), claims.applicationId(), claims.sessionId(), claims.accountEpoch(),
+        Integer matches = jdbcTemplate.queryForObject("select count(1) from s_session_grant g join s_session s on s.id = g.session_id join s_principal p on p.id = g.principal_id where g.token_id = ? and g.grant_source = 'CONSOLE_DEBUG' and g.status = 'ACTIVE' and g.expires_at > utc_timestamp(3) and g.issuer_console_ref = unhex(?) and g.account_id = ? and g.application_id = ? and g.session_id = ? and g.account_epoch = ? and g.application_epoch = ? and g.principal_epoch = ? and g.session_epoch = ? and s.status = 'ACTIVE' and s.auth_epoch = ? and p.status = 'ACTIVE' and p.auth_epoch = ?",
+                Integer.class, claims.tokenId(), claims.issuerConsoleRef(), claims.accountId(), claims.applicationId(), claims.sessionId(), claims.accountEpoch(),
                 claims.applicationEpoch(), claims.principalEpoch(), claims.sessionEpoch(), claims.sessionEpoch(), claims.principalEpoch());
         if (matches == null || matches != 1)
         {
