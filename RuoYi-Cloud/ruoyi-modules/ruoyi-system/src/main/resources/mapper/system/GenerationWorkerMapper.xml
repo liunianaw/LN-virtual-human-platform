@@ -47,9 +47,11 @@
             error_code = #{errorCode}, submitted_at = case when #{status} = 'SUBMITTED' then coalesce(submitted_at, utc_timestamp(3)) else submitted_at end,
             completed_at = case when #{status} in ('UNKNOWN','FAILED') then utc_timestamp(3) else completed_at end, updated_at = utc_timestamp(3)
         where id = #{attemptId} and step_id = #{stepId} and attempt_no = #{attemptNo} and lease_epoch = #{leaseEpoch}
+          and (status in ('PREPARED', 'SUBMITTED') or status = #{status})
     </update>
     <update id="updateStepProgress">
-        update p_generation_step set status = #{status}, error_code = #{errorCode}, heartbeat_at = utc_timestamp(3), updated_at = utc_timestamp(3)
+        update p_generation_step set status = #{status}, error_code = #{errorCode}, heartbeat_at = utc_timestamp(3),
+            lease_expires_at = date_add(utc_timestamp(3), interval 5 minute), updated_at = utc_timestamp(3)
         where account_id = #{accountId} and task_id = #{taskId} and id = #{stepId} and lease_owner = #{workerId}
           and lease_epoch = #{leaseEpoch} and lease_expires_at > utc_timestamp(3)
     </update>
@@ -98,4 +100,9 @@
     <select id="selectPendingOutboxForUpdate" resultMap="OutboxResult">select id, account_id, event_id, event_type, trace_id, payload from p_outbox where (status = 'PENDING' and (next_run_at is null or next_run_at &lt;= utc_timestamp(3))) or (status = 'SENDING' and lease_expires_at &lt;= utc_timestamp(3)) order by id limit 1 for update skip locked</select>
     <update id="claimOutbox">update p_outbox set status = 'SENDING', lease_owner = #{workerId}, lease_expires_at = date_add(utc_timestamp(3), interval 5 minute), attempt_count = attempt_count + 1, updated_at = utc_timestamp(3) where id = #{id} and (status = 'PENDING' or (status = 'SENDING' and lease_expires_at &lt;= utc_timestamp(3)))</update>
     <update id="markOutboxSent">update p_outbox set status = 'SENT', published_at = utc_timestamp(3), lease_expires_at = null, updated_at = utc_timestamp(3) where id = #{id} and status = 'SENDING' and lease_owner = #{workerId} and lease_expires_at > utc_timestamp(3)</update>
+    <update id="renewTaskOutbox">
+        update p_outbox set lease_expires_at = date_add(utc_timestamp(3), interval 5 minute), updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and aggregate_id = #{taskId} and event_type = 'AVATAR_GENERATION_REQUESTED'
+          and status = 'SENDING' and lease_owner = #{workerId} and lease_expires_at > utc_timestamp(3)
+    </update>
 </mapper>

@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -25,6 +28,8 @@ from ruoyi_media.providers.qwen_image import (
     QwenImageProvider,
     safe_provider_details,
 )
+
+_LEASE_RENEWAL_SECONDS = 30
 
 
 class StepStatus(StrEnum):
@@ -205,6 +210,37 @@ class GenerationWorker:
         except StaleLeaseError:
             return WorkerOutcome.IGNORED_STALE
         try:
+            with self._keep_lease(claim, attempt):
+                return self._generate_claim(event, claim, attempt)
+        except StaleLeaseError:
+            return WorkerOutcome.IGNORED_STALE
+
+    @contextmanager
+    def _keep_lease(self, claim: ClaimedActionStep, attempt: PreparedAttempt):
+        # Dispatch is recorded before HTTP; renew during provider/COS work so
+        # a slow request or timeout can still report its terminal state.
+        self._platform.progress(claim, attempt, StepStatus.RUNNING, None)
+        stopped = threading.Event()
+        def renew():
+            while not stopped.wait(_LEASE_RENEWAL_SECONDS):
+                try:
+                    self._platform.progress(claim, attempt, StepStatus.RUNNING, None)
+                    print(json.dumps({"event": "generation_waiting", "taskId": claim.task_id, "action": claim.action}), flush=True)
+                except Exception as error:
+                    print(json.dumps({"event": "lease_renewal_failed", "taskId": claim.task_id, "errorType": type(error).__name__}), flush=True)
+                    return
+        thread = threading.Thread(target=renew, daemon=True)
+        thread.start()
+        try:
+            yield
+        finally:
+            stopped.set()
+            thread.join(timeout=35)
+
+    def _generate_claim(self, event, claim, attempt):
+        print(json.dumps({"event": "generation_dispatch", "taskId": claim.task_id, "stepId": claim.step_id,
+                          "attemptId": attempt.attempt_id, "action": claim.action, "model": claim.model}), flush=True)
+        try:
             generated = self._provider.generate(
                 ImageGenerationRequest(
                     model=claim.model,
@@ -217,6 +253,7 @@ class GenerationWorker:
         except ProviderRejected as error:
             return self._report_failure(event, claim, attempt, "PROVIDER_REJECTED", {"errorCode": error.code}, retryable=False)
         except ProviderUncertain as error:
+            print(json.dumps({"event": "generation_provider_unknown", "taskId": claim.task_id, **error.details}), flush=True)
             return self._report_unknown(event, claim, attempt, error.details)
 
         try:
@@ -227,6 +264,15 @@ class GenerationWorker:
         except Exception as error:
             # A confirmed provider request with an incomplete local artifact is
             # unknown, never automatically resubmitted as another paid call.
+            diagnostic = {"event": "generation_postprocessing_failed", "taskId": claim.task_id,
+                          "requestId": generated.request_id, "errorType": type(error).__name__}
+            if str(error) in {
+                "action board perimeter must use a saturated chroma background",
+                "action board must be exactly 1536 x 1536; it is never resized",
+                "COS output object write failed",
+            }:
+                diagnostic["reason"] = str(error)
+            print(json.dumps(diagnostic), flush=True)
             return self._report_unknown(event, claim, attempt, {"reason": type(error).__name__, "providerRequestId": generated.request_id})
 
         result = GenerationStepResult(
@@ -251,20 +297,25 @@ class GenerationWorker:
         return WorkerOutcome.REPORTED_SUCCEEDED
 
     def _process_and_upload(self, claim: ClaimedActionStep, image_png: bytes) -> tuple[list[StoredObject], dict[str, object]]:
-        with tempfile.TemporaryDirectory(prefix="ruoyi-media-") as directory:
-            temporary = Path(directory)
-            board_path = temporary / "action-board.png"
-            board_path.write_bytes(image_png)
-            package_directory = temporary / "package"
-            manifest = process_action_board(board_path, package_directory, claim.action)
-            objects: list[StoredObject] = []
-            for name in (*(f"frame-{index:02d}.png" for index in range(6)), "atlas.png", "manifest.json"):
-                object_key = _output_key(claim.output_prefix, name)
-                expected_content_type = "application/json" if name == "manifest.json" else "image/png"
-                stored = self._objects.upload(object_key, package_directory / name, expected_content_type)
-                _validate_stored_object(stored, object_key, package_directory / name, expected_content_type)
-                objects.append(stored)
-            return objects, manifest
+        # Keep the paid result for local repair if processing or upload fails.
+        # This directory contains private artifacts, never provider credentials.
+        artifact_root = Path(os.environ.get("RUOYI_MEDIA_ARTIFACT_DIR", str(Path(tempfile.gettempdir()) / "ruoyi-media-generation")))
+        directory = artifact_root / f"{claim.task_id}-{claim.step_id}-{claim.lease_epoch}"
+        directory.mkdir(parents=True, exist_ok=True)
+        board_path = directory / "action-board.png"
+        board_path.write_bytes(image_png)
+        print(json.dumps({"event": "processing_start", "taskId": claim.task_id, "sourcePath": str(board_path)}), flush=True)
+        package_directory = directory / "package"
+        manifest = process_action_board(board_path, package_directory, claim.action)
+        print(json.dumps({"event": "processing_completed", "taskId": claim.task_id, "action": claim.action}), flush=True)
+        objects: list[StoredObject] = []
+        for name in (*(f"frame-{index:02d}.png" for index in range(6)), "atlas.png", "manifest.json"):
+            object_key = _output_key(claim.output_prefix, name)
+            expected_content_type = "application/json" if name == "manifest.json" else "image/png"
+            stored = self._objects.upload(object_key, package_directory / name, expected_content_type)
+            _validate_stored_object(stored, object_key, package_directory / name, expected_content_type)
+            objects.append(stored)
+        return objects, manifest
 
     def _report_failure(
         self,

@@ -52,4 +52,5 @@ public interface GenerationWorkerMapper
     OutboxEvent selectPendingOutboxForUpdate();
     int claimOutbox(@Param("id") Long id, @Param("workerId") String workerId);
     int markOutboxSent(@Param("id") Long id, @Param("workerId") String workerId);
+    int renewTaskOutbox(@Param("accountId") Long accountId, @Param("taskId") Long taskId, @Param("workerId") String workerId);
 }

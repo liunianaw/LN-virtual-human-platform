@@ -113,6 +113,7 @@ public class GenerationWorkerService
                 safeToken(providerRequestId, 128), safeToken(errorCode, 64)) != 1
                 || workerMapper.updateStepProgress(accountId, taskId, stepId, workerId, leaseEpoch, state, safeToken(errorCode, 64)) != 1)
                 throw staleLease();
+            workerMapper.renewTaskOutbox(accountId, taskId, workerId);
         });
     }
 

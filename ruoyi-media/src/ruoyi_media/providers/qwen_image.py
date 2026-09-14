@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -144,11 +145,15 @@ class QwenImageProvider:
             raise ProviderUncertain(diagnostics) from None
 
     def _post_generation(self, payload: dict[str, object], diagnostics: dict[str, object]) -> dict[str, object]:
+        encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         request = urllib.request.Request(
             self._settings.endpoint + "/api/v1/services/aigc/multimodal-generation/generation",
-            data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+            data=encoded,
             headers={"Content-Type": "application/json", "Authorization": "Bearer " + self._settings.api_key},
         )
+        started = time.monotonic()
+        print(json.dumps({"event": "provider_http_start", "model": payload["model"],
+                          "host": urlsplit(self._settings.endpoint).hostname, "requestBytes": len(encoded)}), flush=True)
         try:
             with self._http.open(request, timeout=300) as response:
                 diagnostics["httpStatus"] = response.status
@@ -161,6 +166,9 @@ class QwenImageProvider:
         parsed = json.loads(body)
         if not isinstance(parsed, dict):
             raise ValueError("response_not_object")
+        print(json.dumps({"event": "provider_http_response", "seconds": round(time.monotonic() - started, 2),
+                          **safe_provider_details({"httpStatus": diagnostics.get("httpStatus"),
+                                                   "requestId": parsed.get("request_id"), "errorCode": parsed.get("code")})}), flush=True)
         return parsed
 
     def _download_image(self, image_url: str, diagnostics: dict[str, object]) -> bytes:
