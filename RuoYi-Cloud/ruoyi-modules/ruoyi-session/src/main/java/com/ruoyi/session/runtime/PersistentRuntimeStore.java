@@ -73,6 +73,13 @@ public class PersistentRuntimeStore
                 audio.bucket(), audio.objectKey(), bytes, audio.expiresAt());
     }
 
+    public void markAudioFailed(long turnId, int ordinal, String failureCode)
+    {
+        Instant now = Instant.now();
+        jdbcTemplate.update("update s_operation set status = 'FAILED', result_summary = json_object('failureCode', ?), updated_at = ?, finished_at = ? where turn_id = ? and ordinal = ? and operation_type = 'TTS' and status in ('QUEUED','RUNNING')",
+                failureCode, now, now, turnId, ordinal);
+    }
+
     public void playback(long turnId, int ordinal, PlaybackState state)
     {
         String playback = state.name();
@@ -93,6 +100,13 @@ public class PersistentRuntimeStore
     {
         Instant now = Instant.now();
         jdbcTemplate.update("update s_turn set status = 'COMPLETED', audio_status = 'COMPLETED', playback_status = 'COMPLETED', ended_at = ?, updated_at = ? where id = ? and status = 'RUNNING'", now, now, turnId);
+    }
+
+    public void fail(long turnId)
+    {
+        Instant now = Instant.now();
+        jdbcTemplate.update("update s_turn set status = 'FAILED', audio_status = 'FAILED', playback_status = 'FAILED', ended_at = ?, updated_at = ? where id = ? and status = 'RUNNING'",
+                now, now, turnId);
     }
 
     public void scheduleCleanup(TemporaryAudioReference audio)

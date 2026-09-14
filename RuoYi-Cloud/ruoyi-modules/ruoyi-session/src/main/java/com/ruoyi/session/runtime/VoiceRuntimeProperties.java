@@ -12,6 +12,7 @@ public class VoiceRuntimeProperties
     private int maxBufferedSegments = 2;
     private long maxAudioBytes = 5L * 1024 * 1024;
     private Duration temporaryAudioTtl = Duration.ofMinutes(15);
+    private String temporaryAudioDirectory = System.getProperty("java.io.tmpdir") + "/ln-session-audio";
     private Provider official = new Provider();
     private Provider relay = new Provider();
 
@@ -55,6 +56,16 @@ public class VoiceRuntimeProperties
         this.temporaryAudioTtl = temporaryAudioTtl;
     }
 
+    public String getTemporaryAudioDirectory()
+    {
+        return temporaryAudioDirectory;
+    }
+
+    public void setTemporaryAudioDirectory(String temporaryAudioDirectory)
+    {
+        this.temporaryAudioDirectory = temporaryAudioDirectory;
+    }
+
     public Provider getOfficial()
     {
         return official;
@@ -79,6 +90,9 @@ public class VoiceRuntimeProperties
     {
         private boolean enabled;
         private Duration timeout = Duration.ofSeconds(30);
+        private String endpoint;
+        private String model;
+        private String voice;
 
         public boolean isEnabled()
         {
@@ -98,6 +112,36 @@ public class VoiceRuntimeProperties
         public void setTimeout(Duration timeout)
         {
             this.timeout = timeout;
+        }
+
+        public String getEndpoint()
+        {
+            return endpoint;
+        }
+
+        public void setEndpoint(String endpoint)
+        {
+            this.endpoint = endpoint;
+        }
+
+        public String getModel()
+        {
+            return model;
+        }
+
+        public void setModel(String model)
+        {
+            this.model = model;
+        }
+
+        public String getVoice()
+        {
+            return voice;
+        }
+
+        public void setVoice(String voice)
+        {
+            this.voice = voice;
         }
     }
 }

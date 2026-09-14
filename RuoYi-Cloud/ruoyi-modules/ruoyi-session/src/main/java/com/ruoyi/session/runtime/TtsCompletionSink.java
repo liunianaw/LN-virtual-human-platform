@@ -4,4 +4,7 @@ package com.ruoyi.session.runtime;
 public interface TtsCompletionSink
 {
     AudioReadyResult onAudioReady(RuntimePrincipal principal, AudioReadyInput input);
+
+    /** A provider failure must be persisted as a failure, never left looking like an audio success. */
+    void onAudioFailed(RuntimePrincipal principal, TtsSynthesisWork work, String failureCode);
 }
