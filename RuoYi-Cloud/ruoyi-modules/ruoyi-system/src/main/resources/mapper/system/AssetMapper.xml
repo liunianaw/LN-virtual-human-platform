@@ -31,6 +31,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <result property="status" column="status"/>
         <result property="internalState" column="internal_state"/>
         <result property="progress" column="progress"/>
+        <result property="errorCode" column="error_code"/>
         <result property="createdAt" column="created_at"/>
     </resultMap>
 
@@ -55,7 +56,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 
     <sql id="taskColumns">
         id, account_id, avatar_id, avatar_version_id, source_file_id, quota_reservation_id, request_id,
-        status, internal_state, progress, created_at
+        status, internal_state, progress, error_code, created_at
     </sql>
 
     <select id="selectTaskByAccountAndRequest" resultMap="GenerationTaskResult">

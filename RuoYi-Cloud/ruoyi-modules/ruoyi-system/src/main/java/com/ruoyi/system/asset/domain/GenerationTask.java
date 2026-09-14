@@ -15,6 +15,7 @@ public class GenerationTask
     private String status;
     private String internalState;
     private Integer progress;
+    private String errorCode;
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }
@@ -36,6 +37,8 @@ public class GenerationTask
     public String getInternalState() { return internalState; }
     public void setInternalState(String value) { internalState = value; }
     public Integer getProgress() { return progress; }
+    public String getErrorCode() { return errorCode; }
+    public void setErrorCode(String value) { errorCode = value; }
     public void setProgress(Integer value) { progress = value; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime value) { createdAt = value; }

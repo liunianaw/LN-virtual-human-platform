@@ -33,6 +33,7 @@ export interface AvatarGenerationTask {
   requestId: string
   status: string
   internalState?: string
+  errorCode?: string
   progress?: number
   createdAt?: string
 }

@@ -273,6 +273,9 @@ class GenerationWorker:
             }:
                 diagnostic["reason"] = str(error)
             print(json.dumps(diagnostic), flush=True)
+            if isinstance(error, ValueError):
+                return self._report_failure(event, claim, attempt, "ACTION_PROCESSING_INVALID",
+                                            {"requestId": generated.request_id}, retryable=False)
             return self._report_unknown(event, claim, attempt, {"reason": type(error).__name__, "providerRequestId": generated.request_id})
 
         result = GenerationStepResult(

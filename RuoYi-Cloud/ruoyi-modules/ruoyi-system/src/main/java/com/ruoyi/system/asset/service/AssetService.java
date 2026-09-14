@@ -253,6 +253,7 @@ public class AssetService
         response.setStatus(task.getStatus());
         response.setInternalState(task.getInternalState());
         response.setProgress(task.getProgress());
+        response.setErrorCode(task.getErrorCode());
         response.setCreatedAt(task.getCreatedAt());
         return response;
     }

@@ -96,6 +96,7 @@
               <template #default="scope">
                 <el-tag :type="statusType(scope.row.status)">{{ scope.row.status }}</el-tag>
                 <span v-if="scope.row.internalState" class="state-detail">{{ scope.row.internalState }}</span>
+                <div v-if="scope.row.errorCode" role="status">{{ scope.row.errorCode }}</div>
               </template>
             </el-table-column>
             <el-table-column label="进度" width="130">

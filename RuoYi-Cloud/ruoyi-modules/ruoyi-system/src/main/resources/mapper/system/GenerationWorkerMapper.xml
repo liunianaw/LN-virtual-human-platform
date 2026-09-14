@@ -82,7 +82,10 @@
               and a.attempt_no = s.attempt_no and a.lease_epoch = s.lease_epoch)
     </update>
     <update id="markTaskFailed">
-        update p_generation_task set status = 'FAILED', internal_state = 'FINISHED', finished_at = utc_timestamp(3), updated_at = utc_timestamp(3)
+        update p_generation_task set status = 'FAILED', internal_state = 'FINISHED',
+            error_code = (select s.error_code from p_generation_step s where s.account_id = #{accountId}
+                and s.task_id = #{taskId} and s.status in ('FAILED','UNKNOWN') order by s.updated_at desc limit 1),
+            finished_at = utc_timestamp(3), updated_at = utc_timestamp(3)
         where account_id = #{accountId} and id = #{taskId} and status in ('QUEUED', 'PROCESSING')
     </update>
     <update id="updateStepSuccess">

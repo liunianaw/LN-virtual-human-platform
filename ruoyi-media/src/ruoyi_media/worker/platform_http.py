@@ -13,7 +13,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
-from PIL import Image
+from PIL import Image, ImageOps
+from ruoyi_media.providers.avatar_prompts import prompt as validated_action_prompt
 
 from .generation import (
     AvatarGenerationRequested,
@@ -206,6 +207,7 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             parameters = _parameters(data.get("parametersJson"))
             output_prefix = _output_prefix(_required_string(data.get("outputPrefix"), "outputPrefix"))
             reference_png = self._read_reference(_required_string(data.get("referenceUrl"), "referenceUrl"))
+            reference_png, layout_guide_png = _generation_references(reference_png)
         except PlatformTransportError as error:
             # The platform lease is already RUNNING at this point, but no
             # provider request or attempt exists.  Return it to READY so an
@@ -222,7 +224,7 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             lease_epoch=claim.lease_epoch,
             lease_expires_at=claim.lease_expires_at,
             reference_png=reference_png,
-            layout_guide_png=claim.layout_guide_png,
+            layout_guide_png=layout_guide_png,
             prompt=_action_prompt(action),
             model=model,
             parameters=parameters,
@@ -436,11 +438,29 @@ def _outbox_payload(value: object) -> dict[str, object]:
 
 def _action_prompt(action: str) -> str:
     return (
-        "Create a single 1536x1536 full-body avatar action board on a flat saturated chroma background. "
-        "Arrange six complete 512x768 full-body frames in a fixed 3x2 grid, consistent identity and clothing, "
-        + _ACTION_PROMPTS[action]
-        + ". Do not add text, borders, extra people, cropped limbs, or split panels."
+        "第一张图只提供角色身份，第二张图只提供六个角色的排布、大小与脚底位置。"
+        "按第二张图的两行三列布局重新绘制六个连续动作帧，禁止改成单行或改变人物数量。"
+        "参考图中的原场景和矩形照片背景不属于排版约束，必须全部移除；"
+        "每格只保留角色，整张图共用一块连续、均匀的纯品红背景，不得出现六张带原背景的照片拼贴。"
+        + validated_action_prompt(action)
     )
+
+
+def _generation_references(source: bytes) -> tuple[bytes, bytes]:
+    """Reuse avatar_lab.provider prepare_reference/layout_guide geometry."""
+    with Image.open(io.BytesIO(source)) as opened:
+        oriented = ImageOps.exif_transpose(opened).convert("RGBA")
+        fitted = ImageOps.contain(oriented, (820, 1230), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGB", (1024, 1536), "#ff00ff")
+    canvas.paste(fitted, ((1024 - fitted.width) // 2, (1536 - fitted.height) // 2), fitted)
+    cell = canvas.resize((512, 768), Image.Resampling.LANCZOS)
+    guide = Image.new("RGB", (1536, 1536))
+    for index in range(6):
+        guide.paste(cell, ((index % 3) * 512, (index // 3) * 768))
+    reference_bytes, guide_bytes = io.BytesIO(), io.BytesIO()
+    canvas.save(reference_bytes, format="PNG")
+    guide.save(guide_bytes, format="PNG")
+    return reference_bytes.getvalue(), guide_bytes.getvalue()
 
 
 def _output_prefix(value: str) -> str:

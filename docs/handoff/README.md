@@ -27,9 +27,11 @@
 
 - [x] 确认提交→Outbox→Worker→COS 参考图→千问 POST 的实际链路。服务 `930010002` 使用 `qwen-image-3.0-pro`；密钥与已成功的 validation 配置一致。参数已对齐该验证脚本（`prompt_extend=false`、`seed=20260908`）。原 `prompt_extend=true` 请求在等待响应时 300 秒超时；对齐参数的任务 `102078449035771933` 于 23:02:21 发出，29.48 秒后 HTTP 200，厂商请求 ID `d722a517-d8fa-9b14-98b8-320de4f9d5eb`。这是成功响应证据，不等于八动作制作成功，也不足以断言所有上游超时都由该参数引起。
 - [x] 修复慢调用期间不续租导致超时回写被 `STALE_LEASE` 丢弃；真实超时任务 `102078449035771920` 已正确回写 UNKNOWN attempt 和 FAILED task，Outbox 已结束。旧任务 `102078449035771908` 的两条未得到响应的 attempt 已保留为 UNKNOWN，不自动重发。
-- [ ] 八动作与后处理验收仍未完成：任务 `102078449035771933` 已获生成结果，随后本地处理或上传失败；旧 Worker 未保存生成原图及具体异常，COS 对应输出目录为空。已补充原图持久保留（默认系统临时目录下 `ruoyi-media-generation`）及处理阶段日志，供下一次已有授权的制作或离线修复追踪。原始图片属于私有素材，不提交 Git。
+- [x] 独立复现后处理失败：真实调用 `8e5ef8e6-0dec-93f8-99a5-26be61f875d5` 23.45 秒 HTTP 200，原图为六格不同颜色背景，处理器拒绝不符合抠图约束的边缘。正式链路现复用 validation 的纯品红提示词、1024×1536 参考图整理及六格排版参考，代替泛化英文提示。修正后真实调用 `0c5c5d98-8bec-9fe8-babc-5ff478eebb8d` 33.42 秒 HTTP 200，单个 idle 动作切帧/抠图通过，6 帧、atlas、manifest 共 8 文件上传 COS 后回读 SHA-256 一致；仍有 `touches_border_05` 人工检查提示。真实诊断原图及包保留在 `logs/real-action-fixed/`，COS 前缀 `avatar-generation-diagnostics/20260914/0c5c5d98/`。这些是独立诊断产物，未伪造成业务任务成功。
+- [x] 页面显示任务错误码；确定的后处理格式失败标记 `ACTION_PROCESSING_INVALID`，与上游结果未知区分。生成原图持久保留（默认系统临时目录下 `ruoyi-media-generation`），便于离线修复，私有素材不提交 Git。
+- [ ] 完整八动作、汇总登记及后台预览仍未通过。顺查代码发现 `submitSucceeded` 只登记 `p_file` 和动作 step，缺少 `p_avatar_action`、版本 manifest/QA/几何汇总写入；随后 `markGenerationReadyForReview` 的失败被吞掉。必须补齐正式汇总链路并真实验收，不能仅凭八次图片返回就标记 M2 完成。
 
-本轮仅 system 与 Worker 重启；Java 打包成功，当前源码的 3 项入口检查和 2 项聚焦验证（慢调用续租/UNKNOWN 不重发、后处理失败保留原图）通过。现场日志在未提交的 `logs/worker-traced-out.log`，不得把进程 ready 或单次 HTTP 200 写成 M2 已通过。
+本轮 system 与 Worker 已重启加载修复，system health 为 UP；前端 Vite 保持运行并热更新。Java 打包、Vue 类型检查、当前源码的 3 项入口检查和 2 项聚焦验证（慢调用续租/UNKNOWN 不重发、后处理失败保留原图）通过。现场日志在未提交的 `logs/worker-traced-out.log`，不得把进程 ready 或单次 HTTP 200 写成 M2 已通过。此前四个业务任务保留 FAILED/UNKNOWN 历史，均不自动重发。
 
 当前执行顺序：**M1 本地验收已通过**，完整证据见 `tasks/M1-RUN-001.md`。下一阶段按 `M2-ASSET-001` 开始；COS 真实私有桶上传/签名读取/清理是 M2 的真实外部服务验证，未在 M1 执行。当前 Nacos 已启用认证；Java 服务冷启动时由进程环境传入 Nacos 登录凭据，绝不写入仓库或 Nacos 配置。前端只承担最小后端验证，不做美化。
 
