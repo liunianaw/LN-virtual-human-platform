@@ -60,7 +60,7 @@ export interface PublishAvatarVersionRequest {
 
 export function uploadAvatarReference(data: FormData): Promise<AjaxResult<AvatarReferenceFile>> {
   return request({
-    url: '/asset/files',
+    url: '/system/asset/files',
     method: 'post',
     headers: { 'Content-Type': 'multipart/form-data' },
     data
@@ -69,7 +69,7 @@ export function uploadAvatarReference(data: FormData): Promise<AjaxResult<Avatar
 
 export function createAvatarGenerationTask(data: CreateAvatarGenerationTaskRequest): Promise<AjaxResult<AvatarGenerationTask>> {
   return request({
-    url: '/asset/generation-tasks',
+    url: '/system/asset/generation-tasks',
     method: 'post',
     data
   })
@@ -77,21 +77,21 @@ export function createAvatarGenerationTask(data: CreateAvatarGenerationTaskReque
 
 export function listAvatarGenerationTasks(): Promise<AjaxResult<AvatarGenerationTask[]>> {
   return request({
-    url: '/asset/generation-tasks',
+    url: '/system/asset/generation-tasks',
     method: 'get'
   })
 }
 
 export function getAvatarGenerationTask(taskId: number): Promise<AjaxResult<AvatarGenerationTask>> {
   return request({
-    url: '/asset/generation-tasks/' + taskId,
+    url: '/system/asset/generation-tasks/' + taskId,
     method: 'get'
   })
 }
 
 export function getAvatarVersionPreview(avatarId: number, versionId: number): Promise<AjaxResult<AvatarVersionPreview>> {
   return request({
-    url: '/asset/avatars/' + avatarId + '/versions/' + versionId + '/preview',
+    url: '/system/asset/avatars/' + avatarId + '/versions/' + versionId + '/preview',
     method: 'get'
   })
 }
@@ -102,7 +102,7 @@ export function publishAvatarVersion(
   data: PublishAvatarVersionRequest
 ): Promise<AjaxResult<AvatarVersionPreview>> {
   return request({
-    url: '/asset/avatars/' + avatarId + '/versions/' + versionId + '/publish',
+    url: '/system/asset/avatars/' + avatarId + '/versions/' + versionId + '/publish',
     method: 'post',
     data
   })
