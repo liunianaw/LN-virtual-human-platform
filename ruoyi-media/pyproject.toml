@@ -9,6 +9,7 @@ description = "Independent media-service API and worker entrypoints for the LN v
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "cos-python-sdk-v5==1.9.44",
     "fastapi==0.116.1",
     "pillow==11.3.0",
     "uvicorn==0.35.0",
