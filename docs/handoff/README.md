@@ -21,10 +21,10 @@
 - [ ] **M2-PROCESS-001**：外部生成编排、CPU 素材加工、八动作图集与 manifest 校验、失败/未知/Worker 重启恢复。
 - [ ] **M2-PUBLISH-001**：后台预览、人工验收、不可变 Avatar 发布版本及跨账号引用限制。
 - [ ] **M2-VOICE-001**：官方与 Relay Voice 配置、最小 `SPEAK_ONLY` 调试 Session、分段播放、stop 与临时音频清理；不做声音克隆。
-- [ ] **M2-ACCEPT-001**：真实成功路径与受控故障验收、Linux Compose 和本机浏览器记录、正式样品包与已知问题收口。
+- [ ] **M2-ACCEPT-001**：真实成功路径与受控故障验收、本机完整服务组和浏览器记录、正式样品包与已知问题收口。
 
 当前执行顺序：**M1 本地验收已通过**，完整证据见 `tasks/M1-RUN-001.md`。下一阶段按 `M2-ASSET-001` 开始；COS 真实私有桶上传/签名读取/清理是 M2 的真实外部服务验证，未在 M1 执行。当前 Nacos 已启用认证；Java 服务冷启动时由进程环境传入 Nacos 登录凭据，绝不写入仓库或 Nacos 配置。前端只承担最小后端验证，不做美化。
 
-M2 当前实现提交：`ee7a287`（受保护 Worker/COS 输出接线）、`0ac4650`（后台候选预览与发布入口）、`1b3d0b9`（Worker Compose/COS 依赖）、`ea645b0`（Voice 与 DEBUG SPEAK_ONLY 授权）。2026-09-14 本机集中验收已完成受影响模块打包、媒体依赖安装、全部 HTTP 健康检查和 Worker 心跳；Worker 缺失或错误内部令牌均返回应用码 `401`。Windows 下 Java 必须以 `-Dfile.encoding=UTF-8` 启动，否则 Nacos YAML 中的中文会触发加载器把 `MalformedInputException` 误报为“配置不存在”。M2 项仍未勾选：真实八动作图像、官方 TTS 与 Relay 试听、Linux Docker Compose、浏览器样品/故障记录均尚缺实际外部运行条件，不能以构建或模拟路径替代。
+M2 当前实现提交：`ee7a287`（受保护 Worker/COS 输出接线）、`0ac4650`（后台候选预览与发布入口）、`1b3d0b9`（Worker Compose/COS 依赖）、`ea645b0`（Voice 与 DEBUG SPEAK_ONLY 授权）。2026-09-14 本机集中验收已完成受影响模块打包、媒体依赖安装、全部 HTTP 健康检查和 Worker 心跳；Worker 缺失或错误内部令牌均返回应用码 `401`。Windows 下 Java 必须以 `-Dfile.encoding=UTF-8` 启动，否则 Nacos YAML 中的中文会触发加载器把 `MalformedInputException` 误报为“配置不存在”。M2 的部署验收口径已由用户改为本机完整服务组真实运行，不再要求 Linux Compose；真实八动作图像、官方 TTS 与 Relay 试听、浏览器样品/故障记录仍必须实际完成，不能以构建或模拟路径替代。
 
 Git：COS 与 SQL 已本地提交，未推送、未合并。此次仅文档修改，不重写历史。历史资料按需查阅：[M1-DB-001](tasks/M1-DB-001.md)、[GOV-001](tasks/GOV-001.md)、[模块裁剪](../ruoyi-module-trimming.md)、[第一阶段方案](../superpowers/specs/2026-09-09-phase-one-design.md)。
