@@ -91,10 +91,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 return;
             }
             persistentStore.markAudioFailed(Long.parseLong(state.turnId), work.ordinal(), failureCode);
-            if (state.allAudioTerminal())
-            {
-                finishFailed(state);
-            }
+            finishFailed(state);
         }
     }
 
@@ -183,6 +180,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
 
     private void finishFailed(TurnState turn)
     {
+        turn.stop(cleanupQueue);
         persistentStore.fail(Long.parseLong(turn.turnId));
         turns.remove(turn.turnId, turn);
         activeTurnBySession.remove(turn.principal.sessionId(), turn.turnId);
@@ -383,12 +381,6 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         private boolean isCompleted()
         {
             return segments.stream().allMatch(segment -> segment.status == SegmentStatus.ENDED);
-        }
-
-        private boolean allAudioTerminal()
-        {
-            return segments.stream().allMatch(segment -> segment.status == SegmentStatus.ENDED || segment.status == SegmentStatus.FAILED
-                    || segment.status == SegmentStatus.STOPPED);
         }
 
         private void stop(TemporaryAudioCleanupQueue queue)
