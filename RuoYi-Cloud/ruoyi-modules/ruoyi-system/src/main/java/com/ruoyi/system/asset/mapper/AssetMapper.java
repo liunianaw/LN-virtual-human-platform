@@ -1,5 +1,6 @@
 package com.ruoyi.system.asset.mapper;
 
+import java.util.List;
 import org.apache.ibatis.annotations.Param;
 import com.ruoyi.system.asset.domain.AssetFile;
 import com.ruoyi.system.asset.domain.GenerationServiceConfig;
@@ -15,6 +16,8 @@ public interface AssetMapper
     GenerationTask selectTaskByAccountAndRequest(@Param("accountId") Long accountId, @Param("requestId") String requestId);
 
     GenerationTask selectTaskByAccountAndId(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
+
+    List<GenerationTask> selectRecentTasksByAccount(@Param("accountId") Long accountId);
 
     GenerationServiceConfig selectActiveAvatarGenerationService(@Param("serviceId") Long serviceId);
 

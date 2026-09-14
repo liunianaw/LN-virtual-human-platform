@@ -127,6 +127,13 @@ public class AssetService
         return taskResponse(task);
     }
 
+    /** 返回当前账号最近的制作任务，供后台人工验收入口恢复工作上下文。 */
+    public List<GenerationTaskResponse> listGenerationTasks(Long accountId)
+    {
+        requireAccount(accountId);
+        return assetMapper.selectRecentTasksByAccount(accountId).stream().map(this::taskResponse).toList();
+    }
+
     private GenerationTaskResponse createGenerationTaskInTransaction(Long accountId, CreateGenerationTaskRequest request)
     {
         GenerationTask existing = assetMapper.selectTaskByAccountAndRequest(accountId, request.getRequestId());

@@ -68,6 +68,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         where account_id = #{accountId} and id = #{taskId}
     </select>
 
+    <select id="selectRecentTasksByAccount" resultMap="GenerationTaskResult">
+        select <include refid="taskColumns"/> from p_generation_task
+        where account_id = #{accountId}
+        order by created_at desc, id desc
+        limit 100
+    </select>
+
     <select id="selectActiveAvatarGenerationService" resultMap="GenerationServiceResult">
         select id, name, provider_code, endpoint, model_id, parameters, revision
         from p_official_service

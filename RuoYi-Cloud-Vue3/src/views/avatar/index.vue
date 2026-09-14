@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <el-alert
-      title="当前页面仅使用已提供的资产接口；任务全量列表和官方服务选择接口尚未提供。"
+      title="任务列表仅显示当前账号最近 100 条记录；官方服务选择接口尚未提供。"
       type="info"
       :closable="false"
       show-icon
@@ -69,7 +69,10 @@
               <el-button icon="Search" @click="queryTask">查询任务</el-button>
             </el-form-item>
           </el-form>
-          <p class="table-tip">仅显示本页面创建或按 ID 查询到的任务；后端暂未提供账户任务列表接口。</p>
+          <div class="table-tip">
+            <span>仅显示当前账号最近 100 条任务。</span>
+            <el-button link type="primary" :loading="querying" @click="loadTasks">刷新列表</el-button>
+          </div>
           <el-table v-loading="querying" :data="tasks" border>
             <el-table-column prop="taskId" label="任务 ID" width="100" />
             <el-table-column prop="avatarId" label="Avatar" width="100" />
@@ -163,6 +166,7 @@ import {
   createAvatarGenerationTask,
   getAvatarGenerationTask,
   getAvatarVersionPreview,
+  listAvatarGenerationTasks,
   publishAvatarVersion,
   uploadAvatarReference,
   type AvatarGenerationTask,
@@ -260,6 +264,15 @@ function refreshTaskById(taskId: number) {
   })
 }
 
+function loadTasks() {
+  querying.value = true
+  listAvatarGenerationTasks().then(response => {
+    tasks.value = response.data || []
+  }).finally(() => {
+    querying.value = false
+  })
+}
+
 function upsertTask(task: AvatarGenerationTask) {
   const index = tasks.value.findIndex((item: AvatarGenerationTask) => item.taskId === task.taskId)
   if (index === -1) tasks.value.unshift(task)
@@ -301,6 +314,8 @@ function statusType(status: string): 'success' | 'warning' | 'danger' | 'info' {
   if (status === 'PROCESSING' || status === 'QUEUED') return 'warning'
   return 'info'
 }
+
+onMounted(loadTasks)
 </script>
 
 <style scoped>

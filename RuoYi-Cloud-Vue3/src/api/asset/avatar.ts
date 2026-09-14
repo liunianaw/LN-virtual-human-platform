@@ -75,6 +75,13 @@ export function createAvatarGenerationTask(data: CreateAvatarGenerationTaskReque
   })
 }
 
+export function listAvatarGenerationTasks(): Promise<AjaxResult<AvatarGenerationTask[]>> {
+  return request({
+    url: '/asset/generation-tasks',
+    method: 'get'
+  })
+}
+
 export function getAvatarGenerationTask(taskId: number): Promise<AjaxResult<AvatarGenerationTask>> {
   return request({
     url: '/asset/generation-tasks/' + taskId,

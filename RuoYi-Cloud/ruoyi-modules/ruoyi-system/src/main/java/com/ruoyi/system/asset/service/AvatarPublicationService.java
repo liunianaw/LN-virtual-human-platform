@@ -84,8 +84,9 @@ public class AvatarPublicationService
     {
         requireAccount(accountId);
         if (request == null || !Boolean.TRUE.equals(request.getVisualAccepted())
-            || (request.getReviewNote() != null && request.getReviewNote().length() > 500))
-            throw new ServiceException("必须确认人工视觉验收，且验收备注不能超过 500 字");
+            || request.getReviewNote() == null || request.getReviewNote().trim().isEmpty()
+            || request.getReviewNote().length() > 500)
+            throw new ServiceException("必须确认人工视觉验收并填写不超过 500 字的验收备注");
         transactionTemplate.executeWithoutResult(status -> {
             AvatarVersionRecord version = publicationMapper.selectOwnedVersionForUpdate(accountId, avatarId, versionId);
             if (version == null) throw forbidden("无权发布此 Avatar 版本");
