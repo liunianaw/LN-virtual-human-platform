@@ -47,6 +47,15 @@ public class GenerationWorkerController
         return AjaxResult.success();
     }
 
+    @PostMapping("/claim-release")
+    public AjaxResult releasePreflightClaim(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token,
+        @RequestBody PreflightReleaseRequest request)
+    {
+        tokenGuard.require(token);
+        workerService.releasePreflightClaim(request.accountId(), request.taskId(), request.stepId(), request.workerId(), request.leaseEpoch(), request.errorCode());
+        return AjaxResult.success();
+    }
+
     @PostMapping("/attempts")
     public AjaxResult prepareAttempt(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token, @RequestBody AttemptRequest request)
     {
@@ -84,6 +93,7 @@ public class GenerationWorkerController
     public record ClaimRequest(Long accountId, Long taskId, String workerId) { }
     public record WorkerRequest(String workerId) { }
     public record OutboxSentRequest(Long outboxId, String workerId) { }
+    public record PreflightReleaseRequest(Long accountId, Long taskId, Long stepId, String workerId, Long leaseEpoch, String errorCode) { }
     public record AttemptRequest(Long accountId, Long taskId, Long stepId, String workerId, Long leaseEpoch, String requestHash) { }
     public record ProgressRequest(Long accountId, Long taskId, Long stepId, Long attemptId, String workerId, Long leaseEpoch,
                                   String state, String providerRequestId, String errorCode) { }

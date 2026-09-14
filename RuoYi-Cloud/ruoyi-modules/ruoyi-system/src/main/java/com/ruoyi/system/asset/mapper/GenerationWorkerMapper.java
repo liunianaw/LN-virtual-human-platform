@@ -33,6 +33,13 @@ public interface GenerationWorkerMapper
     int finishTerminalAttempt(@Param("attemptId") Long attemptId, @Param("stepId") Long stepId,
         @Param("attemptNo") Integer attemptNo, @Param("leaseEpoch") Long leaseEpoch, @Param("status") String status);
 
+    int releasePreflightClaim(@Param("accountId") Long accountId, @Param("taskId") Long taskId, @Param("stepId") Long stepId,
+        @Param("workerId") String workerId, @Param("leaseEpoch") Long leaseEpoch, @Param("errorCode") String errorCode);
+
+    int releaseExpiredUnpreparedClaims(@Param("accountId") Long accountId, @Param("taskId") Long taskId, @Param("errorCode") String errorCode);
+
+    int markTaskFailed(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
+
     int updateStepSuccess(@Param("accountId") Long accountId, @Param("taskId") Long taskId, @Param("stepId") Long stepId,
         @Param("workerId") String workerId, @Param("leaseEpoch") Long leaseEpoch, @Param("fileId") Long fileId,
         @Param("metadata") String metadata);

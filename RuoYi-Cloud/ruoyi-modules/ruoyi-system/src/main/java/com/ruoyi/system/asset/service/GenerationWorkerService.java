@@ -44,6 +44,7 @@ public class GenerationWorkerService
     {
         validateIdentity(accountId, taskId, workerId);
         return transactions.execute(status -> {
+            workerMapper.releaseExpiredUnpreparedClaims(accountId, taskId, "CLAIM_PREFLIGHT_EXPIRED");
             ClaimedGenerationStep step = workerMapper.selectReadyActionForUpdate(accountId, taskId);
             if (step == null) return null;
             if (workerMapper.claimStep(step.getStepId(), workerId, step.getLeaseEpoch()) != 1) throw staleLease();
@@ -154,6 +155,18 @@ public class GenerationWorkerService
             ClaimedGenerationStep claim = currentLease(accountId, taskId, stepId, workerId, leaseEpoch);
             if (workerMapper.finishTerminalStep(accountId, taskId, stepId, workerId, leaseEpoch, state) != 1
                 || workerMapper.finishTerminalAttempt(attemptId, stepId, claim.getAttemptNo(), leaseEpoch, state) != 1)
+                throw staleLease();
+            workerMapper.markTaskFailed(accountId, taskId);
+        });
+    }
+
+    public void releasePreflightClaim(Long accountId, Long taskId, Long stepId, String workerId, Long leaseEpoch, String errorCode)
+    {
+        validateIdentity(accountId, taskId, workerId);
+        if (stepId == null || stepId <= 0 || leaseEpoch == null || leaseEpoch <= 0 || safeToken(errorCode, 64) == null)
+            throw new ServiceException("Worker preflight 参数无效");
+        transactions.executeWithoutResult(status -> {
+            if (workerMapper.releasePreflightClaim(accountId, taskId, stepId, workerId, leaseEpoch, errorCode) != 1)
                 throw staleLease();
         });
     }

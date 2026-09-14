@@ -121,7 +121,7 @@ def _generation_worker():
 def _consume_outbox(interval: float) -> None:
     """Poll one leased event at a time; no provider call is retried implicitly."""
     from .generation import WorkerOutcome
-    from .platform_http import SystemGenerationPlatform
+    from .platform_http import PreflightClaimFailure, SystemGenerationPlatform
 
     worker = _generation_worker()
     worker_id = os.environ["RUOYI_MEDIA_WORKER_ID"]
@@ -136,7 +136,13 @@ def _consume_outbox(interval: float) -> None:
                 # leased until the platform routes it to a compatible worker.
                 emit("outbox_unsupported")
             else:
-                _drain_avatar_event(worker, platform, worker_id, event.outbox_id, event.message, WorkerOutcome)
+                try:
+                    _drain_avatar_event(worker, platform, worker_id, event.outbox_id, event.message, WorkerOutcome)
+                except PreflightClaimFailure as error:
+                    # The platform released a never-submitted step to READY.
+                    # Keep the outbox unacknowledged; a later lease can resume
+                    # it after the preflight condition is repaired.
+                    emit("generation_preflight_released_" + error.code.lower())
         except Exception as error:
             # Keep the process observable without recording provider payloads,
             # credentials, or reference metadata in the worker logs.

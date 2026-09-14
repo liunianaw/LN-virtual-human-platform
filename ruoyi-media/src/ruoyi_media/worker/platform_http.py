@@ -54,6 +54,22 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+class _CosRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow only the HTTPS COS redirects emitted for system-signed reads."""
+
+    def redirect_request(self, request, fp, code, message, headers, new_url):  # type: ignore[no-untyped-def]
+        parsed = urlsplit(new_url)
+        if (
+            parsed.scheme != "https"
+            or not (parsed.hostname or "").endswith(".myqcloud.com")
+            or parsed.username
+            or parsed.password
+            or parsed.port not in (None, 443)
+        ):
+            return None
+        return super().redirect_request(request, fp, code, message, headers, new_url)
+
+
 @dataclass(frozen=True)
 class PlatformHttpSettings:
     base_url: str
@@ -96,6 +112,7 @@ class SystemGenerationPlatform(GenerationPlatformPort):
     def __init__(self, settings: PlatformHttpSettings) -> None:
         self._settings = settings
         self._http = urllib.request.build_opener(_NoRedirect())
+        self._cos_http = urllib.request.build_opener(_CosRedirect())
 
     @classmethod
     def from_environment(cls) -> "SystemGenerationPlatform":
@@ -141,6 +158,13 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             "workerId": _safe_token(worker_id, "workerId"),
         })
 
+    def release_preflight_claim(self, claim: ClaimedActionStep, code: str) -> None:
+        """Return a leased, never-submitted step to READY for a repaired Worker."""
+        self._post("/asset/internal/generation/claim-release", {
+            **self._lease_payload(claim),
+            "errorCode": _safe_token(code, "errorCode"),
+        })
+
     def claim_next_action_step(self, event: AvatarGenerationRequested, worker_id: str) -> ClaimedActionStep | None:
         self._worker_id = _safe_token(worker_id, "workerId")
         data = self._post("/asset/internal/generation/claim", {
@@ -162,7 +186,7 @@ class SystemGenerationPlatform(GenerationPlatformPort):
         lease_seconds = data.get("leaseSeconds")
         if type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
             raise PlatformTransportError("platform lease duration is invalid")
-        return ClaimedActionStep(
+        claim = ClaimedActionStep(
             account_id=account_id,
             task_id=task_id,
             step_id=str(_positive_int(data.get("stepId"), "stepId")),
@@ -170,12 +194,36 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             attempt_no=_positive_int(data.get("attemptNo"), "attemptNo"),
             lease_epoch=_positive_int(data.get("leaseEpoch"), "leaseEpoch"),
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=lease_seconds),
-            reference_png=self._read_reference(_required_string(data.get("referenceUrl"), "referenceUrl")),
+            reference_png=b"",
             layout_guide_png=None,
             prompt=_action_prompt(action),
             model=_safe_token(_required_string(data.get("model"), "model"), "model"),
             parameters=_parameters(data.get("parametersJson")),
             output_prefix=_output_prefix(_required_string(data.get("outputPrefix"), "outputPrefix")),
+        )
+        try:
+            reference_png = self._read_reference(_required_string(data.get("referenceUrl"), "referenceUrl"))
+        except PlatformTransportError as error:
+            # The platform lease is already RUNNING at this point, but no
+            # provider request or attempt exists.  Return it to READY so an
+            # operator can repair the preflight condition and resume the
+            # user-requested task without replaying a paid provider request.
+            self.release_preflight_claim(claim, _preflight_error_code(error))
+            raise PreflightClaimFailure(_preflight_error_code(error)) from error
+        return ClaimedActionStep(
+            account_id=claim.account_id,
+            task_id=claim.task_id,
+            step_id=claim.step_id,
+            action=claim.action,
+            attempt_no=claim.attempt_no,
+            lease_epoch=claim.lease_epoch,
+            lease_expires_at=claim.lease_expires_at,
+            reference_png=reference_png,
+            layout_guide_png=claim.layout_guide_png,
+            prompt=claim.prompt,
+            model=claim.model,
+            parameters=claim.parameters,
+            output_prefix=claim.output_prefix,
         )
 
     def prepare_attempt(self, claim: ClaimedActionStep, request_hash: str) -> PreparedAttempt:
@@ -296,7 +344,7 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             raise PlatformTransportError("platform reference URL is not a Tencent COS HTTPS URL")
         request = urllib.request.Request(value, headers={"Accept": "image/png,image/jpeg"})
         try:
-            with self._http.open(request, timeout=60) as response:
+            with self._cos_http.open(request, timeout=60) as response:
                 length = response.headers.get("Content-Length")
                 if length is not None and (not length.isdecimal() or int(length) > _MAX_REFERENCE_BYTES):
                     raise PlatformTransportError("reference image is too large")
@@ -400,3 +448,22 @@ def _error_code(details: dict[str, object] | None) -> str | None:
     if not isinstance(code, str):
         code = details.get("errorCode")
     return code if isinstance(code, str) and _SAFE_TOKEN.fullmatch(code[:64]) else None
+
+
+class PreflightClaimFailure(RuntimeError):
+    """A leased step was conclusively closed before a provider request."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def _preflight_error_code(error: PlatformTransportError) -> str:
+    message = str(error)
+    if message == "platform reference URL is not a Tencent COS HTTPS URL":
+        return "REFERENCE_URL_REJECTED"
+    if message == "reference image is too large":
+        return "REFERENCE_TOO_LARGE"
+    if message == "reference image is invalid":
+        return "REFERENCE_INVALID"
+    return "REFERENCE_UNAVAILABLE"

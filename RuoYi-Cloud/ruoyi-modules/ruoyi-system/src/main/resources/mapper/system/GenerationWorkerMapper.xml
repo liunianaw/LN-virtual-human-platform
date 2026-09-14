@@ -63,6 +63,26 @@
         where id = #{attemptId} and step_id = #{stepId} and attempt_no = #{attemptNo} and lease_epoch = #{leaseEpoch}
           and status = #{status}
     </update>
+    <update id="releasePreflightClaim">
+        update p_generation_step set status = 'READY', error_code = #{errorCode}, lease_owner = null, lease_expires_at = null,
+            heartbeat_at = utc_timestamp(3), updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and task_id = #{taskId} and id = #{stepId} and lease_owner = #{workerId}
+          and lease_epoch = #{leaseEpoch} and lease_expires_at > utc_timestamp(3) and status = 'RUNNING'
+          and not exists (select 1 from p_generation_attempt a where a.step_id = p_generation_step.id
+              and a.attempt_no = p_generation_step.attempt_no and a.lease_epoch = p_generation_step.lease_epoch)
+    </update>
+    <update id="releaseExpiredUnpreparedClaims">
+        update p_generation_step s set status = 'READY', error_code = #{errorCode}, lease_owner = null, lease_expires_at = null,
+            heartbeat_at = utc_timestamp(3), updated_at = utc_timestamp(3)
+        where s.account_id = #{accountId} and s.task_id = #{taskId} and s.status = 'RUNNING'
+          and s.lease_expires_at &lt;= utc_timestamp(3)
+          and not exists (select 1 from p_generation_attempt a where a.step_id = s.id
+              and a.attempt_no = s.attempt_no and a.lease_epoch = s.lease_epoch)
+    </update>
+    <update id="markTaskFailed">
+        update p_generation_task set status = 'FAILED', internal_state = 'FINISHED', finished_at = utc_timestamp(3), updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{taskId} and status in ('QUEUED', 'PROCESSING')
+    </update>
     <update id="updateStepSuccess">
         update p_generation_step set status = 'SUCCEEDED', result_file_id = #{fileId}, result_metadata = cast(#{metadata} as json),
             lease_expires_at = null, heartbeat_at = utc_timestamp(3), updated_at = utc_timestamp(3)
