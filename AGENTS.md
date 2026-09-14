@@ -82,3 +82,11 @@
 - 你可以自由启动，停止项目相关服务。
 - Redis安装路径D:\BigData\Redis-x64-3.0.504
 - RabbitMQ安装路径：D:\BigData\RabbitMQ，连接信息：host: 127.0.0.1，port: 5672，username: dev，password: 123456，virtual-host: /dev_vhost
+
+### Windows 本机启动止损规则
+
+- 启动前只做一次端口盘点；已监听的服务不得重复拉起。按 **Nacos → session → system → auth/gateway → media API/Worker** 启动，每个阶段只等到端口或健康端点可用再进入下一阶段。
+- Nacos 重启后，先确认 `8848` 监听，再用短期登录令牌运行 `RuoYi-Cloud/bin/publish-nacos-config.ps1 -Apply` 发布并回读全部开发配置；不得因为应用报“配置不存在”而盲目反复重启。
+- Windows Java 进程一律加 `-Dfile.encoding=UTF-8`。本项目的 Nacos YAML 含中文；GBK 默认编码会令 Spring Cloud Alibaba 将 `MalformedInputException` 误包装成“配置不存在”。该报错首先检查编码和应用日志，不把必需 import 改成 `optional:` 掩盖。
+- 使用 `Start-Process` 时，以各模块 `target` 为工作目录并以 JAR 文件名传给 `-jar`，避免含非 ASCII 路径在 JVM 参数中被错误编码。Nacos 账号、数据库密码和双向内部 Bearer 仅通过子进程环境传入；system/session 必须在同一启动批次共享对应的内部 Bearer，绝不写回仓库或 Nacos。
+- 启动失败时只读取该服务末尾日志并定位一次根因；修复后只重启受影响服务及其直接依赖。所有服务启动完成后只运行一次 `RuoYi-Cloud/bin/check-m1-services.ps1`，并额外查看媒体 Worker 的 `ready/heartbeat`；不要在没有新证据时循环全量重启。
