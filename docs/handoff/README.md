@@ -1,6 +1,8 @@
 # 历史交接与执行计划导航
 
-2026-09-15起不再维护独立任务清单。当前依据：[公共角色执行计划](../superpowers/specs/2026-09-15-admin-public-avatar-flow.md)、[私有角色执行计划](../superpowers/specs/2026-09-15-user-private-avatar-flow.md)及各自执行状态。工作按AGENTS.md的计划、编码、验收与修复三阶段执行。下文原清单仅为历史记录，不再驱动当前执行。
+2026-09-20清理说明：旧工程计划已删除，可从Git历史恢复；日志已移入本机回收站。当前计划统一见[项目整体说明书](../../项目整体说明书.md)，下文只保留历史证据，不再作为待办清单。
+
+2026-09-15起不再维护独立任务清单。当时依据：[公共角色执行计划](../superpowers/specs/2026-09-15-admin-public-avatar-flow.md)、[私有角色执行计划](../superpowers/specs/2026-09-15-user-private-avatar-flow.md)及各自执行状态。工作按AGENTS.md的计划、编码、验收与修复三阶段执行。下文原清单仅为历史记录，不再驱动当前执行。
 
 2026-09-15 当前优先事项：用户确认按管理员平台使用、用户平台使用、开发者接入划分业务流程，先讨论执行说明书，暂不按旧清单继续实现。代码逻辑验证由主代理本人负责，终点验收保留；不派子代理代验。
 
@@ -14,7 +16,7 @@
 
 更新：2026-09-13。分支：`feat/m1-db-cos-bootstrap`。恢复时先读 AGENTS.md 和本清单，再查相关 Git commit；实现与验证细节以提交正文为准。
 
-本轮已落地的前置提交：平台库 V1 `d5c9530`、会话服务与 13 表 V1 `568adaa`、媒体 API/Worker `09edbb1`、system Flyway 接线 `e243c7d`、M1 HTTP 健康检查 `731fb44`、受保护的 Nacos 发布工具 `e7a4d5c`（Windows PowerShell/请求头修复 `2b11aa3`、Nacos v3 响应解析修复 `6ae5080`）。这些均待隔离空库与完整服务组联调，不等同 M1 通过。详细执行步骤见 `docs/superpowers/plans/2026-09-12-m1-foundation.md`。
+本轮已落地的前置提交：平台库 V1 `d5c9530`、会话服务与 13 表 V1 `568adaa`、媒体 API/Worker `09edbb1`、system Flyway 接线 `e243c7d`、M1 HTTP 健康检查 `731fb44`、受保护的 Nacos 发布工具 `e7a4d5c`（Windows PowerShell/请求头修复 `2b11aa3`、Nacos v3 响应解析修复 `6ae5080`）。这些均待隔离空库与完整服务组联调，不等同 M1 通过。详细执行步骤属于已清理的旧M1工程计划，可查Git历史；保留本页和M1-RUN-001的实际验证记录。
 
 - [x] 精简 AGENTS.md：直接沟通、独立任务并行、按成果提交、复用验证结果；本轮仅调整规范与交接。
 - [x] COS 本地配置文件与忽略规则已创建：`f44e189`。用户已手填密钥；现有适配器测试通过。
@@ -49,4 +51,4 @@
 
 M2 当前实现提交：`ee7a287`（受保护 Worker/COS 输出接线）、`0ac4650`（后台候选预览与发布入口）、`1b3d0b9`（Worker Compose/COS 依赖）、`ea645b0`（Voice 与 DEBUG SPEAK_ONLY 授权）。2026-09-14 本机集中验收已完成受影响模块打包、媒体依赖安装、全部 HTTP 健康检查和 Worker 心跳；Worker 缺失或错误内部令牌均返回应用码 `401`。Windows 下 Java 必须以 `-Dfile.encoding=UTF-8` 启动，否则 Nacos YAML 中的中文会触发加载器把 `MalformedInputException` 误报为“配置不存在”。M2 的部署验收口径已由用户改为本机完整服务组真实运行，不再要求 Linux Compose；真实八动作图像、官方 TTS 与 Relay 试听、浏览器样品/故障记录仍必须实际完成，不能以构建或模拟路径替代。
 
-Git：COS 与 SQL 已本地提交，未推送、未合并。此次仅文档修改，不重写历史。历史资料按需查阅：[M1-DB-001](tasks/M1-DB-001.md)、[GOV-001](tasks/GOV-001.md)、[模块裁剪](../ruoyi-module-trimming.md)、[第一阶段方案](../superpowers/specs/2026-09-09-phase-one-design.md)。
+Git：COS 与 SQL 已本地提交，未推送、未合并。此次仅文档修改，不重写历史。历史资料按需查阅：[M1-DB-001](tasks/M1-DB-001.md)、[GOV-001](tasks/GOV-001.md)、[模块裁剪](../ruoyi-module-trimming.md)、第一阶段方案（旧稿已清理，可查Git历史）。

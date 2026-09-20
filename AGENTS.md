@@ -88,7 +88,7 @@
 - 保留已有一级目录；Java 在若依内扩展，`ruoyi-media/` 承载 Python 素材处理，`avatar-sdk/` 承载独立 JS/TS 能力，`upstream/` 为参考源码，`validation/` 为制作验证工具。
 - 数据使用 MySQL、Redis、腾讯云 COS，本地开发同样使用云对象存储；模型调用外部 API，不自行部署模型权重。开发者模型/音频厂商 Key 留在开发者后端。
 - M1/M2编号作为历史工程进度保留；新任务按已确认业务流程及执行说明书组织，不受旧的零散功能清单驱动。开发者接入的具体范围按新说明书明确，不能自动扩大到LLM/ASR等未授权能力；第一阶段不做声音克隆。
-- 按需阅读根目录需求、架构、接口、数据库说明；字段查 `docs/database/`；工程阶段查 `docs/superpowers/specs/2026-09-09-phase-one-design.md` 和 `docs/ruoyi-module-trimming.md`。
+- 按需阅读根目录需求、架构、数据库说明；字段查 `docs/database/`；当前执行计划及接口契约统一从 `项目整体说明书.md` 导航。旧工程计划已清理，历史按需查 Git；裁剪事实见 `docs/ruoyi-module-trimming.md`。
 - 素材工作按需查 `validation/README.md` 和 `docs/opensource-reuse.md`。复用外部代码时登记来源、SHA、原函数/文件和适配内容，保留许可，不引入无关模型运行时。
 
 ## 8. 操作边界

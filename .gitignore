@@ -21,3 +21,9 @@ upstream/
 
 # Maven build outputs
 **/target/
+
+# Local runtime logs (including rotated logs); keep source log configuration
+*.log
+*.log.*
+**/.m1-runtime-logs/
+**/.m2-runtime-logs/
