@@ -8,12 +8,12 @@
 
 | 项目 | 当前事实与证据 |
 |---|---|
-| 当前阶段 | 计划已定稿，正式编码尚未开始；工作树已有未提交的角色制作与 Worker 改动，必须纳入而不还原。 |
-| 已形成能力 | `p_outbox` 与 Worker 直接 HTTP 领取/确认已存在；Worker 租约、attempt、回执和结果回写已存在。 |
-| 已知阻断风险 | Compose Worker 命令没有 `--consume-outbox`，而现链路也没有 RabbitMQ 消费，制作任务可能只有心跳而不被处理。 |
-| 主代理静态逻辑验证 | 未执行；编码后按第 8 节记录。 |
-| 用户体验验收 | 未执行；不做默认付费生成。 |
-| 下一步 | 以本计划的消息契约实现 system 发布器与 media 消费者，再迁移 asset 分层。 |
+| 当前阶段 | 正式编码与目录整改已完成，提交为 `41c85b8`、`d6f8b7b`；本文件保留为已完成技术基线。 |
+| 已形成能力 | system 在事务内写 Outbox 并发布 RabbitMQ 持久消息；media 手动 ACK 消费，Worker 租约、attempt、回执和结果回写仍通过内部 HTTP 契约。 |
+| 已知剩余风险 | 尚未在真实数据库和业务任务上完成第 9 节的端到端终点验收；不得把隔离 Broker 验证写成完整业务验收。 |
+| 主代理静态逻辑验证 | 已完成受影响 Java 模块测试、Python 聚焦测试、启动脚本解析和隔离 RabbitMQ topology/ACK/retry/DLQ 验证，详见第 8 节。 |
+| 用户体验验收 | 未执行；不默认发起付费生成。 |
+| 下一步 | 后续业务计划直接复用本计划的消息与分层边界；需要时按第 9 节做受控的真实业务验收。 |
 
 ## 2. 目标、范围和边界
 
@@ -37,7 +37,7 @@
 
 ## 4. 现有链路与强制复用
 
-`AssetService` 在同一事务写 `p_generation_task`、步骤和 `p_outbox`；当前 `GenerationWorkerController` 暴露 `/outbox/claim`、`/outbox/sent`，`GenerationWorkerService` 通过 `GenerationWorkerMapper` 直接租赁 Outbox；`ruoyi_media.worker.__main__` 用 `--consume-outbox` 轮询这些接口。该轮询链路将被发布器/消费者取代。
+`AssetService` 在同一事务写 `p_generation_task`、步骤和 `p_outbox`。旧的 Worker `/outbox/claim`、`/outbox/sent` HTTP 轮询链路已移除；system 发布器与 `ruoyi_media.worker.__main__ --consume-rabbit` 已取代它。Worker 继续通过既有内部 API 租赁可执行步骤和保存结果。
 
 必须复用 `GenerationWorker.handle`、`SystemGenerationPlatform.claim/prepareAttempt/progress/saveReceipt/submit...`、数据库租约/attempt/结果状态机，以及当前 provider 的 UNKNOWN 处理。RabbitMQ 仅负责“唤醒任务”，不承载租约、厂商调用或结果事实。
 
@@ -87,7 +87,7 @@ I1：业务事实与 Outbox 同事务；I2：Outbox 仅由 system publisher 标�
 | 重复消息/UNKNOWN | 重投同一消息或制造已提交结果未知 | 不新建付费请求；系统保留唯一 attempt 和 UNKNOWN 事实。 |
 | 管理员入口 | 使用公共角色创建/管理入口 | Controller 无业务编排，Service 拒绝非管理员伪造调用。 |
 
-本轮编码已完成并通过受影响模块验证；真实 Broker/业务链路验收和后续修复按 AGENTS.md 执行。
+本轮编码已完成并通过受影响模块验证。隔离 Broker 已验证消息拓扑、手动 ACK、retry 和 DLQ；携带真实数据库任务的完整业务链路验收仍待按本节执行。
 
 ## 10. 跨模块交接
 

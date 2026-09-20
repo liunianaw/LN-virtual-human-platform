@@ -8,7 +8,7 @@
 
 | 项目 | 事实 |
 |---|---|
-| 阶段/基线 | 计划；2026-09-19工作区 |
+| 阶段/基线 | 计划讨论稿；实施前以 2026-09-21 当前源码和 `41c85b8`、`d6f8b7b` 为基线复核。 |
 | 已有能力 | AvatarPublicationService.unpublish/disable/deleteAvatar及引用查询；页面已有部分管理按钮 |
 | 缺口 | Voice生命周期、撤销事件到活动会话、删除事件到实际资源清理尚需补齐 |
 | 静态/用户结论 | 本次盘点不等于全链路通过；此计划未体验验收；角色制作已完成不重做 |
@@ -33,10 +33,10 @@
 
 | 来源/方法 | 当前行为 | 复用与差异 |
 |---|---|---|
-| [AvatarPublicationService](../../../RuoYi-Cloud/ruoyi-modules/ruoyi-system/src/main/java/com/ruoyi/system/asset/service/AvatarPublicationService.java):changeOfficialStatus | 锁资源、更新状态、写AVATAR_STATUS_CHANGED | 保留事件/状态，补ETag/幂等、对应消费者，不另建同义事件 |
+| [AvatarPublicationServiceImpl](../../../RuoYi-Cloud/ruoyi-modules/ruoyi-system/src/main/java/com/ruoyi/system/asset/service/impl/AvatarPublicationServiceImpl.java):changeOfficialStatus | 锁资源、更新状态、写AVATAR_STATUS_CHANGED | 保留事件/状态，补ETag/幂等、对应消费者，不另建同义事件 |
 | deleteAvatar→AvatarPublicationMapper.countActiveReferences/countApplicationReferences/countRecoverableSessionReferences | 删除前检查引用、转DELETING、写AVATAR_DELETE_REQUESTED | 共用锁约束；补消费、文件去重清理和最终状态 |
 | ObjectStorage.delete/CosObjectStorage | 可删除指定对象 | 直接复用；限定已校验p_file.object_key，不接受客户端对象路径 |
-| ruoyi-media/worker/__main__._consume_outbox | 当前消费生成任务，不是通用删除队列 | 不把删除事件塞进生成器；system/job中添加有租约/去重的删除执行 |
+| `ruoyi_media.worker.__main__ --consume-rabbit` | 当前消费生成任务，不是通用删除队列 | 不把删除事件塞进生成器；system/job中添加有租约/去重的删除执行 |
 | session/runtime与system/voice/DebugSessionService | 部分当前状态校验和过期撤销 | 加状态事件消费者、活动连接关闭、音频读前检查；不可仅改列表 |
 
 ## 5. 完整业务流程

@@ -77,4 +77,4 @@ Task 1 仅完成静态结构核对，未连接或执行 MySQL。真实初始化�
 
 当前运行的平台库由 `ruoyi-system` Flyway 管理，历史为基线 V0、结构与管理员种子 V1、M1 账号角色边界 V2；会话库由 `ruoyi-session` Flyway 管理，历史为基线 V0 和会话结构 V1。已在隔离空库验证首次迁移和重启幂等；已在隔离库验证修改已执行 V1 会报 Flyway checksum mismatch。
 
-这些迁移路径不执行 `clean` 或 `repair`，也不应将 `init-platform-and-session.sql` 重放到已被 Flyway 管理的现有库。服务重启与完整本机验收证据见 [M1-RUN-001](../../docs/handoff/tasks/M1-RUN-001.md)。
+这些迁移路径不执行 `clean` 或 `repair`，也不应将 `init-platform-and-session.sql` 重放到已被 Flyway 管理的现有库。当前运行与验收边界以[项目整体说明书](../../项目整体说明书.md)及对应执行计划为准；历史启动记录按 Git 查询。
