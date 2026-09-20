@@ -12,6 +12,7 @@ public class AvatarActionPreviewResponse
     private String frameLayout;
     private String atlasUrl;
     private String previewUrl;
+    private String expiresAt;
 
     public String getActionCode() { return actionCode; }
     public void setActionCode(String value) { actionCode = value; }
@@ -27,4 +28,6 @@ public class AvatarActionPreviewResponse
     public void setAtlasUrl(String value) { atlasUrl = value; }
     public String getPreviewUrl() { return previewUrl; }
     public void setPreviewUrl(String value) { previewUrl = value; }
+    public String getExpiresAt() { return expiresAt; }
+    public void setExpiresAt(String value) { expiresAt = value; }
 }

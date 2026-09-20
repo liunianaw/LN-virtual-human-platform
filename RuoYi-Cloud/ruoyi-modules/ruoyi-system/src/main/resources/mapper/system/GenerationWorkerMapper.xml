@@ -8,32 +8,47 @@
         <result property="sourceObjectKey" column="source_object_key"/><result property="actionCode" column="action_code"/>
         <result property="attemptNo" column="attempt_no"/><result property="leaseEpoch" column="lease_epoch"/>
         <result property="modelId" column="model_id"/><result property="parameters" column="parameters"/>
+        <result property="stepStatus" column="step_status"/><result property="existingAttemptId" column="existing_attempt_id"/>
+        <result property="reservedAttemptId" column="reserved_attempt_id"/>
+        <result property="providerRequestKey" column="provider_request_key"/><result property="receiptJson" column="receipt_json"/>
     </resultMap>
     <sql id="claimColumns">
         s.id as step_id, t.id as task_id, t.account_id, t.avatar_version_id, t.source_file_id, f.object_key as source_object_key,
         s.action_code, s.attempt_no, s.lease_epoch, json_unquote(json_extract(t.service_snapshot, '$.modelId')) as model_id,
-        json_unquote(json_extract(t.service_snapshot, '$.parameters')) as parameters
+        json_unquote(json_extract(t.service_snapshot, '$.parameters')) as parameters,
+        s.status as step_status, a.id as existing_attempt_id, s.reserved_attempt_id, a.provider_request_key,
+        json_extract(s.result_metadata, '$.providerReceipt') as receipt_json
     </sql>
     <select id="selectReadyActionForUpdate" resultMap="ClaimResult">
         select <include refid="claimColumns"/> from p_generation_step s
         join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
         join p_file f on f.id = t.source_file_id and f.account_id = t.account_id and f.status = 'AVAILABLE'
-        where s.account_id = #{accountId} and s.task_id = #{taskId} and s.status = 'READY'
+        left join p_generation_attempt a on a.step_id = s.id and a.attempt_no = s.attempt_no
+        where s.account_id = #{accountId} and s.task_id = #{taskId}
+          and (s.status = 'READY' or (s.status = 'POLLING' and (s.next_run_at is null or s.next_run_at &lt;= utc_timestamp(3)))
+               or (s.status = 'RUNNING' and s.lease_expires_at &lt;= utc_timestamp(3)))
           and s.step_type = 'GENERATE_ACTION' and t.status in ('QUEUED', 'PROCESSING')
-        order by s.created_at limit 1 for update skip locked
+          and exists (select 1 from p_official_service svc join p_secret secret on secret.id = svc.secret_id
+              where svc.id = t.official_service_id and svc.status = 'ACTIVE'
+                and svc.capability = 'AVATAR_GENERATION' and secret.status = 'ACTIVE')
+        order by s.id limit 1 for update skip locked
     </select>
     <select id="selectLeaseForUpdate" resultMap="ClaimResult">
         select <include refid="claimColumns"/> from p_generation_step s
         join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
         join p_file f on f.id = t.source_file_id and f.account_id = t.account_id and f.status = 'AVAILABLE'
+        left join p_generation_attempt a on a.step_id = s.id and a.attempt_no = s.attempt_no
         where s.account_id = #{accountId} and s.task_id = #{taskId} and s.id = #{stepId}
           and s.lease_owner = #{workerId} and s.lease_epoch = #{leaseEpoch} and s.lease_expires_at > utc_timestamp(3)
         for update
     </select>
     <update id="claimStep">
-        update p_generation_step set status = 'RUNNING', attempt_no = attempt_no + 1, lease_epoch = lease_epoch + 1,
+        update p_generation_step set attempt_no = case when status = 'READY' then attempt_no + 1 else attempt_no end,
+            stage_started_at = case when status = 'RUNNING' then stage_started_at else utc_timestamp(3) end,
+            status = 'RUNNING', lease_epoch = lease_epoch + 1,
             lease_owner = #{workerId}, lease_expires_at = date_add(utc_timestamp(3), interval 5 minute), heartbeat_at = utc_timestamp(3), updated_at = utc_timestamp(3)
-        where id = #{stepId} and status = 'READY' and lease_epoch = #{leaseEpoch}
+        where id = #{stepId} and lease_epoch = #{leaseEpoch} and
+            (status in ('READY','POLLING') or (status = 'RUNNING' and lease_expires_at &lt;= utc_timestamp(3)))
     </update>
     <update id="startTask">update p_generation_task set status = 'PROCESSING', internal_state = 'RUNNING', started_at = coalesce(started_at, utc_timestamp(3)), updated_at = utc_timestamp(3) where account_id = #{accountId} and id = #{taskId} and status = 'QUEUED'</update>
     <insert id="insertAttempt">
@@ -42,6 +57,39 @@
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{claim.accountId}, #{claim.taskId}, #{claim.stepId}, #{claim.attemptNo}, #{claim.leaseEpoch},
             #{providerRequestKey}, #{claim.modelId}, 'PREPARED', #{requestHash})
     </insert>
+    <insert id="upsertLatestAttempt">
+        insert into p_avatar_action_selection (avatar_version_id, action_code, account_id, latest_attempt_id, updated_at)
+        values (#{claim.avatarVersionId}, #{claim.actionCode}, #{claim.accountId}, #{attemptId}, utc_timestamp(3))
+        on duplicate key update latest_attempt_id = values(latest_attempt_id), updated_at = utc_timestamp(3)
+    </insert>
+    <insert id="insertActionResult">
+        insert into p_avatar_action_result (id, created_at, account_id, avatar_version_id, action_code,
+            step_id, attempt_id, atlas_file_id, manifest_file_id, frame_count, fps, loop_enabled,
+            frame_layout, qa_report, content_hash)
+        values (#{id}, utc_timestamp(3), #{claim.accountId}, #{claim.avatarVersionId}, #{claim.actionCode},
+            #{claim.stepId}, #{attemptId}, #{atlasId}, #{manifestId},
+            json_extract(#{manifest}, '$.frameCount'), json_extract(#{manifest}, '$.fps'),
+            case when json_extract(#{manifest}, '$.loop') = true then 1 else 0 end,
+            cast(#{manifest} as json), json_object('geometryOk', json_extract(#{manifest}, '$.geometryOk'),
+                'warnings', json_extract(#{manifest}, '$.warnings'), 'visualAccepted', false), #{hash})
+    </insert>
+    <update id="saveProviderReceipt">
+        update p_generation_attempt set provider_task_id = coalesce(#{providerTaskId}, provider_task_id),
+            provider_request_id = coalesce(#{providerRequestId}, provider_request_id), updated_at = utc_timestamp(3)
+        where id = #{attemptId} and step_id = #{stepId} and lease_epoch = #{leaseEpoch}
+          and status in ('PREPARED','SUBMITTED')
+          and (provider_task_id is null or #{providerTaskId} is null or provider_task_id = #{providerTaskId})
+    </update>
+    <update id="saveStepReceipt">
+        update p_generation_step set result_metadata = json_set(coalesce(result_metadata, json_object()),
+            '$.providerReceipt', cast(#{receipt} as json)), updated_at = utc_timestamp(3)
+        where id = #{stepId} and lease_epoch = #{leaseEpoch} and lease_expires_at > utc_timestamp(3)
+    </update>
+    <update id="resumeAttempt">
+        update p_generation_attempt set lease_epoch = #{leaseEpoch}, updated_at = utc_timestamp(3)
+        where id = #{attemptId} and step_id = #{stepId} and request_hash = #{requestHash}
+          and lease_epoch &lt;= #{leaseEpoch} and status in ('PREPARED', 'SUBMITTED')
+    </update>
     <update id="updateAttemptProgress">
         update p_generation_attempt set status = #{status}, provider_request_id = coalesce(#{providerRequestId}, provider_request_id),
             error_code = #{errorCode}, submitted_at = case when #{status} = 'SUBMITTED' then coalesce(submitted_at, utc_timestamp(3)) else submitted_at end,
@@ -50,13 +98,17 @@
           and (status in ('PREPARED', 'SUBMITTED') or status = #{status})
     </update>
     <update id="updateStepProgress">
-        update p_generation_step set status = #{status}, error_code = #{errorCode}, heartbeat_at = utc_timestamp(3),
-            lease_expires_at = date_add(utc_timestamp(3), interval 5 minute), updated_at = utc_timestamp(3)
+        update p_generation_step set stage_started_at = case when status = #{status} then stage_started_at else utc_timestamp(3) end,
+            status = #{status}, error_code = #{errorCode}, heartbeat_at = utc_timestamp(3),
+            lease_expires_at = case when #{status} = 'POLLING' then utc_timestamp(3) else date_add(utc_timestamp(3), interval 5 minute) end,
+            next_run_at = case when #{status} = 'POLLING' then date_add(utc_timestamp(3), interval 10 second) else next_run_at end,
+            updated_at = utc_timestamp(3)
         where account_id = #{accountId} and task_id = #{taskId} and id = #{stepId} and lease_owner = #{workerId}
           and lease_epoch = #{leaseEpoch} and lease_expires_at > utc_timestamp(3)
     </update>
     <update id="finishTerminalStep">
-        update p_generation_step set status = #{status}, lease_expires_at = null, heartbeat_at = utc_timestamp(3), updated_at = utc_timestamp(3)
+        update p_generation_step set stage_started_at = case when status = #{status} then stage_started_at else utc_timestamp(3) end,
+            status = #{status}, lease_expires_at = null, heartbeat_at = utc_timestamp(3), updated_at = utc_timestamp(3)
         where account_id = #{accountId} and task_id = #{taskId} and id = #{stepId} and lease_owner = #{workerId}
           and lease_epoch = #{leaseEpoch} and lease_expires_at > utc_timestamp(3)
     </update>
@@ -66,7 +118,7 @@
           and status = #{status}
     </update>
     <update id="releasePreflightClaim">
-        update p_generation_step set status = 'READY', error_code = #{errorCode}, lease_owner = null, lease_expires_at = null,
+        update p_generation_step set status = 'READY', stage_started_at = utc_timestamp(3), error_code = #{errorCode}, lease_owner = null, lease_expires_at = null,
             heartbeat_at = utc_timestamp(3), updated_at = utc_timestamp(3)
         where account_id = #{accountId} and task_id = #{taskId} and id = #{stepId} and lease_owner = #{workerId}
           and lease_epoch = #{leaseEpoch} and lease_expires_at > utc_timestamp(3) and status = 'RUNNING'
@@ -74,7 +126,7 @@
               and a.attempt_no = p_generation_step.attempt_no and a.lease_epoch = p_generation_step.lease_epoch)
     </update>
     <update id="releaseExpiredUnpreparedClaims">
-        update p_generation_step s set status = 'READY', error_code = #{errorCode}, lease_owner = null, lease_expires_at = null,
+        update p_generation_step s set status = 'READY', stage_started_at = utc_timestamp(3), error_code = #{errorCode}, lease_owner = null, lease_expires_at = null,
             heartbeat_at = utc_timestamp(3), updated_at = utc_timestamp(3)
         where s.account_id = #{accountId} and s.task_id = #{taskId} and s.status = 'RUNNING'
           and s.lease_expires_at &lt;= utc_timestamp(3)
@@ -87,9 +139,33 @@
                 and s.task_id = #{taskId} and s.status in ('FAILED','UNKNOWN') order by s.updated_at desc limit 1),
             finished_at = utc_timestamp(3), updated_at = utc_timestamp(3)
         where account_id = #{accountId} and id = #{taskId} and status in ('QUEUED', 'PROCESSING')
+          and not exists (select 1 from p_generation_step active_step where active_step.task_id = #{taskId}
+              and active_step.step_type = 'GENERATE_ACTION' and active_step.status in ('READY','RUNNING','POLLING'))
+          and exists (select 1 from p_generation_step failed_step where failed_step.task_id = #{taskId}
+              and failed_step.status in ('FAILED','UNKNOWN'))
     </update>
+    <update id="updateTaskProgress">
+        update p_generation_task t
+        set t.progress = (select floor(100 * sum(case when s.status in ('SUCCEEDED','FAILED','UNKNOWN') then 1 else 0 end) / count(*))
+                          from p_generation_step s where s.account_id = #{accountId} and s.task_id = #{taskId}),
+            t.updated_at = utc_timestamp(3)
+        where t.account_id = #{accountId} and t.id = #{taskId} and t.status in ('QUEUED','PROCESSING')
+    </update>
+    <update id="markTaskSucceeded">
+        update p_generation_task set status = 'SUCCEEDED', internal_state = 'REVIEW_REQUIRED', progress = 100,
+            finished_at = utc_timestamp(3), updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{taskId} and status in ('QUEUED','PROCESSING')
+          and not exists (select 1 from p_generation_step s where s.account_id = #{accountId}
+              and s.task_id = #{taskId} and s.status != 'SUCCEEDED')
+    </update>
+    <select id="countActiveSteps" resultType="int">
+        select count(*) from p_generation_step s join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
+        where s.account_id = #{accountId} and s.task_id = #{taskId} and t.status in ('QUEUED','PROCESSING')
+          and s.step_type = 'GENERATE_ACTION' and s.status in ('READY','RUNNING','POLLING')
+    </select>
     <update id="updateStepSuccess">
-        update p_generation_step set status = 'SUCCEEDED', result_file_id = #{fileId}, result_metadata = cast(#{metadata} as json),
+        update p_generation_step set status = 'SUCCEEDED', stage_started_at = utc_timestamp(3), result_file_id = #{fileId},
+            result_metadata = json_merge_patch(coalesce(result_metadata, json_object()), cast(#{metadata} as json)),
             lease_expires_at = null, heartbeat_at = utc_timestamp(3), updated_at = utc_timestamp(3)
         where account_id = #{accountId} and task_id = #{taskId} and id = #{stepId} and lease_owner = #{workerId}
           and lease_epoch = #{leaseEpoch} and lease_expires_at > utc_timestamp(3)
@@ -97,15 +173,5 @@
     <update id="updateAttemptSuccess">
         update p_generation_attempt set status = 'SUCCEEDED', output_file_id = #{fileId}, completed_at = utc_timestamp(3), updated_at = utc_timestamp(3)
         where id = #{attemptId} and step_id = #{stepId} and attempt_no = #{attemptNo} and lease_epoch = #{leaseEpoch}
-    </update>
-    <select id="countUnsucceededSteps" resultType="int">select count(*) from p_generation_step where account_id = #{accountId} and task_id = #{taskId} and status != 'SUCCEEDED'</select>
-    <resultMap id="OutboxResult" type="com.ruoyi.system.asset.domain.OutboxEvent"><id property="id" column="id"/><result property="accountId" column="account_id"/><result property="eventId" column="event_id"/><result property="eventType" column="event_type"/><result property="traceId" column="trace_id"/><result property="payload" column="payload"/></resultMap>
-    <select id="selectPendingOutboxForUpdate" resultMap="OutboxResult">select id, account_id, event_id, event_type, trace_id, payload from p_outbox where (status = 'PENDING' and (next_run_at is null or next_run_at &lt;= utc_timestamp(3))) or (status = 'SENDING' and lease_expires_at &lt;= utc_timestamp(3)) order by id limit 1 for update skip locked</select>
-    <update id="claimOutbox">update p_outbox set status = 'SENDING', lease_owner = #{workerId}, lease_expires_at = date_add(utc_timestamp(3), interval 5 minute), attempt_count = attempt_count + 1, updated_at = utc_timestamp(3) where id = #{id} and (status = 'PENDING' or (status = 'SENDING' and lease_expires_at &lt;= utc_timestamp(3)))</update>
-    <update id="markOutboxSent">update p_outbox set status = 'SENT', published_at = utc_timestamp(3), lease_expires_at = null, updated_at = utc_timestamp(3) where id = #{id} and status = 'SENDING' and lease_owner = #{workerId} and lease_expires_at > utc_timestamp(3)</update>
-    <update id="renewTaskOutbox">
-        update p_outbox set lease_expires_at = date_add(utc_timestamp(3), interval 5 minute), updated_at = utc_timestamp(3)
-        where account_id = #{accountId} and aggregate_id = #{taskId} and event_type = 'AVATAR_GENERATION_REQUESTED'
-          and status = 'SENDING' and lease_owner = #{workerId} and lease_expires_at > utc_timestamp(3)
     </update>
 </mapper>

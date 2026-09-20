@@ -20,6 +20,7 @@ public class AvatarPreviewResponse
     private String baseImageUrl;
     private String manifestUrl;
     private String previewUrl;
+    private String expiresAt;
     private List<AvatarActionPreviewResponse> actions;
 
     public Long getAvatarId() { return avatarId; }
@@ -42,6 +43,8 @@ public class AvatarPreviewResponse
     public void setManifestUrl(String value) { manifestUrl = value; }
     public String getPreviewUrl() { return previewUrl; }
     public void setPreviewUrl(String value) { previewUrl = value; }
+    public String getExpiresAt() { return expiresAt; }
+    public void setExpiresAt(String value) { expiresAt = value; }
     public List<AvatarActionPreviewResponse> getActions() { return actions; }
     public void setActions(List<AvatarActionPreviewResponse> value) { actions = value; }
 }

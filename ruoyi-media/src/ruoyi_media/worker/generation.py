@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 import threading
+import urllib.error
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -26,6 +27,7 @@ from ruoyi_media.providers.qwen_image import (
     ProviderRejected,
     ProviderUncertain,
     QwenImageProvider,
+    persist_receipt,
     safe_provider_details,
 )
 
@@ -33,6 +35,7 @@ _LEASE_RENEWAL_SECONDS = 30
 
 
 class StepStatus(StrEnum):
+    POLLING = "POLLING"
     FAILED = "FAILED"
     RUNNING = "RUNNING"
     SUCCEEDED = "SUCCEEDED"
@@ -40,6 +43,7 @@ class StepStatus(StrEnum):
 
 
 class WorkerOutcome(StrEnum):
+    WAITING = "WAITING"
     IGNORED_STALE = "IGNORED_STALE"
     NO_WORK = "NO_WORK"
     REPORTED_FAILED = "REPORTED_FAILED"
@@ -97,6 +101,8 @@ class ClaimedActionStep:
 class PreparedAttempt:
     attempt_id: str
     provider_request_key: str
+    recovery_only: bool = False
+    receipt: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -158,6 +164,8 @@ class GenerationPlatformPort(Protocol):
     def claim_next_action_step(self, event: AvatarGenerationRequested, worker_id: str) -> ClaimedActionStep | None: ...
 
     def prepare_attempt(self, claim: ClaimedActionStep, request_hash: str) -> PreparedAttempt: ...
+
+    def save_receipt(self, claim: ClaimedActionStep, attempt: PreparedAttempt, receipt: dict[str, object]) -> None: ...
 
     def progress(
         self,
@@ -241,15 +249,24 @@ class GenerationWorker:
         print(json.dumps({"event": "generation_dispatch", "taskId": claim.task_id, "stepId": claim.step_id,
                           "attemptId": attempt.attempt_id, "action": claim.action, "model": claim.model}), flush=True)
         try:
-            generated = self._provider.generate(
+            artifact_root = Path(os.environ.get("RUOYI_MEDIA_ARTIFACT_DIR", str(Path(tempfile.gettempdir()) / "ruoyi-media-generation")))
+            receipt_path = artifact_root / f"attempt-{attempt.attempt_id}" / "receipt.local.json"
+            if attempt.receipt and not receipt_path.is_file():
+                persist_receipt(receipt_path, attempt.receipt)
+            if attempt.recovery_only and not receipt_path.is_file() and not receipt_path.with_name("provider-response.local.json").is_file():
+                raise ProviderUncertain({"reason": "recovery_evidence_missing"})
+            generated = self._obtain_image(
                 ImageGenerationRequest(
                     model=claim.model,
                     prompt=claim.prompt,
                     reference_png=claim.reference_png,
                     layout_guide_png=claim.layout_guide_png,
                     parameters=claim.parameters,
-                )
+                ),
+                receipt_path, claim, attempt,
             )
+            if generated is None:
+                return WorkerOutcome.WAITING
         except ProviderRejected as error:
             return self._report_failure(event, claim, attempt, "PROVIDER_REJECTED", {"errorCode": error.code}, retryable=False)
         except ProviderUncertain as error:
@@ -298,6 +315,38 @@ class GenerationWorker:
         except StaleLeaseError:
             return WorkerOutcome.IGNORED_STALE
         return WorkerOutcome.REPORTED_SUCCEEDED
+
+    def _obtain_image(self, request, receipt_path, claim, attempt):
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8")) if receipt_path.is_file() else None
+        if receipt and receipt.get("imageUrl"):
+            return self._provider.recover(receipt_path, lambda value: self._platform.save_receipt(claim, attempt, value))
+        if receipt and receipt.get("providerTaskId"):
+            try:
+                receipt = self._provider.query_async(receipt_path)
+            except (urllib.error.URLError, TimeoutError, OSError):
+                failures = int(receipt.get("recoveryFailures", 0)) + 1
+                receipt["recoveryFailures"] = failures
+                persist_receipt(receipt_path, receipt)
+                self._platform.save_receipt(claim, attempt, receipt)
+                if failures >= 5:
+                    raise ProviderUncertain({"providerTaskId": receipt["providerTaskId"], "reason": "query_retries_exhausted"}) from None
+                self._platform.progress(claim, attempt, StepStatus.POLLING, receipt.get("requestId"))
+                return None
+        elif attempt.recovery_only:
+            # Legacy synchronous raw response recovery is parse/download-only.
+            return self._provider.generate(request, receipt_path,
+                lambda value: self._platform.save_receipt(claim, attempt, value))
+        else:
+            receipt = self._provider.submit_async(request, receipt_path)
+        self._platform.save_receipt(claim, attempt, receipt)
+        if receipt.get("stage") == "SUCCEEDED":
+            return self._provider.recover(receipt_path)
+        if receipt.get("stage") in {"FAILED", "CANCELED"}:
+            raise ProviderRejected("ASYNC_TASK_FAILED")
+        if receipt.get("stage") not in {"PENDING", "RUNNING"}:
+            raise ProviderUncertain({"providerTaskId": receipt.get("providerTaskId"), "reason": "task_unknown"})
+        self._platform.progress(claim, attempt, StepStatus.POLLING, receipt.get("requestId"))
+        return None
 
     def _process_and_upload(self, claim: ClaimedActionStep, image_png: bytes) -> tuple[list[StoredObject], dict[str, object]]:
         # Keep the paid result for local repair if processing or upload fails.

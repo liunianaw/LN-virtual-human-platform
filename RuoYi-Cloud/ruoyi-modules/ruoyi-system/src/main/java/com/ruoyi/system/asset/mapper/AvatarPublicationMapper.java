@@ -16,6 +16,9 @@ public interface AvatarPublicationMapper
     AvatarVersionRecord selectOwnedVersionForUpdate(@Param("accountId") Long accountId, @Param("avatarId") Long avatarId,
         @Param("versionId") Long versionId);
 
+    AvatarVersionRecord selectAccessiblePublishedVersion(@Param("accountId") Long accountId,
+        @Param("avatarId") Long avatarId, @Param("versionId") Long versionId);
+
     AvatarRecord selectOwnedAvatarForUpdate(@Param("accountId") Long accountId, @Param("avatarId") Long avatarId);
 
     List<AvatarActionRecord> selectActions(@Param("avatarVersionId") Long avatarVersionId);
@@ -26,11 +29,6 @@ public interface AvatarPublicationMapper
 
     int countUnavailableActionFiles(@Param("accountId") Long accountId, @Param("avatarVersionId") Long avatarVersionId);
 
-    int updateVersionToReview(@Param("accountId") Long accountId, @Param("avatarVersionId") Long avatarVersionId);
-
-    int updateTaskToReview(@Param("accountId") Long accountId, @Param("taskId") Long taskId,
-        @Param("avatarVersionId") Long avatarVersionId);
-
     int updateVersionToPublished(@Param("accountId") Long accountId, @Param("avatarVersionId") Long avatarVersionId,
         @Param("acceptedBy") Long acceptedBy);
 
@@ -39,7 +37,26 @@ public interface AvatarPublicationMapper
 
     int countActiveReferences(@Param("avatarId") Long avatarId);
 
+    int countApplicationReferences(@Param("avatarId") Long avatarId);
+
+    int countRecoverableSessionReferences(@Param("avatarId") Long avatarId);
+
     int countActiveGenerationTasks(@Param("accountId") Long accountId, @Param("avatarId") Long avatarId);
 
     int markAvatarDeleting(@Param("accountId") Long accountId, @Param("avatarId") Long avatarId);
+
+    int insertReview(@Param("id") Long id, @Param("accountId") Long accountId, @Param("avatarId") Long avatarId,
+        @Param("versionId") Long versionId, @Param("reviewNote") String reviewNote);
+
+    List<java.util.Map<String, Object>> selectPublicAvatars(@Param("offset") int offset, @Param("limit") int limit);
+    int countPublicAvatars();
+    List<java.util.Map<String, Object>> selectAdminPublicAvatars(@Param("status") String status,
+        @Param("offset") int offset, @Param("limit") int limit);
+    int countAdminPublicAvatars(@Param("status") String status);
+    java.util.Map<String, Object> selectAccessibleAvatar(@Param("accountId") Long accountId, @Param("avatarId") Long avatarId);
+    List<java.util.Map<String, Object>> selectAccessibleAvatarVersions(@Param("accountId") Long accountId,
+        @Param("avatarId") Long avatarId);
+    java.util.Map<String, Object> selectOfficialAvatarForUpdate(@Param("avatarId") Long avatarId);
+    int changeOfficialAvatarStatus(@Param("avatarId") Long avatarId, @Param("expectedStatus") String expectedStatus,
+        @Param("newStatus") String newStatus);
 }

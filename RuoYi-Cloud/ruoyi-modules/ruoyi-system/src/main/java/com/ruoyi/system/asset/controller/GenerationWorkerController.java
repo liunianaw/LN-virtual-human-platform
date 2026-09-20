@@ -1,7 +1,6 @@
 package com.ruoyi.system.asset.controller;
 
-import java.util.List;
-import java.util.Map;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -9,47 +8,49 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import com.ruoyi.common.core.web.domain.AjaxResult;
 import com.ruoyi.system.asset.service.MediaInternalTokenGuard;
-import com.ruoyi.system.asset.service.GenerationWorkerService;
+import com.ruoyi.system.asset.dto.GenerationAttemptRequest;
+import com.ruoyi.system.asset.dto.GenerationClaimRequest;
+import com.ruoyi.system.asset.dto.GenerationPreflightReleaseRequest;
+import com.ruoyi.system.asset.dto.GenerationProgressRequest;
+import com.ruoyi.system.asset.dto.GenerationReceiptRequest;
+import com.ruoyi.system.asset.dto.GenerationSucceededResultRequest;
+import com.ruoyi.system.asset.dto.GenerationTaskActiveRequest;
+import com.ruoyi.system.asset.dto.GenerationTerminalResultRequest;
+import com.ruoyi.system.asset.service.IGenerationWorkerService;
 
 /** 仅供持有环境注入内部令牌的媒体进程调用；此路径不得由网关公开。 */
 @RestController
 @RequestMapping("/asset/internal/generation")
 public class GenerationWorkerController
 {
-    private final GenerationWorkerService workerService;
+    private final IGenerationWorkerService workerService;
     private final MediaInternalTokenGuard tokenGuard;
 
-    public GenerationWorkerController(GenerationWorkerService workerService, MediaInternalTokenGuard tokenGuard)
+    public GenerationWorkerController(IGenerationWorkerService workerService, MediaInternalTokenGuard tokenGuard)
     {
         this.workerService = workerService;
         this.tokenGuard = tokenGuard;
     }
 
     @PostMapping("/claim")
-    public AjaxResult claim(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token, @RequestBody ClaimRequest request)
+    public AjaxResult claim(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token,
+        @Valid @RequestBody GenerationClaimRequest request)
     {
         tokenGuard.require(token);
         return AjaxResult.success(workerService.claim(request.accountId(), request.taskId(), request.workerId()));
     }
 
-    @PostMapping("/outbox/claim")
-    public AjaxResult claimOutbox(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token, @RequestBody WorkerRequest request)
+    @PostMapping("/task-active")
+    public AjaxResult taskActive(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token,
+        @Valid @RequestBody GenerationTaskActiveRequest request)
     {
         tokenGuard.require(token);
-        return AjaxResult.success(workerService.claimOutbox(request.workerId()));
-    }
-
-    @PostMapping("/outbox/sent")
-    public AjaxResult markOutboxSent(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token, @RequestBody OutboxSentRequest request)
-    {
-        tokenGuard.require(token);
-        workerService.markOutboxSent(request.outboxId(), request.workerId());
-        return AjaxResult.success();
+        return AjaxResult.success(workerService.hasActiveSteps(request.accountId(), request.taskId()));
     }
 
     @PostMapping("/claim-release")
     public AjaxResult releasePreflightClaim(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token,
-        @RequestBody PreflightReleaseRequest request)
+        @Valid @RequestBody GenerationPreflightReleaseRequest request)
     {
         tokenGuard.require(token);
         workerService.releasePreflightClaim(request.accountId(), request.taskId(), request.stepId(), request.workerId(), request.leaseEpoch(), request.errorCode());
@@ -57,14 +58,16 @@ public class GenerationWorkerController
     }
 
     @PostMapping("/attempts")
-    public AjaxResult prepareAttempt(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token, @RequestBody AttemptRequest request)
+    public AjaxResult prepareAttempt(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token,
+        @Valid @RequestBody GenerationAttemptRequest request)
     {
         tokenGuard.require(token);
         return AjaxResult.success(workerService.prepareAttempt(request.accountId(), request.taskId(), request.stepId(), request.workerId(), request.leaseEpoch(), request.requestHash()));
     }
 
     @PostMapping("/progress")
-    public AjaxResult progress(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token, @RequestBody ProgressRequest request)
+    public AjaxResult progress(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token,
+        @Valid @RequestBody GenerationProgressRequest request)
     {
         tokenGuard.require(token);
         workerService.progress(request.accountId(), request.taskId(), request.stepId(), request.attemptId(), request.workerId(),
@@ -72,8 +75,19 @@ public class GenerationWorkerController
         return AjaxResult.success();
     }
 
+    @PostMapping("/receipt")
+    public AjaxResult receipt(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token,
+        @Valid @RequestBody GenerationReceiptRequest request)
+    {
+        tokenGuard.require(token);
+        workerService.saveReceipt(request.accountId(), request.taskId(), request.stepId(), request.attemptId(),
+            request.workerId(), request.leaseEpoch(), request.receipt());
+        return AjaxResult.success();
+    }
+
     @PostMapping("/results/succeeded")
-    public AjaxResult submitSucceeded(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token, @RequestBody SucceededResultRequest request)
+    public AjaxResult submitSucceeded(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token,
+        @Valid @RequestBody GenerationSucceededResultRequest request)
     {
         tokenGuard.require(token);
         workerService.submitSucceeded(request.accountId(), request.taskId(), request.stepId(), request.attemptId(), request.workerId(),
@@ -82,7 +96,8 @@ public class GenerationWorkerController
     }
 
     @PostMapping("/results/terminal")
-    public AjaxResult submitTerminal(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token, @RequestBody TerminalResultRequest request)
+    public AjaxResult submitTerminal(@RequestHeader(value = "X-LN-Internal-Token", required = false) String token,
+        @Valid @RequestBody GenerationTerminalResultRequest request)
     {
         tokenGuard.require(token);
         workerService.submitTerminal(request.accountId(), request.taskId(), request.stepId(), request.attemptId(), request.workerId(),
@@ -90,15 +105,4 @@ public class GenerationWorkerController
         return AjaxResult.success();
     }
 
-    public record ClaimRequest(Long accountId, Long taskId, String workerId) { }
-    public record WorkerRequest(String workerId) { }
-    public record OutboxSentRequest(Long outboxId, String workerId) { }
-    public record PreflightReleaseRequest(Long accountId, Long taskId, Long stepId, String workerId, Long leaseEpoch, String errorCode) { }
-    public record AttemptRequest(Long accountId, Long taskId, Long stepId, String workerId, Long leaseEpoch, String requestHash) { }
-    public record ProgressRequest(Long accountId, Long taskId, Long stepId, Long attemptId, String workerId, Long leaseEpoch,
-                                  String state, String providerRequestId, String errorCode) { }
-    public record SucceededResultRequest(Long accountId, Long taskId, Long stepId, Long attemptId, String workerId, Long leaseEpoch,
-                                         List<GenerationWorkerService.StoredObject> objects, Map<String, Object> manifest) { }
-    public record TerminalResultRequest(Long accountId, Long taskId, Long stepId, Long attemptId, String workerId, Long leaseEpoch,
-                                        String state) { }
 }

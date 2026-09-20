@@ -67,6 +67,13 @@
                 class="mt8"
               />
             </el-form-item>
+            <el-form-item label="角色归属" required>
+              <el-radio-group v-model="taskForm.visibility">
+                <el-radio value="PRIVATE">本人私有</el-radio>
+                <el-radio v-if="isAdmin" value="OFFICIAL">官方公共</el-radio>
+              </el-radio-group>
+              <div class="form-tip">官方公共角色发布后供所有平台用户选择；私有角色仅本人可用。</div>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="creating" :disabled="!reference || !taskForm.officialServiceId" @click="createTask">开始制作</el-button>
             </el-form-item>
@@ -102,21 +109,103 @@
             <el-table-column label="进度" width="130">
               <template #default="scope"><el-progress :percentage="scope.row.progress || 0" :stroke-width="8" /></template>
             </el-table-column>
-            <el-table-column label="操作" width="160" fixed="right">
+            <el-table-column label="操作" width="220" fixed="right">
               <template #default="scope">
                 <el-button link type="primary" @click="refreshTask(scope.row)">刷新</el-button>
                 <el-button
                   link
                   type="primary"
                   :disabled="!scope.row.avatarId || !scope.row.avatarVersionId"
-                  @click="openPreview(scope.row)"
-                >预览 / 验收</el-button>
+                  @click="openProduction(scope.row)"
+                >制作详情</el-button>
+                <el-button link type="primary" @click="createInheritedVersion(scope.row)">新版本</el-button>
               </template>
             </el-table-column>
           </el-table>
         </el-card>
       </el-col>
     </el-row>
+
+    <el-row :gutter="16" class="mt16">
+      <el-col :xs="24" :lg="12">
+        <el-card header="公共角色库" shadow="never">
+          <el-table :data="publicAvatars" border size="small">
+            <el-table-column prop="name" label="角色" min-width="120" />
+            <el-table-column prop="status" label="状态" width="90" />
+            <el-table-column label="预览" width="90">
+              <template #default="scope">
+                <el-button v-if="scope.row.versionId" link type="primary" @click="openCatalogPreview(scope.row)">查看</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-col>
+      <el-col v-if="isAdmin" :xs="24" :lg="12">
+        <el-card header="官方角色管理" shadow="never">
+          <el-table :data="adminPublicAvatars" border size="small">
+            <el-table-column prop="name" label="角色" min-width="110" />
+            <el-table-column prop="status" label="状态" width="90" />
+            <el-table-column label="操作" width="150">
+              <template #default="scope">
+                <el-button v-if="scope.row.status === 'PUBLISHED'" link type="warning" @click="changeOfficialStatus(scope.row, 'unpublish')">下架</el-button>
+                <el-button v-if="scope.row.status !== 'DISABLED'" link type="danger" @click="changeOfficialStatus(scope.row, 'disable')">停用</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-dialog v-model="productionOpen" title="八动作制作详情" width="1080px" append-to-body @closed="stopProductionPolling">
+      <el-skeleton v-if="productionLoading && !production" :rows="8" animated />
+      <template v-else-if="production">
+        <el-alert v-if="productionStatusMessage" :title="productionStatusMessage" type="warning" :closable="false" class="mb12" />
+        <div class="production-summary">
+          <span>已生成 {{ production.completedActionCount }}/8</span>
+          <span>已确认 {{ production.acceptedActionCount }}/8</span>
+          <el-tag :type="production.versionStatus === 'REVIEW' ? 'success' : 'warning'">{{ production.versionStatus }}</el-tag>
+          <el-button link type="primary" :loading="productionLoading" @click="loadProduction()">刷新</el-button>
+        </div>
+        <el-row :gutter="12">
+          <el-col v-for="action in production.actions" :key="action.actionCode" :xs="24" :sm="12" :lg="6">
+            <el-card shadow="never" class="action-card">
+              <template #header>
+                <div class="action-header">
+                  <strong>{{ actionLabel(action.actionCode) }}</strong>
+                  <el-tag size="small" :type="actionStageType(action.stage)">{{ action.stage }}</el-tag>
+                </div>
+              </template>
+              <ActionPreview
+                v-if="actionPreviews[action.actionCode]"
+                :url="actionPreviews[action.actionCode].atlasUrl"
+                :frames="actionPreviews[action.actionCode].frameLayout?.frames || []"
+                :fps="actionPreviews[action.actionCode].fps"
+                :loop="actionPreviews[action.actionCode].loopEnabled"
+              />
+              <el-empty v-else description="动作尚未预览" :image-size="56" />
+              <div class="action-meta">
+                <span>结果 {{ action.resultIds.length }}</span>
+                <span>{{ action.acceptedResultId ? '已确认' : '待确认' }}</span>
+              </div>
+              <div v-if="action.stageStartedAt" class="action-timing">{{ stageTiming(action) }}</div>
+              <div v-if="action.errorCode" class="action-error">{{ action.safeMessage || action.errorCode }}</div>
+              <div class="action-buttons">
+                <el-button v-if="action.allowedOperations.includes('preview')" size="small" @click="previewAction(action)">预览</el-button>
+                <el-button v-if="action.allowedOperations.includes('select')" size="small" type="success" plain @click="acceptAction(action)">确认采用</el-button>
+                <el-button v-if="action.allowedOperations.includes('recovery')" size="small" type="primary" plain @click="recoverAction(action)">核对 / 恢复</el-button>
+                <el-button v-if="action.allowedOperations.includes('discard')" size="small" plain @click="discardAction(action)">保留旧结果</el-button>
+                <el-button v-if="action.allowedOperations.includes('regenerate')" size="small" type="warning" plain @click="regenerateAction(action)">重做</el-button>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
+        <div class="assembly-bar">
+          <span v-if="!production.canAssemble">确认八个动作且没有运行中或待核对任务后才能组装。</span>
+          <el-button type="primary" :loading="assembling" :disabled="!production.canAssemble" @click="assembleProduction">组装整套并进入验收</el-button>
+          <el-button v-if="production.versionStatus === 'REVIEW'" type="success" plain @click="openFinalPreview">整套预览 / 发布</el-button>
+        </div>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="previewOpen" title="候选 Avatar 预览与人工验收" width="900px" append-to-body>
       <el-skeleton v-if="previewLoading" :rows="6" animated />
@@ -149,6 +238,22 @@
             </el-table>
           </el-col>
         </el-row>
+        <el-divider content-position="left">八动作动态预览</el-divider>
+        <el-row :gutter="12" class="final-action-grid">
+          <el-col v-for="action in preview.actions || []" :key="action.actionCode" :xs="24" :sm="12" :md="6">
+            <div class="final-action-card">
+              <strong>{{ actionLabel(action.actionCode) }}</strong>
+              <ActionPreview
+                v-if="action.atlasUrl && finalActionFrames(action.frameLayout).length"
+                :url="action.atlasUrl"
+                :frames="finalActionFrames(action.frameLayout)"
+                :fps="action.fps"
+                :loop="action.loopEnabled"
+              />
+              <span v-else>动作预览文件不可用</span>
+            </div>
+          </el-col>
+        </el-row>
         <el-divider content-position="left">发布确认</el-divider>
         <el-checkbox v-model="reviewAccepted" :disabled="preview.status !== 'REVIEW'">
           已完成视觉检查，确认全身、手部、动作过渡和透明边缘符合预期。
@@ -169,7 +274,7 @@
         <el-button
           type="primary"
           :loading="publishing"
-          :disabled="!preview || preview.status !== 'REVIEW' || !reviewAccepted || !reviewNote.trim()"
+          :disabled="previewReadOnly || !preview || preview.status !== 'REVIEW' || !reviewAccepted || !reviewNote.trim()"
           @click="publishPreview"
         >确认发布</el-button>
       </template>
@@ -179,20 +284,42 @@
 
 <script setup lang="ts" name="AvatarProduction">
 import {
+  assembleAvatarVersion,
   createAvatarGenerationTask,
+  createAvatarVersion,
+  createOfficialAvatarGenerationTask,
+  discardAvatarActionAttempt,
+  disableOfficialAvatar,
+  getAvatarActionResultPreview,
+  getAvatarDetail,
   getAvatarGenerationTask,
+  getAvatarProduction,
   getAvatarVersionPreview,
   listAvatarGenerationServices,
   listAvatarGenerationTasks,
+  listAdminPublicAvatars,
+  listPublicAvatars,
   publishAvatarVersion,
+  recoverAvatarActionAttempt,
+  regenerateAvatarAction,
+  selectAvatarActionResult,
+  unpublishOfficialAvatar,
   uploadAvatarReference,
   type AvatarGenerationTask,
   type AvatarGenerationService,
+  type AvatarProductionAction,
+  type AvatarProductionSnapshot,
+  type AvatarActionResultPreview,
+  type AvatarCatalogItem,
   type AvatarReferenceFile,
   type AvatarVersionPreview
 } from '@/api/asset/avatar'
+import ActionPreview from './ActionPreview.vue'
+import useUserStore from '@/store/modules/user'
 
 const { proxy } = getCurrentInstance()
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.roles.includes('admin'))
 const selectedReferenceFile = ref<File>()
 const reference = ref<AvatarReferenceFile>()
 const rightsConfirmed = ref(false)
@@ -202,17 +329,30 @@ const creating = ref(false)
 const generationServicesLoading = ref(false)
 const querying = ref(false)
 const publishing = ref(false)
+const assembling = ref(false)
 const taskIdToQuery = ref('')
 const tasks = ref<AvatarGenerationTask[]>([])
 const generationServices = ref<AvatarGenerationService[]>([])
+const publicAvatars = ref<AvatarCatalogItem[]>([])
+const adminPublicAvatars = ref<AvatarCatalogItem[]>([])
 const previewOpen = ref(false)
 const previewLoading = ref(false)
 const preview = ref<AvatarVersionPreview>()
+const previewReadOnly = ref(false)
 const reviewAccepted = ref(false)
 const reviewNote = ref('')
+const productionOpen = ref(false)
+const productionLoading = ref(false)
+const production = ref<AvatarProductionSnapshot>()
+const productionStatusMessage = ref('')
+const productionIdentity = reactive({ avatarId: '', versionId: '' })
+const actionPreviews = reactive<Record<string, AvatarActionResultPreview>>({})
+let productionTimer: number | undefined
+let productionPollFailures = 0
 const taskForm = reactive({
   name: '',
-  officialServiceId: undefined as string | undefined
+  officialServiceId: undefined as string | undefined,
+  visibility: 'PRIVATE' as 'PRIVATE' | 'OFFICIAL'
 })
 
 function handleReferenceChange(file: { raw?: File }) {
@@ -247,16 +387,27 @@ function createTask() {
     proxy?.$modal.msgWarning('请先上传参考图、填写角色名称并选择官方服务。')
     return
   }
+  const selectedService = generationServices.value.find((service: AvatarGenerationService) => service.serviceId === taskForm.officialServiceId)
+  if (!selectedService) {
+    proxy?.$modal.msgWarning('制作服务列表已变化，请重新选择。')
+    return
+  }
   creating.value = true
-  createAvatarGenerationTask({
+  const createRequest = {
     sourceFileId: reference.value.fileId,
     officialServiceId: taskForm.officialServiceId,
+    expectedServiceRevision: selectedService.revision,
     requestId: crypto.randomUUID(),
     name: taskForm.name.trim()
-  }).then(response => {
+  }
+  const createCall = isAdmin.value && taskForm.visibility === 'OFFICIAL'
+    ? createOfficialAvatarGenerationTask
+    : createAvatarGenerationTask
+  createCall(createRequest).then(response => {
     if (!response.data?.taskId) throw new Error('制作接口未返回任务 ID')
     upsertTask(response.data)
     proxy?.$modal.msgSuccess('制作任务已受理。')
+    openProduction(response.data)
   }).finally(() => {
     creating.value = false
   })
@@ -305,14 +456,197 @@ function loadGenerationServices() {
   })
 }
 
+function loadCatalogs() {
+  listPublicAvatars().then(response => { publicAvatars.value = response.data?.items || [] })
+  if (isAdmin.value) listAdminPublicAvatars().then(response => { adminPublicAvatars.value = response.data?.items || [] })
+}
+
+function openCatalogPreview(item: AvatarCatalogItem) {
+  if (!item.versionId) return
+  openPreview({ avatarId: item.avatarId, avatarVersionId: item.versionId } as AvatarGenerationTask, true)
+}
+
+function createInheritedVersion(task: AvatarGenerationTask) {
+  getAvatarDetail(task.avatarId).then(response => {
+    const detail = response.data
+    if (!detail?.currentVersionId || !detail.revision) throw new Error('角色尚无可继承的已发布版本。')
+    return createAvatarVersion(task.avatarId, {
+      requestId: crypto.randomUUID(), expectedAvatarRevision: detail.revision, baseVersionId: detail.currentVersionId
+    })
+  }).then(response => {
+    if (!response.data?.versionId) throw new Error('新版本接口未返回候选版本。')
+    proxy?.$modal.msgSuccess('已创建同一角色的新候选版本，旧发布版本保持不变。')
+    openProduction({ avatarId: response.data.avatarId, avatarVersionId: response.data.versionId } as AvatarGenerationTask)
+  })
+}
+
+async function changeOfficialStatus(item: AvatarCatalogItem, operation: 'unpublish' | 'disable') {
+  const label = operation === 'unpublish' ? '下架' : '紧急停用'
+  const reason = window.prompt(`请输入${label}原因（最多 500 字）：`)?.trim()
+  if (!reason) return
+  await (operation === 'unpublish' ? unpublishOfficialAvatar(item.avatarId, reason) : disableOfficialAvatar(item.avatarId, reason))
+  proxy?.$modal.msgSuccess(`官方角色已${label}。`)
+  loadCatalogs()
+}
+
 function upsertTask(task: AvatarGenerationTask) {
   const index = tasks.value.findIndex((item: AvatarGenerationTask) => item.taskId === task.taskId)
   if (index === -1) tasks.value.unshift(task)
   else tasks.value.splice(index, 1, task)
 }
 
-function openPreview(task: AvatarGenerationTask) {
+function openProduction(task: AvatarGenerationTask) {
+  productionIdentity.avatarId = task.avatarId
+  productionIdentity.versionId = task.avatarVersionId
+  production.value = undefined
+  productionStatusMessage.value = ''
+  productionPollFailures = 0
+  Object.keys(actionPreviews).forEach(key => delete actionPreviews[key])
+  productionOpen.value = true
+  loadProduction()
+  startProductionPolling()
+}
+
+function loadProduction(silent = false) {
+  if (!productionIdentity.avatarId || !productionIdentity.versionId || productionLoading.value) return
+  if (!silent) productionLoading.value = true
+  getAvatarProduction(productionIdentity.avatarId, productionIdentity.versionId).then(response => {
+    if (!response.data?.versionId) throw new Error('制作进度接口未返回候选版本')
+    production.value = response.data
+    productionPollFailures = 0
+    productionStatusMessage.value = ''
+    if (hasRunningActions(response.data)) startProductionPolling(3000)
+    else stopProductionPolling()
+  }).catch(() => {
+    productionPollFailures++
+    productionStatusMessage.value = '状态暂未更新；网络恢复后页面会继续查询，不会把任务标记为失败。'
+    startProductionPolling(Math.min(15000, 3000 * (2 ** Math.min(productionPollFailures - 1, 3))))
+  }).finally(() => { productionLoading.value = false })
+}
+
+function startProductionPolling(delay = 3000) {
+  stopProductionPolling()
+  productionTimer = window.setTimeout(() => {
+    productionTimer = undefined
+    if (!productionOpen.value) return
+    if (document.hidden) {
+      startProductionPolling(delay)
+      return
+    }
+    if (!production.value || hasRunningActions(production.value)) loadProduction(true)
+  }, delay)
+}
+
+function stopProductionPolling() {
+  if (productionTimer !== undefined) window.clearTimeout(productionTimer)
+  productionTimer = undefined
+}
+
+function hasRunningActions(snapshot: AvatarProductionSnapshot) {
+  return snapshot.actions.some(action => isActionActive(action.stage))
+}
+
+function isActionActive(stage: string) {
+  return ['QUEUED', 'READY', 'RUNNING', 'POLLING'].includes(stage)
+}
+
+function stageTiming(action: AvatarProductionAction) {
+  const started = action.stageStartedAt ? Date.parse(action.stageStartedAt) : Number.NaN
+  if (!Number.isFinite(started)) return ''
+  const label = new Date(started).toLocaleString()
+  if (!isActionActive(action.stage)) return `阶段开始：${label}`
+  const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000))
+  return `阶段开始：${label} · 已等待 ${Math.floor(seconds / 60)}分${seconds % 60}秒`
+}
+
+function latestResult(action: AvatarProductionAction) {
+  return action.resultIds[action.resultIds.length - 1]
+}
+
+function previewAction(action: AvatarProductionAction) {
+  const resultId = latestResult(action)
+  if (!resultId || !production.value) return
+  getAvatarActionResultPreview(production.value.avatarId, production.value.versionId, action.actionCode, resultId).then(response => {
+    if (!response.data?.atlasUrl) throw new Error('动作预览接口未返回图集')
+    actionPreviews[action.actionCode] = response.data
+  })
+}
+
+function acceptAction(action: AvatarProductionAction) {
+  const resultId = latestResult(action)
+  if (!resultId || !production.value) return
+  selectAvatarActionResult(production.value.avatarId, production.value.versionId, action.actionCode, {
+    requestId: crypto.randomUUID(), resultId, expectedActionRevision: action.actionRevision, visualAccepted: true
+  }).then(() => {
+    proxy?.$modal.msgSuccess(`${actionLabel(action.actionCode)}已确认。`)
+    loadProduction()
+  })
+}
+
+async function regenerateAction(action: AvatarProductionAction) {
+  if (!production.value || isActionActive(action.stage)) return
+  let acknowledgeUncertainCharge = false
+  let supersedesAttemptId: string | undefined
+  if (action.stage === 'UNKNOWN') {
+    await proxy?.$modal.confirm('上次请求结果未知，重新生成可能产生重复费用。确认继续吗？')
+    acknowledgeUncertainCharge = true
+    supersedesAttemptId = action.latestAttemptId || undefined
+  }
+  regenerateAvatarAction(production.value.avatarId, production.value.versionId, action.actionCode, {
+    requestId: crypto.randomUUID(), expectedActionRevision: action.actionRevision,
+    acknowledgeUncertainCharge, supersedesAttemptId
+  }).then(() => {
+    proxy?.$modal.msgSuccess(`已提交${actionLabel(action.actionCode)}重做。`)
+    loadProduction()
+    startProductionPolling()
+  })
+}
+
+function recoverAction(action: AvatarProductionAction) {
+  if (!production.value || !action.latestAttemptId) return
+  recoverAvatarActionAttempt(production.value.avatarId, production.value.versionId, action.actionCode, action.latestAttemptId, {
+    requestId: crypto.randomUUID(), expectedActionRevision: action.actionRevision
+  }).then(() => {
+    proxy?.$modal.msgSuccess(`已安排核对${actionLabel(action.actionCode)}的原任务，不会重新发起生成。`)
+    loadProduction()
+    startProductionPolling()
+  })
+}
+
+async function discardAction(action: AvatarProductionAction) {
+  if (!production.value || !action.latestAttemptId || !action.acceptedResultId) return
+  await proxy?.$modal.confirm('确认保留上一次已采用结果，并关闭本轮选用吗？已提交给厂商的请求无法保证取消。')
+  discardAvatarActionAttempt(production.value.avatarId, production.value.versionId, action.actionCode, action.latestAttemptId, {
+    requestId: crypto.randomUUID(), expectedActionRevision: action.actionRevision, retainResultId: action.acceptedResultId
+  }).then(() => {
+    proxy?.$modal.msgSuccess(`已保留${actionLabel(action.actionCode)}的旧结果。`)
+    loadProduction()
+  })
+}
+
+function assembleProduction() {
+  if (!production.value || !production.value.canAssemble) return
+  const selectedResults = production.value.actions.map((action: AvatarProductionAction) => ({
+    actionCode: action.actionCode, resultId: action.acceptedResultId || ''
+  }))
+  if (selectedResults.some((item: { actionCode: string; resultId: string }) => !item.resultId)) return
+  assembling.value = true
+  assembleAvatarVersion(production.value.avatarId, production.value.versionId, {
+    requestId: crypto.randomUUID(), expectedCandidateRevision: production.value.candidateRevision, selectedResults
+  }).then(() => {
+    proxy?.$modal.msgSuccess('八动作已组装，可以进行整套预览。')
+    loadProduction()
+  }).finally(() => { assembling.value = false })
+}
+
+function openFinalPreview() {
+  if (!production.value) return
+  openPreview({ avatarId: production.value.avatarId, avatarVersionId: production.value.versionId } as AvatarGenerationTask)
+}
+
+function openPreview(task: AvatarGenerationTask, readOnly = false) {
   previewOpen.value = true
+  previewReadOnly.value = readOnly
   previewLoading.value = true
   preview.value = undefined
   reviewAccepted.value = false
@@ -347,9 +681,43 @@ function statusType(status: string): 'success' | 'warning' | 'danger' | 'info' {
   return 'info'
 }
 
+function actionStageType(stage: string): 'success' | 'warning' | 'danger' | 'info' {
+  if (stage === 'READY_FOR_REVIEW' || stage === 'SUCCEEDED') return 'success'
+  if (stage === 'FAILED' || stage === 'UNKNOWN') return 'danger'
+  if (isActionActive(stage)) return 'warning'
+  return 'info'
+}
+
+function actionLabel(action: string) {
+  return ({ idle: '待机', speaking: '说话', listening: '倾听', thinking: '思考', nod: '点头', shake_head: '摇头', wave: '挥手', happy: '开心' } as Record<string, string>)[action] || action
+}
+
+function finalActionFrames(layout?: string): Array<{ x: number; y: number; width: number; height: number }> {
+  if (!layout) return []
+  try {
+    const parsed = JSON.parse(layout)
+    return Array.isArray(parsed.frames) ? parsed.frames : []
+  } catch {
+    return []
+  }
+}
+
+function handleVisibilityChange() {
+  if (!document.hidden && productionOpen.value && (!production.value || hasRunningActions(production.value))) {
+    stopProductionPolling()
+    loadProduction(true)
+  }
+}
+
 onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   loadTasks()
   loadGenerationServices()
+  loadCatalogs()
+})
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  stopProductionPolling()
 })
 </script>
 
@@ -357,8 +725,22 @@ onMounted(() => {
 .full-width { width: 100%; }
 .form-tip, .table-tip { color: var(--el-text-color-secondary); font-size: 12px; line-height: 20px; }
 .mt8 { margin-top: 8px; }
+.mt16 { margin-top: 16px; }
 .task-query { margin-bottom: 8px; }
 .state-detail { margin-left: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
 .preview-image { width: 100%; min-height: 260px; border: 1px solid var(--el-border-color-lighter); }
 .review-note { margin-top: 12px; }
+.production-summary, .action-header, .action-meta, .assembly-bar { display: flex; align-items: center; gap: 10px; }
+.production-summary { margin-bottom: 12px; }
+.action-header { justify-content: space-between; }
+.action-card { margin-bottom: 12px; }
+.action-meta { justify-content: space-between; margin: 8px 0; color: var(--el-text-color-secondary); font-size: 12px; }
+.action-timing { margin-bottom: 8px; color: var(--el-text-color-secondary); font-size: 12px; }
+.action-error { min-height: 20px; color: var(--el-color-danger); font-size: 12px; }
+.action-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.action-buttons :deep(.el-button + .el-button) { margin-left: 0; }
+.assembly-bar { justify-content: flex-end; margin-top: 8px; }
+.assembly-bar > span { margin-right: auto; color: var(--el-text-color-secondary); font-size: 12px; }
+.final-action-grid { max-height: 460px; overflow-y: auto; }
+.final-action-card { border: 1px solid var(--el-border-color-lighter); margin-bottom: 12px; padding: 8px; }
 </style>

@@ -64,6 +64,15 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         where account_id = #{accountId} and request_id = #{requestId}
     </select>
 
+    <select id="countMatchingTaskRequest" resultType="int">
+        select count(*) from p_generation_task t
+        join p_avatar a on a.id = t.avatar_id and a.account_id = t.account_id
+        where t.account_id = #{accountId} and t.id = #{taskId}
+          and t.source_file_id = #{sourceFileId} and t.official_service_id = #{officialServiceId}
+          and a.name = #{name} collate utf8mb4_0900_as_cs and a.visibility = #{visibility}
+          and (t.request_hash is null or t.request_hash = #{requestHash})
+    </select>
+
     <select id="selectTaskByAccountAndId" resultMap="GenerationTaskResult">
         select <include refid="taskColumns"/> from p_generation_task
         where account_id = #{accountId} and id = #{taskId}
@@ -108,7 +117,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 
     <insert id="insertAvatar">
         insert into p_avatar (id, created_at, updated_at, account_id, visibility, name, status, revision)
-        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, 'PRIVATE', #{name}, 'DRAFT', 1)
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{visibility}, #{name}, 'DRAFT', 1)
     </insert>
 
     <insert id="insertAvatarVersion">
@@ -122,30 +131,30 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         insert into p_quota_reservation (id, created_at, updated_at, account_id, quota_type, business_type,
             business_id, reservation_no, reserved_units, settled_units, state)
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, 'AVATAR_COUNT', 'GENERATION', #{businessId},
-            1, 1, 0, 'RESERVED')
+            1, 0, 0, 'RESERVED')
     </insert>
 
     <insert id="insertQuotaEntry">
         insert into p_quota_entry (id, created_at, updated_at, account_id, quota_type, reservation_id, event_key,
             entry_type, delta_granted, delta_used, delta_reserved)
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, 'AVATAR_COUNT', #{reservationId}, #{eventKey},
-            'RESERVE', 0, 0, 1)
+            'RESERVE', 0, 0, 0)
     </insert>
 
     <insert id="insertGenerationTask">
         insert into p_generation_task (id, created_at, updated_at, account_id, avatar_id, avatar_version_id,
             source_file_id, task_kind, status, internal_state, progress, official_service_id, service_snapshot,
-            pipeline_version, quota_reservation_id, request_id, reservation_no)
+            pipeline_version, quota_reservation_id, request_id, request_hash, reservation_no)
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{avatarId}, #{avatarVersionId},
             #{sourceFileId}, 'GENERATE', 'QUEUED', 'READY', 0, #{officialServiceId}, cast(#{serviceSnapshot} as json),
-            #{pipelineVersion}, #{quotaReservationId}, #{requestId}, 1)
+            #{pipelineVersion}, #{quotaReservationId}, #{requestId}, #{requestHash}, 1)
     </insert>
 
     <insert id="insertGenerationActionStep">
         insert into p_generation_step (id, created_at, updated_at, account_id, task_id, step_key, step_type,
-            action_code, depends_on, status, attempt_no, lease_epoch, next_run_at)
+            action_code, depends_on, status, stage_started_at, attempt_no, reserved_attempt_id, lease_epoch, next_run_at)
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{taskId}, #{stepKey}, 'GENERATE_ACTION',
-            #{actionCode}, json_array(), 'READY', 0, 0, utc_timestamp(3))
+            #{actionCode}, json_array(), 'READY', utc_timestamp(3), 0, #{reservedAttemptId}, 0, utc_timestamp(3))
     </insert>
 
     <insert id="insertOutbox">

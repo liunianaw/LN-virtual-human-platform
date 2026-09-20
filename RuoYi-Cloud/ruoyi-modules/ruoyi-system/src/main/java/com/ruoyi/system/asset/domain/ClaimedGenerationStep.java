@@ -14,6 +14,22 @@ public class ClaimedGenerationStep
     private Long leaseEpoch;
     private String modelId;
     private String parameters;
+    private String stepStatus;
+    private Long existingAttemptId;
+    private Long reservedAttemptId;
+    private String providerRequestKey;
+    private String receiptJson;
+
+    public String getStepStatus() { return stepStatus; }
+    public void setStepStatus(String value) { stepStatus = value; }
+    public Long getExistingAttemptId() { return existingAttemptId; }
+    public void setExistingAttemptId(Long value) { existingAttemptId = value; }
+    public Long getReservedAttemptId() { return reservedAttemptId; }
+    public void setReservedAttemptId(Long value) { reservedAttemptId = value; }
+    public String getProviderRequestKey() { return providerRequestKey; }
+    public void setProviderRequestKey(String value) { providerRequestKey = value; }
+    public String getReceiptJson() { return receiptJson; }
+    public void setReceiptJson(String value) { receiptJson = value; }
 
     public Long getStepId() { return stepId; }
     public void setStepId(Long value) { stepId = value; }

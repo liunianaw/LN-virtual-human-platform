@@ -16,6 +16,10 @@ public interface AssetMapper
 
     GenerationTask selectTaskByAccountAndRequest(@Param("accountId") Long accountId, @Param("requestId") String requestId);
 
+    int countMatchingTaskRequest(@Param("accountId") Long accountId, @Param("taskId") Long taskId,
+        @Param("sourceFileId") Long sourceFileId, @Param("officialServiceId") Long officialServiceId,
+        @Param("name") String name, @Param("visibility") String visibility, @Param("requestHash") byte[] requestHash);
+
     GenerationTask selectTaskByAccountAndId(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
 
     List<GenerationTask> selectRecentTasksByAccount(@Param("accountId") Long accountId);
@@ -28,7 +32,8 @@ public interface AssetMapper
 
     int insertFile(AssetFile file);
 
-    int insertAvatar(@Param("id") Long id, @Param("accountId") Long accountId, @Param("name") String name);
+    int insertAvatar(@Param("id") Long id, @Param("accountId") Long accountId, @Param("name") String name,
+        @Param("visibility") String visibility);
 
     int insertAvatarVersion(@Param("id") Long id, @Param("avatarId") Long avatarId, @Param("accountId") Long accountId,
         @Param("sourceFileId") Long sourceFileId, @Param("pipelineVersion") String pipelineVersion,
@@ -43,10 +48,11 @@ public interface AssetMapper
         @Param("avatarVersionId") Long avatarVersionId, @Param("sourceFileId") Long sourceFileId,
         @Param("officialServiceId") Long officialServiceId, @Param("serviceSnapshot") String serviceSnapshot,
         @Param("pipelineVersion") String pipelineVersion, @Param("quotaReservationId") Long quotaReservationId,
-        @Param("requestId") String requestId);
+        @Param("requestId") String requestId, @Param("requestHash") byte[] requestHash);
 
     int insertGenerationActionStep(@Param("id") Long id, @Param("accountId") Long accountId, @Param("taskId") Long taskId,
-        @Param("stepKey") String stepKey, @Param("actionCode") String actionCode);
+        @Param("stepKey") String stepKey, @Param("actionCode") String actionCode,
+        @Param("reservedAttemptId") Long reservedAttemptId);
 
     int insertOutbox(@Param("id") Long id, @Param("accountId") Long accountId, @Param("eventId") String eventId,
         @Param("eventType") String eventType, @Param("aggregateType") String aggregateType,

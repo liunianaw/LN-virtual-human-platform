@@ -1,5 +1,6 @@
 package com.ruoyi.system.asset.controller;
 
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,23 +15,29 @@ import com.ruoyi.common.log.annotation.Log;
 import com.ruoyi.common.log.enums.BusinessType;
 import com.ruoyi.common.security.annotation.RequiresPermissions;
 import com.ruoyi.common.security.utils.SecurityUtils;
+import com.ruoyi.system.asset.dto.AvatarStatusReasonRequest;
+import com.ruoyi.system.asset.dto.CreateAvatarVersionRequest;
 import com.ruoyi.system.asset.dto.CreateGenerationTaskRequest;
 import com.ruoyi.system.asset.dto.PublishAvatarVersionRequest;
-import com.ruoyi.system.asset.service.AssetService;
-import com.ruoyi.system.asset.service.AvatarPublicationService;
+import com.ruoyi.system.asset.service.IAssetService;
+import com.ruoyi.system.asset.service.IAvatarPublicationService;
+import com.ruoyi.system.asset.service.IAvatarProductionService;
 
 /** 已登录账号的私有参考图与 Avatar 制作任务 API。 */
 @RestController
 @RequestMapping("/asset")
 public class AssetController
 {
-    private final AssetService assetService;
-    private final AvatarPublicationService publicationService;
+    private final IAssetService assetService;
+    private final IAvatarPublicationService publicationService;
+    private final IAvatarProductionService productionService;
 
-    public AssetController(AssetService assetService, AvatarPublicationService publicationService)
+    public AssetController(IAssetService assetService, IAvatarPublicationService publicationService,
+        IAvatarProductionService productionService)
     {
         this.assetService = assetService;
         this.publicationService = publicationService;
+        this.productionService = productionService;
     }
 
     @Log(title = "参考图上传", businessType = BusinessType.INSERT)
@@ -53,9 +60,18 @@ public class AssetController
     @Log(title = "Avatar 制作任务", businessType = BusinessType.INSERT)
     @RequiresPermissions("system:asset:add")
     @PostMapping("/generation-tasks")
-    public AjaxResult createGenerationTask(@RequestBody CreateGenerationTaskRequest request)
+    public AjaxResult createGenerationTask(@Valid @RequestBody CreateGenerationTaskRequest request)
     {
         return AjaxResult.success(assetService.createGenerationTask(SecurityUtils.getUserId(), request));
+    }
+
+    /** 管理员公共角色入口。可见性由后端固定，客户端不能通过普通入口提升资产范围。 */
+    @Log(title = "官方公共 Avatar 制作任务", businessType = BusinessType.INSERT)
+    @RequiresPermissions("system:asset:add")
+    @PostMapping("/admin/public-generation-tasks")
+    public AjaxResult createOfficialGenerationTask(@Valid @RequestBody CreateGenerationTaskRequest request)
+    {
+        return AjaxResult.success(assetService.createOfficialGenerationTask(SecurityUtils.getUserId(), request));
     }
 
     @RequiresPermissions("system:asset:list")
@@ -63,6 +79,22 @@ public class AssetController
     public AjaxResult listGenerationTasks()
     {
         return AjaxResult.success(assetService.listGenerationTasks(SecurityUtils.getUserId()));
+    }
+
+    @RequiresPermissions("system:asset:list")
+    @GetMapping("/public-avatars")
+    public AjaxResult listPublicAvatars(@RequestParam(defaultValue = "1") int pageNum,
+        @RequestParam(defaultValue = "20") int pageSize)
+    {
+        return AjaxResult.success(publicationService.listPublic(pageNum, pageSize));
+    }
+
+    @RequiresPermissions("system:asset:list")
+    @GetMapping("/admin/public-avatars")
+    public AjaxResult listAdminPublicAvatars(@RequestParam(defaultValue = "1") int pageNum,
+        @RequestParam(defaultValue = "20") int pageSize, @RequestParam(required = false) String status)
+    {
+        return AjaxResult.success(publicationService.listAdminPublic(pageNum, pageSize, status));
     }
 
     @RequiresPermissions("system:asset:list")
@@ -86,11 +118,45 @@ public class AssetController
         return AjaxResult.success(publicationService.preview(SecurityUtils.getUserId(), avatarId, versionId));
     }
 
+    @RequiresPermissions("system:asset:list")
+    @GetMapping("/avatars/{avatarId}")
+    public AjaxResult avatarDetail(@PathVariable Long avatarId)
+    {
+        return AjaxResult.success(publicationService.detail(SecurityUtils.getUserId(), avatarId));
+    }
+
+    @Log(title = "官方 Avatar 下架", businessType = BusinessType.UPDATE)
+    @RequiresPermissions("system:asset:edit")
+    @PostMapping("/admin/avatars/{avatarId}/unpublish")
+    public AjaxResult unpublishAvatar(@PathVariable Long avatarId,
+        @Valid @RequestBody AvatarStatusReasonRequest request)
+    {
+        return AjaxResult.success(publicationService.unpublish(SecurityUtils.getUserId(), avatarId, request));
+    }
+
+    @Log(title = "官方 Avatar 紧急停用", businessType = BusinessType.UPDATE)
+    @RequiresPermissions("system:asset:edit")
+    @PostMapping("/admin/avatars/{avatarId}/disable")
+    public AjaxResult disableAvatar(@PathVariable Long avatarId,
+        @Valid @RequestBody AvatarStatusReasonRequest request)
+    {
+        return AjaxResult.success(publicationService.disable(SecurityUtils.getUserId(), avatarId, request));
+    }
+
+    @Log(title = "Avatar 新候选版本", businessType = BusinessType.INSERT)
+    @RequiresPermissions("system:asset:add")
+    @PostMapping("/avatars/{avatarId}/versions")
+    public AjaxResult createAvatarVersion(@PathVariable Long avatarId,
+        @Valid @RequestBody CreateAvatarVersionRequest request)
+    {
+        return AjaxResult.success(productionService.createVersion(SecurityUtils.getUserId(), avatarId, request));
+    }
+
     @Log(title = "Avatar 版本发布", businessType = BusinessType.UPDATE)
     @RequiresPermissions("system:asset:edit")
     @PostMapping("/avatars/{avatarId}/versions/{versionId}/publish")
     public AjaxResult publishAvatarVersion(@PathVariable Long avatarId, @PathVariable Long versionId,
-        @RequestBody PublishAvatarVersionRequest request)
+        @Valid @RequestBody PublishAvatarVersionRequest request)
     {
         return AjaxResult.success(publicationService.publish(SecurityUtils.getUserId(), avatarId, versionId, request));
     }
