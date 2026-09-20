@@ -1,0 +1,45 @@
+package com.ruoyi.system.asset.dto;
+
+import java.time.LocalDateTime;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+
+/** 用户可查询的一次制作任务状态。 */
+public class GenerationTaskResponse
+{
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long taskId;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long avatarId;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long avatarVersionId;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long sourceFileId;
+    private String requestId;
+    private String status;
+    private String internalState;
+    private Integer progress;
+    private String errorCode;
+    private LocalDateTime createdAt;
+
+    public Long getTaskId() { return taskId; }
+    public void setTaskId(Long value) { taskId = value; }
+    public Long getAvatarId() { return avatarId; }
+    public void setAvatarId(Long value) { avatarId = value; }
+    public Long getAvatarVersionId() { return avatarVersionId; }
+    public void setAvatarVersionId(Long value) { avatarVersionId = value; }
+    public Long getSourceFileId() { return sourceFileId; }
+    public void setSourceFileId(Long value) { sourceFileId = value; }
+    public String getRequestId() { return requestId; }
+    public void setRequestId(String value) { requestId = value; }
+    public String getStatus() { return status; }
+    public void setStatus(String value) { status = value; }
+    public String getInternalState() { return internalState; }
+    public void setInternalState(String value) { internalState = value; }
+    public Integer getProgress() { return progress; }
+    public String getErrorCode() { return errorCode; }
+    public void setErrorCode(String value) { errorCode = value; }
+    public void setProgress(Integer value) { progress = value; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime value) { createdAt = value; }
+}

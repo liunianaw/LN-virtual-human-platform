@@ -47,4 +47,16 @@ public class CosObjectStorage implements ObjectStorage
         try { client.deleteObject(config.getBucket(), key); }
         catch (RuntimeException e) { throw new ServiceException("COS 删除失败"); }
     }
+
+    @Override
+    public String provider()
+    {
+        return "cos";
+    }
+
+    @Override
+    public String bucket()
+    {
+        return config.getBucket();
+    }
 }

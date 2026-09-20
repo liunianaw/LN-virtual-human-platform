@@ -1,0 +1,8 @@
+FROM openjdk:17
+
+VOLUME /home/ruoyi
+WORKDIR /home/ruoyi
+
+COPY ./jar/ruoyi-modules-session.jar /home/ruoyi/ruoyi-modules-session.jar
+
+ENTRYPOINT ["java", "-jar", "ruoyi-modules-session.jar"]

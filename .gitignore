@@ -7,6 +7,7 @@
 **/.env
 **/.env.*
 !**/.env.example
+RuoYi-Cloud/ruoyi-modules/ruoyi-system/src/main/resources/application-local.yml
 validation/workspace/
 **/__pycache__/
 **/.venv/
@@ -20,3 +21,9 @@ upstream/
 
 # Maven build outputs
 **/target/
+
+# Local runtime logs (including rotated logs); keep source log configuration
+*.log
+*.log.*
+**/.m1-runtime-logs/
+**/.m2-runtime-logs/

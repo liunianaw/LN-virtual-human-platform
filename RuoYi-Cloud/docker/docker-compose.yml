@@ -1,25 +1,27 @@
-version : '3.8'
+version: '3.8'
+
+x-common-client-env: &common-client-env
+  NACOS_ADDR: "${NACOS_ADDR:-ruoyi-nacos:8848}"
+  NACOS_USERNAME: "${NACOS_USERNAME:?Set NACOS_USERNAME}"
+  NACOS_PASSWORD: "${NACOS_PASSWORD:?Set NACOS_PASSWORD}"
+  REDIS_HOST: "${REDIS_HOST:-ruoyi-redis}"
+  REDIS_PORT: "${REDIS_PORT:-6379}"
+  REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD}"
+
+x-rabbitmq-client-env: &rabbitmq-client-env
+  RABBITMQ_HOST: "${RABBITMQ_HOST:-ruoyi-rabbitmq}"
+  RABBITMQ_PORT: "${RABBITMQ_PORT:-5672}"
+  RABBITMQ_USERNAME: "${RABBITMQ_USERNAME:?Set RABBITMQ_USERNAME}"
+  RABBITMQ_PASSWORD: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}"
+  RABBITMQ_VHOST: "${RABBITMQ_VHOST:?Set RABBITMQ_VHOST}"
+
+x-container-logging: &container-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
-  ruoyi-nacos:
-    container_name: ruoyi-nacos
-    image: nacos/nacos-server:v3.0.2
-    build:
-      context: ./nacos
-    environment:
-      - MODE=standalone
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
-      - NACOS_AUTH_TOKEN=your_auth_token
-      - NACOS_AUTH_IDENTITY_KEY=your_identity_key
-      - NACOS_AUTH_IDENTITY_VALUE=your_identity_value
-    volumes:
-      - ./nacos/logs/:/home/nacos/logs
-      - ./nacos/conf/application.properties:/home/nacos/conf/application.properties
-    ports:
-      - "8848:8848"
-      - "9848:9848"
-      - "9849:9849"
-    depends_on:
-      - ruoyi-mysql
   ruoyi-mysql:
     container_name: ruoyi-mysql
     image: mysql:5.7
@@ -31,17 +33,22 @@ services:
       - ./mysql/conf:/etc/mysql/conf.d
       - ./mysql/logs:/logs
       - ./mysql/data:/var/lib/mysql
-    command: [
-          'mysqld',
-          '--innodb-buffer-pool-size=80M',
-          '--character-set-server=utf8mb4',
-          '--collation-server=utf8mb4_unicode_ci',
-          '--default-time-zone=+8:00',
-          '--lower-case-table-names=1'
-        ]
+    command:
+      - mysqld
+      - --innodb-buffer-pool-size=80M
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+8:00
+      - --lower-case-table-names=1
     environment:
-      MYSQL_DATABASE: 'ry-cloud'
-      MYSQL_ROOT_PASSWORD: '${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}'
+      MYSQL_DATABASE: ry-cloud
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   ruoyi-redis:
     container_name: ruoyi-redis
     image: redis
@@ -52,7 +59,262 @@ services:
     volumes:
       - ./redis/conf/redis.conf:/home/ruoyi/redis/redis.conf
       - ./redis/data:/data
-    command: redis-server /home/ruoyi/redis/redis.conf
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD}"
+    command: ["sh", "-ec", "exec redis-server /home/ruoyi/redis/redis.conf --requirepass \"$$REDIS_PASSWORD\""]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  ruoyi-nacos:
+    container_name: ruoyi-nacos
+    image: nacos/nacos-server:v3.0.2
+    build:
+      context: ./nacos
+    environment:
+      MODE: standalone
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}"
+      NACOS_AUTH_TOKEN: "${NACOS_AUTH_TOKEN:?Set NACOS_AUTH_TOKEN}"
+      NACOS_AUTH_IDENTITY_KEY: "${NACOS_AUTH_IDENTITY_KEY:?Set NACOS_AUTH_IDENTITY_KEY}"
+      NACOS_AUTH_IDENTITY_VALUE: "${NACOS_AUTH_IDENTITY_VALUE:?Set NACOS_AUTH_IDENTITY_VALUE}"
+    volumes:
+      - ./nacos/logs/:/home/nacos/logs
+      - ./nacos/conf/application.properties:/home/nacos/conf/application.properties
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+    depends_on:
+      ruoyi-mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/nacos/actuator/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+
+  ruoyi-rabbitmq:
+    container_name: ruoyi-rabbitmq
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_USERNAME:?Set RABBITMQ_USERNAME}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}"
+      RABBITMQ_DEFAULT_VHOST: "${RABBITMQ_VHOST:?Set RABBITMQ_VHOST}"
+    ports:
+      - "5672:5672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging: *container-logging
+
+  ruoyi-m2-config-gate:
+    container_name: ruoyi-m2-config-gate
+    image: busybox:1.36
+    environment:
+      M2_IMAGE_PROVIDER_ENABLED: "${M2_IMAGE_PROVIDER_ENABLED:?Set M2_IMAGE_PROVIDER_ENABLED to true or false}"
+      RUOYI_MEDIA_QWEN_API_KEY: "${RUOYI_MEDIA_QWEN_API_KEY:-}"
+      TTS_ENABLED: "${TTS_ENABLED:?Set TTS_ENABLED to true or false}"
+      TTS_PROVIDER_ENDPOINT: "${TTS_PROVIDER_ENDPOINT:-}"
+      TTS_PROVIDER_API_KEY: "${TTS_PROVIDER_API_KEY:-}"
+      RELAY_ENABLED: "${RELAY_ENABLED:?Set RELAY_ENABLED to true or false}"
+      RELAY_ENDPOINT: "${RELAY_ENDPOINT:-}"
+      RELAY_ACCESS_TOKEN: "${RELAY_ACCESS_TOKEN:-}"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        require_enabled() { case "$$2" in true|false) ;; *) echo "$$1 must be true or false" >&2; exit 64;; esac; }
+        require_when_enabled() { require_enabled "$$1" "$$2"; if [ "$$2" = true ] && [ -z "$$3" ]; then echo "$$1 requires its runtime secret/configuration" >&2; exit 64; fi; }
+        require_when_enabled M2_IMAGE_PROVIDER_ENABLED "$$M2_IMAGE_PROVIDER_ENABLED" "$$RUOYI_MEDIA_QWEN_API_KEY"
+        require_when_enabled TTS_ENABLED "$$TTS_ENABLED" "$$TTS_PROVIDER_ENDPOINT"
+        require_when_enabled TTS_ENABLED "$$TTS_ENABLED" "$$TTS_PROVIDER_API_KEY"
+        require_when_enabled RELAY_ENABLED "$$RELAY_ENABLED" "$$RELAY_ENDPOINT"
+        require_when_enabled RELAY_ENABLED "$$RELAY_ENABLED" "$$RELAY_ACCESS_TOKEN"
+        exit 0
+    restart: "no"
+    logging: *container-logging
+
+  ruoyi-modules-system:
+    container_name: ruoyi-modules-system
+    build:
+      context: ./ruoyi/modules/system
+      dockerfile: dockerfile
+    ports:
+      - "9201:9201"
+    environment:
+      <<: [*common-client-env, *rabbitmq-client-env]
+      PLATFORM_DB_URL: "${PLATFORM_DB_URL:?Set PLATFORM_DB_URL}"
+      PLATFORM_DB_USER: "${PLATFORM_DB_USER:?Set PLATFORM_DB_USER}"
+      PLATFORM_DB_PASSWORD: "${PLATFORM_DB_PASSWORD:?Set PLATFORM_DB_PASSWORD}"
+      COS_REGION: "${COS_REGION:?Set COS_REGION}"
+      COS_BUCKET: "${COS_BUCKET:?Set COS_BUCKET}"
+      COS_SECRET_ID: "${COS_SECRET_ID:?Set COS_SECRET_ID}"
+      COS_SECRET_KEY: "${COS_SECRET_KEY:?Set COS_SECRET_KEY}"
+      COS_SESSION_TOKEN: "${COS_SESSION_TOKEN:-}"
+      COS_ENABLED: "true"
+      RUOYI_MEDIA_INTERNAL_TOKEN: "${RUOYI_MEDIA_INTERNAL_TOKEN:?Set RUOYI_MEDIA_INTERNAL_TOKEN}"
+    depends_on:
+      ruoyi-mysql:
+        condition: service_healthy
+      ruoyi-redis:
+        condition: service_healthy
+      ruoyi-nacos:
+        condition: service_healthy
+      ruoyi-rabbitmq:
+        condition: service_healthy
+      ruoyi-m2-config-gate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9201/actuator/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    logging: *container-logging
+
+  ruoyi-modules-session:
+    container_name: ruoyi-modules-session
+    build:
+      context: ./ruoyi/modules/session
+      dockerfile: dockerfile
+    ports:
+      - "9202:9202"
+    environment:
+      <<: [*common-client-env, *rabbitmq-client-env]
+      SESSION_DB_URL: "${SESSION_DB_URL:?Set SESSION_DB_URL}"
+      SESSION_DB_USER: "${SESSION_DB_USER:?Set SESSION_DB_USER}"
+      SESSION_DB_PASSWORD: "${SESSION_DB_PASSWORD:?Set SESSION_DB_PASSWORD}"
+      TTS_ENABLED: "${TTS_ENABLED:?Set TTS_ENABLED to true or false}"
+      TTS_PROVIDER_ENDPOINT: "${TTS_PROVIDER_ENDPOINT:-}"
+      TTS_PROVIDER_API_KEY: "${TTS_PROVIDER_API_KEY:-}"
+      RELAY_ENABLED: "${RELAY_ENABLED:?Set RELAY_ENABLED to true or false}"
+      RELAY_ENDPOINT: "${RELAY_ENDPOINT:-}"
+      RELAY_ACCESS_TOKEN: "${RELAY_ACCESS_TOKEN:-}"
+    depends_on:
+      ruoyi-mysql:
+        condition: service_healthy
+      ruoyi-redis:
+        condition: service_healthy
+      ruoyi-nacos:
+        condition: service_healthy
+      ruoyi-rabbitmq:
+        condition: service_healthy
+      ruoyi-m2-config-gate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9202/actuator/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    logging: *container-logging
+
+  ruoyi-auth:
+    container_name: ruoyi-auth
+    build:
+      context: ./ruoyi/auth
+      dockerfile: dockerfile
+    ports:
+      - "9200:9200"
+    environment:
+      <<: *common-client-env
+    depends_on:
+      ruoyi-redis:
+        condition: service_healthy
+      ruoyi-nacos:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/actuator/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+
+  ruoyi-gateway:
+    container_name: ruoyi-gateway
+    build:
+      context: ./ruoyi/gateway
+      dockerfile: dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *common-client-env
+    depends_on:
+      ruoyi-auth:
+        condition: service_healthy
+      ruoyi-modules-system:
+        condition: service_healthy
+      ruoyi-modules-session:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+
+  ruoyi-media-api:
+    container_name: ruoyi-media-api
+    build:
+      context: ../../ruoyi-media
+      dockerfile: Dockerfile
+    command: ["uvicorn", "ruoyi_media.api.app:app", "--host", "0.0.0.0", "--port", "8002"]
+    ports:
+      - "8002:8002"
+    environment:
+      <<: *rabbitmq-client-env
+      RUOYI_MEDIA_HOST: 0.0.0.0
+      RUOYI_MEDIA_PORT: "8002"
+      RUOYI_MEDIA_INTERNAL_PLATFORM_URL: "${RUOYI_MEDIA_INTERNAL_PLATFORM_URL:-http://ruoyi-modules-system:9201}"
+      M2_IMAGE_PROVIDER_ENABLED: "${M2_IMAGE_PROVIDER_ENABLED:?Set M2_IMAGE_PROVIDER_ENABLED to true or false}"
+    depends_on:
+      ruoyi-rabbitmq:
+        condition: service_healthy
+      ruoyi-modules-system:
+        condition: service_healthy
+      ruoyi-m2-config-gate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    tmpfs:
+      - /tmp/ruoyi-media:rw,noexec,nosuid,nodev,size=268435456,mode=0700
+    logging: *container-logging
+
+  ruoyi-media-worker:
+    container_name: ruoyi-media-worker
+    build:
+      context: ../../ruoyi-media
+      dockerfile: Dockerfile
+    command: ["python", "-m", "ruoyi_media.worker", "--interval", "30"]
+    environment:
+      <<: *rabbitmq-client-env
+      RUOYI_MEDIA_INTERNAL_PLATFORM_URL: "${RUOYI_MEDIA_INTERNAL_PLATFORM_URL:-http://ruoyi-modules-system:9201}"
+      RUOYI_MEDIA_WORKER_ID: "${RUOYI_MEDIA_WORKER_ID:-compose-media-worker}"
+      RUOYI_MEDIA_INTERNAL_TOKEN: "${RUOYI_MEDIA_INTERNAL_TOKEN:?Set RUOYI_MEDIA_INTERNAL_TOKEN}"
+      RUOYI_MEDIA_COS_REGION: "${COS_REGION:?Set COS_REGION}"
+      RUOYI_MEDIA_COS_BUCKET: "${COS_BUCKET:?Set COS_BUCKET}"
+      RUOYI_MEDIA_COS_SECRET_ID: "${COS_SECRET_ID:?Set COS_SECRET_ID}"
+      RUOYI_MEDIA_COS_SECRET_KEY: "${COS_SECRET_KEY:?Set COS_SECRET_KEY}"
+      RUOYI_MEDIA_COS_SESSION_TOKEN: "${COS_SESSION_TOKEN:-}"
+      RUOYI_MEDIA_QWEN_API_KEY: "${RUOYI_MEDIA_QWEN_API_KEY:-}"
+      RUOYI_MEDIA_QWEN_ENDPOINT: "${RUOYI_MEDIA_QWEN_ENDPOINT:-https://dashscope.aliyuncs.com}"
+      M2_IMAGE_PROVIDER_ENABLED: "${M2_IMAGE_PROVIDER_ENABLED:?Set M2_IMAGE_PROVIDER_ENABLED to true or false}"
+      TMPDIR: /tmp/ruoyi-media
+    depends_on:
+      ruoyi-rabbitmq:
+        condition: service_healthy
+      ruoyi-modules-system:
+        condition: service_healthy
+      ruoyi-m2-config-gate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    tmpfs:
+      - /tmp/ruoyi-media:rw,noexec,nosuid,nodev,size=536870912,mode=0700
+    logging: *container-logging
+
   ruoyi-nginx:
     container_name: ruoyi-nginx
     image: nginx
@@ -66,115 +328,50 @@ services:
       - ./nginx/logs:/var/log/nginx
       - ./nginx/conf.d:/etc/nginx/conf.d
     depends_on:
-      - ruoyi-gateway
-    links:
-      - ruoyi-gateway
-  ruoyi-gateway:
-    environment:
-      NACOS_ADDR: "ruoyi-nacos:8848"
-      REDIS_HOST: "ruoyi-redis"
-      DB_URL: "jdbc:mysql://ruoyi-mysql:3306/ry-cloud?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
-      DB_USER: "root"
-      DB_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}"
-    container_name: ruoyi-gateway
-    build:
-      context: ./ruoyi/gateway
-      dockerfile: dockerfile
-    ports:
-      - "8080:8080"
-    depends_on:
-      - ruoyi-redis
-    links:
-      - ruoyi-redis
-  ruoyi-auth:
-    environment:
-      NACOS_ADDR: "ruoyi-nacos:8848"
-      REDIS_HOST: "ruoyi-redis"
-      DB_URL: "jdbc:mysql://ruoyi-mysql:3306/ry-cloud?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
-      DB_USER: "root"
-      DB_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}"
-    container_name: ruoyi-auth
-    build:
-      context: ./ruoyi/auth
-      dockerfile: dockerfile
-    ports:
-      - "9200:9200"
-    depends_on:
-      - ruoyi-redis
-    links:
-      - ruoyi-redis
-  ruoyi-modules-system:
-    environment:
-      NACOS_ADDR: "ruoyi-nacos:8848"
-      REDIS_HOST: "ruoyi-redis"
-      DB_URL: "jdbc:mysql://ruoyi-mysql:3306/ry-cloud?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
-      DB_USER: "root"
-      DB_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}"
-      COS_REGION: "${COS_REGION:-}"
-      COS_BUCKET: "${COS_BUCKET:-}"
-      COS_SECRET_ID: "${COS_SECRET_ID:-}"
-      COS_SECRET_KEY: "${COS_SECRET_KEY:-}"
-      COS_SESSION_TOKEN: "${COS_SESSION_TOKEN:-}"
-      COS_ENABLED: "${COS_ENABLED:-false}"
-    container_name: ruoyi-modules-system
-    build:
-      context: ./ruoyi/modules/system
-      dockerfile: dockerfile
-    ports:
-      - "9201:9201"
-    depends_on:
-      - ruoyi-redis
-      - ruoyi-mysql
-    links:
-      - ruoyi-redis
-      - ruoyi-mysql
+      ruoyi-gateway:
+        condition: service_healthy
+
   ruoyi-modules-gen:
-    environment:
-      NACOS_ADDR: "ruoyi-nacos:8848"
-      REDIS_HOST: "ruoyi-redis"
-      DB_URL: "jdbc:mysql://ruoyi-mysql:3306/ry-cloud?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
-      DB_USER: "root"
-      DB_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}"
-      TOOL_DB_URL: "${TOOL_DB_URL:-}"
-      TOOL_DB_USER: "${TOOL_DB_USER:-}"
-      TOOL_DB_PASSWORD: "${TOOL_DB_PASSWORD:-}"
     profiles: ["devtools"]
     container_name: ruoyi-modules-gen
     build:
       context: ./ruoyi/modules/gen
       dockerfile: dockerfile
     ports:
-      - "9202:9202"
-    depends_on:
-      - ruoyi-mysql
-    links:
-      - ruoyi-mysql
-  ruoyi-modules-job:
+      - "9203:9203"
     environment:
-      NACOS_ADDR: "ruoyi-nacos:8848"
-      REDIS_HOST: "ruoyi-redis"
-      DB_URL: "jdbc:mysql://ruoyi-mysql:3306/ry-cloud?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
-      DB_USER: "root"
-      DB_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}"
+      <<: *common-client-env
+      DB_URL: "${LEGACY_DB_URL:?Set LEGACY_DB_URL}"
+      DB_USER: "${LEGACY_DB_USER:?Set LEGACY_DB_USER}"
+      DB_PASSWORD: "${LEGACY_DB_PASSWORD:?Set LEGACY_DB_PASSWORD}"
+      TOOL_DB_URL: "${TOOL_DB_URL:-}"
+      TOOL_DB_USER: "${TOOL_DB_USER:-}"
+      TOOL_DB_PASSWORD: "${TOOL_DB_PASSWORD:-}"
+    depends_on:
+      ruoyi-mysql:
+        condition: service_healthy
+      ruoyi-nacos:
+        condition: service_healthy
+
+  ruoyi-modules-job:
     container_name: ruoyi-modules-job
     build:
       context: ./ruoyi/modules/job
       dockerfile: dockerfile
     ports:
       - "9203:9203"
-    depends_on:
-      - ruoyi-mysql
-    links:
-      - ruoyi-mysql
-  ruoyi-visual-monitor:
     environment:
-      MONITOR_USER: "${MONITOR_USER:-admin}"
-      MONITOR_PASSWORD: "${MONITOR_PASSWORD:-}"
-      NACOS_ADDR: "ruoyi-nacos:8848"
-      REDIS_HOST: "ruoyi-redis"
-      DB_URL: "jdbc:mysql://ruoyi-mysql:3306/ry-cloud?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
-      DB_USER: "root"
-      DB_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}"
+      <<: *common-client-env
+      DB_URL: "${LEGACY_DB_URL:?Set LEGACY_DB_URL}"
+      DB_USER: "${LEGACY_DB_USER:?Set LEGACY_DB_USER}"
+      DB_PASSWORD: "${LEGACY_DB_PASSWORD:?Set LEGACY_DB_PASSWORD}"
+    depends_on:
+      ruoyi-mysql:
+        condition: service_healthy
+      ruoyi-nacos:
+        condition: service_healthy
+
+  ruoyi-visual-monitor:
     profiles: ["monitoring"]
     container_name: ruoyi-visual-monitor
     build:
@@ -182,3 +379,15 @@ services:
       dockerfile: dockerfile
     ports:
       - "9100:9100"
+    environment:
+      <<: *common-client-env
+      MONITOR_USER: "${MONITOR_USER:-admin}"
+      MONITOR_PASSWORD: "${MONITOR_PASSWORD:?Set MONITOR_PASSWORD}"
+      DB_URL: "${LEGACY_DB_URL:?Set LEGACY_DB_URL}"
+      DB_USER: "${LEGACY_DB_USER:?Set LEGACY_DB_USER}"
+      DB_PASSWORD: "${LEGACY_DB_PASSWORD:?Set LEGACY_DB_PASSWORD}"
+    depends_on:
+      ruoyi-mysql:
+        condition: service_healthy
+      ruoyi-nacos:
+        condition: service_healthy

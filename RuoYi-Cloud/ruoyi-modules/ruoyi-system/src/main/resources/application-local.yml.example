@@ -1,0 +1,10 @@
+platform:
+  storage:
+    cos:
+      enabled: false
+      region: ap-guangzhou
+      bucket: ln-virtual-human-platform-1411676391
+      secret-id: ""
+      secret-key: ""
+      session-token: ""
+      read-url-seconds: 900

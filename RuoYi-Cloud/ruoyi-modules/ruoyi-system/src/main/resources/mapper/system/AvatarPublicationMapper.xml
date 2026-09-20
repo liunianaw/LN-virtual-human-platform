@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.asset.mapper.AvatarPublicationMapper">
+    <resultMap id="AvatarVersionResult" type="com.ruoyi.system.asset.domain.AvatarVersionRecord">
+        <id property="id" column="id"/>
+        <result property="avatarId" column="avatar_id"/>
+        <result property="accountId" column="account_id"/>
+        <result property="avatarStatus" column="avatar_status"/>
+        <result property="versionStatus" column="version_status"/>
+        <result property="baseFileId" column="base_file_id"/>
+        <result property="manifestFileId" column="manifest_file_id"/>
+        <result property="previewFileId" column="preview_file_id"/>
+        <result property="frameWidth" column="frame_width"/>
+        <result property="frameHeight" column="frame_height"/>
+        <result property="anchorX" column="anchor_x"/>
+        <result property="anchorY" column="anchor_y"/>
+        <result property="qaReport" column="qa_report"/>
+    </resultMap>
+
+    <resultMap id="AvatarActionResult" type="com.ruoyi.system.asset.domain.AvatarActionRecord">
+        <result property="actionCode" column="action_code"/>
+        <result property="atlasFileId" column="atlas_file_id"/>
+        <result property="previewFileId" column="preview_file_id"/>
+        <result property="frameCount" column="frame_count"/>
+        <result property="fps" column="fps"/>
+        <result property="loopEnabled" column="loop_enabled"/>
+        <result property="frameLayout" column="frame_layout"/>
+    </resultMap>
+
+    <resultMap id="AvatarResult" type="com.ruoyi.system.asset.domain.AvatarRecord">
+        <id property="id" column="id"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="AssetFileResult" type="com.ruoyi.system.asset.domain.AssetFile">
+        <id property="id" column="id"/>
+        <result property="accountId" column="account_id"/>
+        <result property="purpose" column="purpose"/>
+        <result property="storageProvider" column="storage_provider"/>
+        <result property="bucket" column="bucket"/>
+        <result property="objectKey" column="object_key"/>
+        <result property="contentType" column="content_type"/>
+        <result property="sizeBytes" column="size_bytes"/>
+        <result property="sha256" column="sha256"/>
+        <result property="width" column="width"/>
+        <result property="height" column="height"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <sql id="versionColumns">
+        v.id, v.avatar_id, v.account_id, a.status as avatar_status, v.status as version_status,
+        v.base_file_id, v.manifest_file_id, v.preview_file_id, v.frame_width, v.frame_height,
+        v.anchor_x, v.anchor_y, v.qa_report
+    </sql>
+
+    <select id="selectOwnedVersion" resultMap="AvatarVersionResult">
+        select <include refid="versionColumns"/>
+        from p_avatar_version v join p_avatar a on a.id = v.avatar_id and a.account_id = v.account_id
+        where v.account_id = #{accountId} and v.avatar_id = #{avatarId} and v.id = #{versionId}
+    </select>
+
+    <select id="selectOwnedVersionForUpdate" resultMap="AvatarVersionResult">
+        select <include refid="versionColumns"/>
+        from p_avatar_version v join p_avatar a on a.id = v.avatar_id and a.account_id = v.account_id
+        where v.account_id = #{accountId} and v.avatar_id = #{avatarId} and v.id = #{versionId}
+        for update
+    </select>
+
+    <select id="selectOwnedAvatarForUpdate" resultMap="AvatarResult">
+        select id, status from p_avatar where account_id = #{accountId} and id = #{avatarId} for update
+    </select>
+
+    <select id="selectActions" resultMap="AvatarActionResult">
+        select action_code, atlas_file_id, preview_file_id, frame_count, fps, loop_enabled, frame_layout
+        from p_avatar_action where avatar_version_id = #{avatarVersionId} order by action_code
+    </select>
+
+    <select id="selectAvailableOwnedFile" resultMap="AssetFileResult">
+        select id, account_id, purpose, storage_provider, bucket, object_key, content_type, size_bytes, sha256,
+               width, height, status
+        from p_file where account_id = #{accountId} and id = #{fileId} and status = 'AVAILABLE'
+    </select>
+
+    <select id="countUnavailableVersionFiles" resultType="int">
+        select count(*) from p_avatar_version v
+        left join p_file base on base.id = v.base_file_id and base.account_id = #{accountId} and base.status = 'AVAILABLE'
+        left join p_file manifest on manifest.id = v.manifest_file_id and manifest.account_id = #{accountId} and manifest.status = 'AVAILABLE'
+        left join p_file preview on preview.id = v.preview_file_id and preview.account_id = #{accountId} and preview.status = 'AVAILABLE'
+        where v.id = #{avatarVersionId}
+          and (v.base_file_id is null or v.manifest_file_id is null or v.preview_file_id is null
+               or base.id is null or manifest.id is null or preview.id is null)
+    </select>
+
+    <select id="countUnavailableActionFiles" resultType="int">
+        select count(*) from p_avatar_action a
+        left join p_file atlas on atlas.id = a.atlas_file_id and atlas.account_id = #{accountId} and atlas.status = 'AVAILABLE'
+        left join p_file preview on preview.id = a.preview_file_id and preview.account_id = #{accountId} and preview.status = 'AVAILABLE'
+        where a.avatar_version_id = #{avatarVersionId}
+          and (atlas.id is null or (a.preview_file_id is not null and preview.id is null))
+    </select>
+
+    <update id="updateVersionToReview">
+        update p_avatar_version set status = 'REVIEW', updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{avatarVersionId} and status = 'BUILDING'
+    </update>
+
+    <update id="updateTaskToReview">
+        update p_generation_task
+        set status = 'SUCCEEDED', internal_state = 'REVIEW_REQUIRED', progress = 100,
+            finished_at = utc_timestamp(3), updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{taskId} and avatar_version_id = #{avatarVersionId}
+          and status in ('QUEUED', 'PROCESSING')
+    </update>
+
+    <update id="updateVersionToPublished">
+        update p_avatar_version
+        set status = 'PUBLISHED', accepted_by = #{acceptedBy}, accepted_at = utc_timestamp(3),
+            published_at = utc_timestamp(3), updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{avatarVersionId} and status = 'REVIEW'
+    </update>
+
+    <update id="updateAvatarCurrentVersion">
+        update p_avatar
+        set current_version_id = #{avatarVersionId}, status = 'PUBLISHED', revision = revision + 1,
+            updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{avatarId} and status not in ('DELETING', 'DELETED', 'DISABLED')
+    </update>
+
+    <select id="countActiveReferences" resultType="int">
+        select count(*) from p_resource_reference r
+        join p_avatar_version v on v.id = r.resource_id
+        where r.resource_type = 'AVATAR_VERSION' and v.avatar_id = #{avatarId}
+          and r.state in ('RESERVED', 'CONFIRMED')
+    </select>
+
+    <select id="countActiveGenerationTasks" resultType="int">
+        select count(*) from p_generation_task
+        where account_id = #{accountId} and avatar_id = #{avatarId} and status in ('QUEUED', 'PROCESSING')
+    </select>
+
+    <update id="markAvatarDeleting">
+        update p_avatar set status = 'DELETING', updated_at = utc_timestamp(3), revision = revision + 1
+        where account_id = #{accountId} and id = #{avatarId} and status not in ('DELETING', 'DELETED')
+    </update>
+</mapper>
