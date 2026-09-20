@@ -41,6 +41,11 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
         <!-- JDBC and Flyway run the platform_db versioned migrations at startup. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

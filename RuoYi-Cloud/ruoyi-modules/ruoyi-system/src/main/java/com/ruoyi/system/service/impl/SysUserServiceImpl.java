@@ -279,12 +279,15 @@ public class SysUserServiceImpl implements ISysUserService
      * @return 结果
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean registerUser(SysUser user)
     {
         // 组织结构仅保留数据库兼容，外部输入不能设置部门或岗位。
         user.setDeptId(null);
         user.setPostIds(null);
-        return userMapper.insertUser(user) > 0;
+        if (userMapper.insertUser(user) <= 0) return false;
+        insertUserRole(user.getUserId(), new Long[] { 2L });
+        return true;
     }
 
     /**

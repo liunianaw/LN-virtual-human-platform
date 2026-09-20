@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import time
@@ -51,19 +52,19 @@ def parse_args(arguments: Sequence[str] | None = None) -> argparse.Namespace:
         help="process exactly one versioned AVATAR_GENERATION_REQUESTED JSON event using configured system/COS/provider adapters",
     )
     parser.add_argument(
-        "--consume-outbox",
+        "--consume-rabbit",
         action="store_true",
-        help="poll the platform outbox and process leased Avatar generation events",
+        help="consume RabbitMQ Avatar generation wake-up messages",
     )
     parsed = parser.parse_args(arguments)
     if parsed.interval < 0:
         parser.error("--interval must be zero or greater")
     if parsed.max_heartbeats is not None and parsed.max_heartbeats < 0:
         parser.error("--max-heartbeats must be zero or greater")
-    if parsed.consume_outbox and parsed.event_file is not None:
-        parser.error("--consume-outbox cannot be combined with --event-file")
-    if parsed.consume_outbox and parsed.interval <= 0:
-        parser.error("--consume-outbox requires --interval greater than zero")
+    if parsed.consume_rabbit and parsed.event_file is not None:
+        parser.error("--consume-rabbit cannot be combined with --event-file")
+    if parsed.consume_rabbit and parsed.interval <= 0:
+        parser.error("--consume-rabbit requires --interval greater than zero")
     return parsed
 
 
@@ -77,8 +78,8 @@ def main(arguments: Sequence[str] | None = None) -> None:
         return
     if args.once:
         return
-    if args.consume_outbox:
-        _consume_outbox(args.interval)
+    if args.consume_rabbit:
+        _consume_rabbit(args.interval)
         return
 
     sent = 0
@@ -118,55 +119,11 @@ def _generation_worker():
     )
 
 
-def _consume_outbox(interval: float) -> None:
-    """Poll one leased event at a time; no provider call is retried implicitly."""
-    from .generation import WorkerOutcome
-    from .platform_http import PreflightClaimFailure, SystemGenerationPlatform
+def _consume_rabbit(interval: float) -> None:
+    from .rabbit_consumer import GenerationRabbitConsumer
+    from .platform_http import SystemGenerationPlatform
 
-    worker = _generation_worker()
-    worker_id = os.environ["RUOYI_MEDIA_WORKER_ID"]
-    platform = SystemGenerationPlatform.from_environment()
-    while True:
-        try:
-            event = platform.claim_outbox(worker_id)
-            if event is None:
-                emit("outbox_empty")
-            elif event.message["eventType"] != "AVATAR_GENERATION_REQUESTED":
-                # Do not discard an event owned by another consumer.  It stays
-                # leased until the platform routes it to a compatible worker.
-                emit("outbox_unsupported")
-            else:
-                try:
-                    _drain_avatar_event(worker, platform, worker_id, event.outbox_id, event.message, WorkerOutcome)
-                except PreflightClaimFailure as error:
-                    # The platform released a never-submitted step to READY.
-                    # Keep the outbox unacknowledged; a later lease can resume
-                    # it after the preflight condition is repaired.
-                    emit("generation_preflight_released_" + error.code.lower())
-        except Exception as error:
-            # Keep the process observable without recording provider payloads,
-            # credentials, or reference metadata in the worker logs.
-            emit("outbox_error_" + type(error).__name__.lower())
-        time.sleep(interval)
-        emit("heartbeat")
-
-
-def _drain_avatar_event(worker, platform, worker_id: str, outbox_id: str, message: dict[str, object], outcome_type) -> None:
-    """Process all ready actions for one task before acknowledging its outbox event.
-
-    `GenerationWorker.handle` intentionally claims only one action.  Keeping
-    the outbox lease while it reports successive successful actions avoids
-    acknowledging the task after the first of its eight required actions.
-    """
-    while True:
-        outcome = worker.handle(message)
-        emit("generation_" + outcome.value.lower())
-        if outcome is outcome_type.REPORTED_SUCCEEDED:
-            continue
-        if outcome in {outcome_type.NO_WORK, outcome_type.REPORTED_FAILED, outcome_type.REPORTED_UNKNOWN}:
-            platform.mark_outbox_sent(outbox_id, worker_id)
-            emit("outbox_sent")
-        return
+    asyncio.run(GenerationRabbitConsumer(_generation_worker(), SystemGenerationPlatform.from_environment(), emit, interval).run())
 
 
 if __name__ == "__main__":

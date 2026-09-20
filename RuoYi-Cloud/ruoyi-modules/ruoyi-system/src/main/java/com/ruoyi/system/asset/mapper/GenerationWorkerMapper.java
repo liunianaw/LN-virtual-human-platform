@@ -2,11 +2,22 @@ package com.ruoyi.system.asset.mapper;
 
 import org.apache.ibatis.annotations.Param;
 import com.ruoyi.system.asset.domain.ClaimedGenerationStep;
-import com.ruoyi.system.asset.domain.OutboxEvent;
 
 /** 受租约保护的制作 Worker 持久化边界。 */
 public interface GenerationWorkerMapper
 {
+    int insertActionResult(@Param("id") Long id, @Param("claim") ClaimedGenerationStep claim,
+        @Param("attemptId") Long attemptId, @Param("atlasId") Long atlasId, @Param("manifestId") Long manifestId,
+        @Param("manifest") String manifest, @Param("hash") byte[] hash);
+    int upsertLatestAttempt(@Param("claim") ClaimedGenerationStep claim, @Param("attemptId") Long attemptId);
+    int saveProviderReceipt(@Param("attemptId") Long attemptId, @Param("stepId") Long stepId,
+        @Param("leaseEpoch") Long leaseEpoch, @Param("providerTaskId") String providerTaskId,
+        @Param("providerRequestId") String providerRequestId);
+    int saveStepReceipt(@Param("stepId") Long stepId, @Param("leaseEpoch") Long leaseEpoch,
+        @Param("receipt") String receipt);
+    int resumeAttempt(@Param("attemptId") Long attemptId, @Param("stepId") Long stepId,
+        @Param("leaseEpoch") Long leaseEpoch, @Param("requestHash") byte[] requestHash);
+
     ClaimedGenerationStep selectReadyActionForUpdate(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
 
     ClaimedGenerationStep selectLeaseForUpdate(@Param("accountId") Long accountId, @Param("taskId") Long taskId,
@@ -40,6 +51,12 @@ public interface GenerationWorkerMapper
 
     int markTaskFailed(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
 
+    int updateTaskProgress(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
+
+    int markTaskSucceeded(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
+
+    int countActiveSteps(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
+
     int updateStepSuccess(@Param("accountId") Long accountId, @Param("taskId") Long taskId, @Param("stepId") Long stepId,
         @Param("workerId") String workerId, @Param("leaseEpoch") Long leaseEpoch, @Param("fileId") Long fileId,
         @Param("metadata") String metadata);
@@ -47,10 +64,4 @@ public interface GenerationWorkerMapper
     int updateAttemptSuccess(@Param("attemptId") Long attemptId, @Param("stepId") Long stepId,
         @Param("attemptNo") Integer attemptNo, @Param("leaseEpoch") Long leaseEpoch, @Param("fileId") Long fileId);
 
-    int countUnsucceededSteps(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
-
-    OutboxEvent selectPendingOutboxForUpdate();
-    int claimOutbox(@Param("id") Long id, @Param("workerId") String workerId);
-    int markOutboxSent(@Param("id") Long id, @Param("workerId") String workerId);
-    int renewTaskOutbox(@Param("accountId") Long accountId, @Param("taskId") Long taskId, @Param("workerId") String workerId);
 }

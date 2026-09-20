@@ -1,4 +1,4 @@
-package com.ruoyi.system.asset.service;
+package com.ruoyi.system.asset.service.impl;
 
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -12,29 +12,28 @@ import com.ruoyi.common.core.constant.HttpStatus;
 import com.ruoyi.common.core.exception.ServiceException;
 import com.ruoyi.system.asset.domain.AssetFile;
 import com.ruoyi.system.asset.domain.ClaimedGenerationStep;
-import com.ruoyi.system.asset.domain.OutboxEvent;
+import com.ruoyi.system.asset.dto.GenerationStoredObject;
 import com.ruoyi.system.asset.mapper.AssetMapper;
 import com.ruoyi.system.asset.mapper.GenerationWorkerMapper;
+import com.ruoyi.system.asset.service.IGenerationWorkerService;
 import com.ruoyi.system.storage.ObjectStorage;
 
 /** ruoyi-media GenerationPlatform/ObjectWriter ports 的平台侧租约实现。 */
 @Service
-public class GenerationWorkerService
+public class GenerationWorkerServiceImpl implements IGenerationWorkerService
 {
     private final GenerationWorkerMapper workerMapper;
     private final AssetMapper assetMapper;
-    private final AvatarPublicationService publicationService;
     private final ObjectProvider<ObjectStorage> storageProvider;
     private final TransactionTemplate transactions;
     private final ObjectMapper objectMapper;
 
-    public GenerationWorkerService(GenerationWorkerMapper workerMapper, AssetMapper assetMapper,
-        AvatarPublicationService publicationService, ObjectProvider<ObjectStorage> storageProvider,
+    public GenerationWorkerServiceImpl(GenerationWorkerMapper workerMapper, AssetMapper assetMapper,
+        ObjectProvider<ObjectStorage> storageProvider,
         TransactionTemplate transactions, ObjectMapper objectMapper)
     {
         this.workerMapper = workerMapper;
         this.assetMapper = assetMapper;
-        this.publicationService = publicationService;
         this.storageProvider = storageProvider;
         this.transactions = transactions;
         this.objectMapper = objectMapper;
@@ -50,7 +49,7 @@ public class GenerationWorkerService
             if (workerMapper.claimStep(step.getStepId(), workerId, step.getLeaseEpoch()) != 1) throw staleLease();
             workerMapper.startTask(accountId, taskId);
             long epoch = step.getLeaseEpoch() + 1;
-            int attempt = step.getAttemptNo() + 1;
+            int attempt = step.getAttemptNo() + ("READY".equals(step.getStepStatus()) ? 1 : 0);
             ObjectStorage storage = requireStorage();
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("accountId", accountId);
@@ -68,22 +67,6 @@ public class GenerationWorkerService
         });
     }
 
-    public OutboxEvent claimOutbox(String workerId)
-    {
-        if (safeToken(workerId, 128) == null) throw new ServiceException("Worker 身份无效");
-        return transactions.execute(status -> {
-            OutboxEvent event = workerMapper.selectPendingOutboxForUpdate();
-            if (event == null) return null;
-            if (workerMapper.claimOutbox(event.getId(), workerId) != 1) throw staleLease();
-            return event;
-        });
-    }
-
-    public void markOutboxSent(Long outboxId, String workerId)
-    {
-        if (outboxId == null || outboxId <= 0 || safeToken(workerId, 128) == null || workerMapper.markOutboxSent(outboxId, workerId) != 1) throw staleLease();
-    }
-
     public Map<String, Object> prepareAttempt(Long accountId, Long taskId, Long stepId, String workerId, Long leaseEpoch,
         String requestHash)
     {
@@ -92,10 +75,23 @@ public class GenerationWorkerService
             throw new ServiceException("Worker attempt 参数无效");
         return transactions.execute(status -> {
             ClaimedGenerationStep claim = currentLease(accountId, taskId, stepId, workerId, leaseEpoch);
-            Long attemptId = nextId();
+            if (claim.getExistingAttemptId() != null)
+            {
+                if (workerMapper.resumeAttempt(claim.getExistingAttemptId(), stepId, leaseEpoch,
+                    java.util.HexFormat.of().parseHex(requestHash)) != 1) throw staleLease();
+                workerMapper.upsertLatestAttempt(claim, claim.getExistingAttemptId());
+                Map<String, Object> resumed = new LinkedHashMap<>();
+                resumed.put("attemptId", claim.getExistingAttemptId());
+                resumed.put("providerRequestKey", claim.getProviderRequestKey());
+                resumed.put("recoveryOnly", true);
+                resumed.put("receiptJson", claim.getReceiptJson());
+                return resumed;
+            }
+            Long attemptId = claim.getReservedAttemptId() == null ? nextId() : claim.getReservedAttemptId();
             String providerRequestKey = UUID.randomUUID().toString().replace("-", "");
             workerMapper.insertAttempt(attemptId, claim, providerRequestKey, java.util.HexFormat.of().parseHex(requestHash));
-            return Map.of("attemptId", attemptId, "providerRequestKey", providerRequestKey);
+            workerMapper.upsertLatestAttempt(claim, attemptId);
+            return Map.of("attemptId", attemptId, "providerRequestKey", providerRequestKey, "recoveryOnly", false);
         });
     }
 
@@ -104,41 +100,64 @@ public class GenerationWorkerService
     {
         validateIdentity(accountId, taskId, workerId);
         if (attemptId == null || attemptId <= 0 || stepId == null || stepId <= 0 || leaseEpoch == null || leaseEpoch <= 0
-            || !("RUNNING".equals(state) || "UNKNOWN".equals(state) || "FAILED".equals(state)))
+            || !("RUNNING".equals(state) || "POLLING".equals(state) || "UNKNOWN".equals(state) || "FAILED".equals(state)))
             throw new ServiceException("Worker progress 参数无效");
         transactions.executeWithoutResult(status -> {
             ClaimedGenerationStep claim = currentLease(accountId, taskId, stepId, workerId, leaseEpoch);
-            String attemptStatus = "RUNNING".equals(state) ? "SUBMITTED" : state;
+            String attemptStatus = ("RUNNING".equals(state) || "POLLING".equals(state)) ? "SUBMITTED" : state;
             if (workerMapper.updateAttemptProgress(attemptId, stepId, claim.getAttemptNo(), leaseEpoch, attemptStatus,
                 safeToken(providerRequestId, 128), safeToken(errorCode, 64)) != 1
                 || workerMapper.updateStepProgress(accountId, taskId, stepId, workerId, leaseEpoch, state, safeToken(errorCode, 64)) != 1)
                 throw staleLease();
-            workerMapper.renewTaskOutbox(accountId, taskId, workerId);
+        });
+    }
+
+    public void saveReceipt(Long accountId, Long taskId, Long stepId, Long attemptId, String workerId,
+        Long leaseEpoch, Map<String, Object> receipt)
+    {
+        validateIdentity(accountId, taskId, workerId);
+        if (receipt == null || attemptId == null || stepId == null || leaseEpoch == null)
+            throw new ServiceException("Worker 回执参数无效");
+        // Only protocol recovery fields; never accept arbitrary credential-bearing maps.
+        if (!java.util.Set.of("providerTaskId", "requestId", "stage", "endpoint", "imageUrl", "usage", "errorCode", "submittedAt", "recoveryFailures").containsAll(receipt.keySet())
+            || json(receipt).length() > 32768) throw new ServiceException("Worker 回执字段无效");
+        String providerTaskId = receipt.get("providerTaskId") instanceof String value ? safeToken(value, 128) : null;
+        String requestId = receipt.get("requestId") instanceof String value ? safeToken(value, 128) : null;
+        if (providerTaskId == null && requestId == null) throw new ServiceException("Worker 回执缺少有效标识");
+        transactions.executeWithoutResult(status -> {
+            ClaimedGenerationStep claim = currentLease(accountId, taskId, stepId, workerId, leaseEpoch);
+            if (!attemptId.equals(claim.getExistingAttemptId())) throw staleLease();
+            if (workerMapper.saveProviderReceipt(attemptId, stepId, leaseEpoch, providerTaskId, requestId) != 1
+                || workerMapper.saveStepReceipt(stepId, leaseEpoch, json(receipt)) != 1) throw staleLease();
         });
     }
 
     public void submitSucceeded(Long accountId, Long taskId, Long stepId, Long attemptId, String workerId, Long leaseEpoch,
-        List<StoredObject> objects, Map<String, Object> manifest)
+        List<GenerationStoredObject> objects, Map<String, Object> manifest)
     {
         validateIdentity(accountId, taskId, workerId);
         if (attemptId == null || attemptId <= 0 || stepId == null || stepId <= 0 || leaseEpoch == null || leaseEpoch <= 0
             || objects == null || objects.isEmpty()) throw new ServiceException("Worker result 参数无效");
         transactions.executeWithoutResult(status -> {
             ClaimedGenerationStep claim = currentLease(accountId, taskId, stepId, workerId, leaseEpoch);
-            Long primaryFileId = registerObjects(claim, objects);
+            if (manifest == null || !claim.getActionCode().equals(manifest.get("action"))
+                || !(manifest.get("frames") instanceof List<?> frames) || frames.size() != 6
+                || !(manifest.get("frameCount") instanceof Number count) || count.intValue() != 6)
+                throw new ServiceException("Worker 动作布局不完整或动作不匹配");
+            Map<String, AssetFile> files = registerObjects(claim, objects);
+            AssetFile atlas = files.get("atlas.png");
+            AssetFile manifestFile = files.get("manifest.json");
+            if (atlas == null || manifestFile == null) throw new ServiceException("Worker 缺少动作图集或清单");
+            Long primaryFileId = atlas.getId();
+            workerMapper.insertActionResult(nextId(), claim, attemptId, atlas.getId(), manifestFile.getId(),
+                json(manifest), atlas.getSha256());
             String metadata = json(Map.of("manifest", manifest == null ? Map.of() : manifest, "objectCount", objects.size()));
             if (workerMapper.updateStepSuccess(accountId, taskId, stepId, workerId, leaseEpoch, primaryFileId, metadata) != 1
                 || workerMapper.updateAttemptSuccess(attemptId, stepId, claim.getAttemptNo(), leaseEpoch, primaryFileId) != 1)
                 throw staleLease();
+            workerMapper.updateTaskProgress(accountId, taskId);
+            workerMapper.markTaskSucceeded(accountId, taskId);
         });
-        if (workerMapper.countUnsucceededSteps(accountId, taskId) == 0)
-        {
-            try { publicationService.markGenerationReadyForReview(accountId, taskId); }
-            catch (ServiceException ignored)
-            {
-                // 完整候选包尚未登记时保留在 PROCESSING，不把不完整结果标为 REVIEW。
-            }
-        }
     }
 
     /**
@@ -157,6 +176,7 @@ public class GenerationWorkerService
             if (workerMapper.finishTerminalStep(accountId, taskId, stepId, workerId, leaseEpoch, state) != 1
                 || workerMapper.finishTerminalAttempt(attemptId, stepId, claim.getAttemptNo(), leaseEpoch, state) != 1)
                 throw staleLease();
+            workerMapper.updateTaskProgress(accountId, taskId);
             workerMapper.markTaskFailed(accountId, taskId);
         });
     }
@@ -172,26 +192,37 @@ public class GenerationWorkerService
         });
     }
 
-    private Long registerObjects(ClaimedGenerationStep claim, List<StoredObject> objects)
+    public boolean hasActiveSteps(Long accountId, Long taskId)
+    {
+        if (accountId == null || accountId <= 0 || taskId == null || taskId <= 0)
+            throw new ServiceException("Worker task 参数无效");
+        return workerMapper.countActiveSteps(accountId, taskId) > 0;
+    }
+
+    private Map<String, AssetFile> registerObjects(ClaimedGenerationStep claim, List<GenerationStoredObject> objects)
     {
         ObjectStorage storage = requireStorage();
-        Long primary = null;
+        Map<String, AssetFile> files = new LinkedHashMap<>();
         String prefix = "avatar-generation/" + claim.getAccountId() + "/" + claim.getTaskId() + "/" + claim.getStepId() + "/" + claim.getLeaseEpoch() + "/";
-        for (StoredObject object : objects)
+        for (GenerationStoredObject object : objects)
         {
             if (object == null || object.objectKey() == null || !object.objectKey().startsWith(prefix) || object.objectKey().contains("..")
                 || object.sha256() == null || !object.sha256().matches("[0-9a-fA-F]{64}") || object.sizeBytes() < 0
                 || !("image/png".equals(object.contentType()) || "application/json".equals(object.contentType())))
                 throw new ServiceException("Worker 输出对象不符合平台前缀或元数据约束");
+            String name = object.objectKey().substring(prefix.length());
             AssetFile file = new AssetFile();
-            file.setId(nextId()); file.setAccountId(claim.getAccountId()); file.setPurpose(object.contentType().equals("application/json") ? "MANIFEST" : "ATLAS");
+            file.setId(nextId()); file.setAccountId(claim.getAccountId());
+            file.setPurpose("manifest.json".equals(name) ? "MANIFEST"
+                : "atlas.png".equals(name) ? "ATLAS"
+                : "frame-00.png".equals(name) ? "BASE" : "PREVIEW");
             file.setStorageProvider(storage.provider()); file.setBucket(storage.bucket()); file.setObjectKey(object.objectKey());
             file.setContentType(object.contentType()); file.setSizeBytes(object.sizeBytes()); file.setSha256(java.util.HexFormat.of().parseHex(object.sha256()));
             file.setStatus("AVAILABLE");
             assetMapper.insertFile(file);
-            if (primary == null || object.objectKey().endsWith("/atlas.png")) primary = file.getId();
+            if (files.putIfAbsent(name, file) != null) throw new ServiceException("Worker 输出对象重复");
         }
-        return primary;
+        return files;
     }
 
     private ClaimedGenerationStep currentLease(Long accountId, Long taskId, Long stepId, String workerId, Long leaseEpoch)
@@ -207,6 +238,4 @@ public class GenerationWorkerService
     private static void validateIdentity(Long accountId, Long taskId, String workerId) { if (accountId == null || accountId <= 0 || taskId == null || taskId <= 0 || safeToken(workerId, 128) == null) throw new ServiceException("Worker 身份无效"); }
     private static String safeToken(String value, int limit) { return value != null && value.matches("[A-Za-z0-9._:-]{1," + limit + "}") ? value : null; }
     private static ServiceException staleLease() { return new ServiceException("STALE_LEASE", HttpStatus.CONFLICT); }
-
-    public record StoredObject(String objectKey, String sha256, long sizeBytes, String contentType) { }
 }

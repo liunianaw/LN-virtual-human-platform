@@ -288,7 +288,7 @@ services:
     build:
       context: ../../ruoyi-media
       dockerfile: Dockerfile
-    command: ["python", "-m", "ruoyi_media.worker", "--interval", "30"]
+    command: ["python", "-m", "ruoyi_media.worker", "--consume-rabbit", "--interval", "30"]
     environment:
       <<: *rabbitmq-client-env
       RUOYI_MEDIA_INTERNAL_PLATFORM_URL: "${RUOYI_MEDIA_INTERNAL_PLATFORM_URL:-http://ruoyi-modules-system:9201}"

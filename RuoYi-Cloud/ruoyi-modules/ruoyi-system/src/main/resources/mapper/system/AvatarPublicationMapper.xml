@@ -68,6 +68,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         for update
     </select>
 
+    <select id="selectAccessiblePublishedVersion" resultMap="AvatarVersionResult">
+        select <include refid="versionColumns"/>
+        from p_avatar_version v join p_avatar a on a.id = v.avatar_id and a.account_id = v.account_id
+        where v.avatar_id = #{avatarId} and v.id = #{versionId} and v.status = 'PUBLISHED'
+          and (v.account_id = #{accountId} or (a.visibility = 'OFFICIAL' and a.status = 'PUBLISHED'))
+    </select>
+
     <select id="selectOwnedAvatarForUpdate" resultMap="AvatarResult">
         select id, status from p_avatar where account_id = #{accountId} and id = #{avatarId} for update
     </select>
@@ -101,19 +108,6 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
           and (atlas.id is null or (a.preview_file_id is not null and preview.id is null))
     </select>
 
-    <update id="updateVersionToReview">
-        update p_avatar_version set status = 'REVIEW', updated_at = utc_timestamp(3)
-        where account_id = #{accountId} and id = #{avatarVersionId} and status = 'BUILDING'
-    </update>
-
-    <update id="updateTaskToReview">
-        update p_generation_task
-        set status = 'SUCCEEDED', internal_state = 'REVIEW_REQUIRED', progress = 100,
-            finished_at = utc_timestamp(3), updated_at = utc_timestamp(3)
-        where account_id = #{accountId} and id = #{taskId} and avatar_version_id = #{avatarVersionId}
-          and status in ('QUEUED', 'PROCESSING')
-    </update>
-
     <update id="updateVersionToPublished">
         update p_avatar_version
         set status = 'PUBLISHED', accepted_by = #{acceptedBy}, accepted_at = utc_timestamp(3),
@@ -135,6 +129,21 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
           and r.state in ('RESERVED', 'CONFIRMED')
     </select>
 
+    <select id="countApplicationReferences" resultType="int">
+        select count(*) from p_app_config c
+        join p_avatar_version v on v.id = c.avatar_version_id
+        where v.avatar_id = #{avatarId}
+    </select>
+
+    <select id="countRecoverableSessionReferences" resultType="int">
+        select count(*) from session_db.s_session s
+        join p_app_config c on c.id = s.app_config_id
+        join p_avatar_version v on v.id = c.avatar_version_id
+        where v.avatar_id = #{avatarId}
+          and s.status in ('CREATING', 'ACTIVE', 'DELETING', 'FAILED')
+          and s.deleted_at is null
+    </select>
+
     <select id="countActiveGenerationTasks" resultType="int">
         select count(*) from p_generation_task
         where account_id = #{accountId} and avatar_id = #{avatarId} and status in ('QUEUED', 'PROCESSING')
@@ -143,5 +152,63 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     <update id="markAvatarDeleting">
         update p_avatar set status = 'DELETING', updated_at = utc_timestamp(3), revision = revision + 1
         where account_id = #{accountId} and id = #{avatarId} and status not in ('DELETING', 'DELETED')
+    </update>
+
+    <insert id="insertReview">
+        insert into p_avatar_review (id, created_at, account_id, avatar_id, avatar_version_id, visual_accepted, review_note)
+        values (#{id}, utc_timestamp(3), #{accountId}, #{avatarId}, #{versionId}, 1, #{reviewNote})
+    </insert>
+
+    <select id="selectPublicAvatars" resultType="map">
+        select cast(a.id as char) avatarId, cast(a.current_version_id as char) versionId, a.name, a.visibility, a.status,
+            f.object_key previewObjectKey
+        from p_avatar a join p_avatar_version v on v.id = a.current_version_id and v.avatar_id = a.id
+        left join p_file f on f.id = v.preview_file_id and f.account_id = v.account_id and f.status = 'AVAILABLE'
+        where a.visibility = 'OFFICIAL' and a.status = 'PUBLISHED' and v.status = 'PUBLISHED'
+        order by a.updated_at desc, a.id desc limit #{offset}, #{limit}
+    </select>
+    <select id="countPublicAvatars" resultType="int">
+        select count(*) from p_avatar a join p_avatar_version v on v.id = a.current_version_id
+        where a.visibility = 'OFFICIAL' and a.status = 'PUBLISHED' and v.status = 'PUBLISHED'
+    </select>
+    <select id="selectAdminPublicAvatars" resultType="map">
+        select cast(a.id as char) avatarId, cast(a.current_version_id as char) versionId, a.name, a.visibility, a.status,
+            cast(a.account_id as char) creatorAccountId, a.revision,
+            (select count(*) from p_generation_task t where t.avatar_id = a.id) taskCount,
+            (select count(*) from p_avatar_version av where av.avatar_id = a.id) versionCount,
+            f.object_key previewObjectKey
+        from p_avatar a left join p_avatar_version v on v.id = a.current_version_id and v.avatar_id = a.id
+        left join p_file f on f.id = v.preview_file_id and f.account_id = v.account_id and f.status = 'AVAILABLE'
+        where a.visibility = 'OFFICIAL' and a.status not in ('DELETED')
+          and (#{status} is null or a.status = #{status})
+        order by a.updated_at desc, a.id desc limit #{offset}, #{limit}
+    </select>
+    <select id="countAdminPublicAvatars" resultType="int">
+        select count(*) from p_avatar a where a.visibility = 'OFFICIAL' and a.status not in ('DELETED')
+          and (#{status} is null or a.status = #{status})
+    </select>
+    <select id="selectAccessibleAvatar" resultType="map">
+        select cast(a.id as char) avatarId, a.name, a.visibility, a.status,
+            cast(a.current_version_id as char) currentVersionId, a.revision,
+            case when a.account_id = #{accountId} then 1 else 0 end owned
+        from p_avatar a where a.id = #{avatarId}
+          and (a.account_id = #{accountId} or (a.visibility = 'OFFICIAL' and a.status = 'PUBLISHED'))
+    </select>
+    <select id="selectAccessibleAvatarVersions" resultType="map">
+        select cast(v.id as char) versionId, v.version_no versionNo, v.status, v.created_at createdAt,
+            case when a.account_id = #{accountId} then 1 else 0 end owned
+        from p_avatar_version v join p_avatar a on a.id = v.avatar_id and a.account_id = v.account_id
+        where v.avatar_id = #{avatarId} and v.status not in ('DELETING','DELETED')
+          and (a.account_id = #{accountId} or (a.visibility = 'OFFICIAL' and a.status = 'PUBLISHED'
+               and v.status = 'PUBLISHED' and a.current_version_id = v.id))
+        order by v.version_no desc
+    </select>
+    <select id="selectOfficialAvatarForUpdate" resultType="map">
+        select cast(id as char) avatarId, status, revision from p_avatar
+        where id = #{avatarId} and visibility = 'OFFICIAL' and status not in ('DELETING','DELETED') for update
+    </select>
+    <update id="changeOfficialAvatarStatus">
+        update p_avatar set status = #{newStatus}, revision = revision + 1, updated_at = utc_timestamp(3)
+        where id = #{avatarId} and visibility = 'OFFICIAL' and status = #{expectedStatus}
     </update>
 </mapper>

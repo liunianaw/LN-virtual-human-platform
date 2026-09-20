@@ -55,7 +55,7 @@ public class DebugSessionService
                 rs -> rs.next() ? new Binding(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getObject(5) == null ? null : rs.getString(5), rs.getLong(6)) : null,
                 applicationId, accountId);
         if (binding == null) throw new ServiceException("应用没有可用的 SPEAK_ONLY 已发布 Voice 配置", HttpStatus.CONFLICT.value());
-        Integer actionCount = jdbc.queryForObject("select count(1) from p_avatar_version v join p_avatar a on a.id = v.avatar_id join p_avatar_action action on action.avatar_version_id = v.id where v.id = ? and v.status = 'PUBLISHED' and a.status = 'PUBLISHED' and (v.account_id = ? or a.visibility = 'OFFICIAL') and action.action_code in ('idle','speaking','listening','thinking','nod','shake_head','wave','happy')",
+        Integer actionCount = jdbc.queryForObject("select count(1) from p_avatar_version v join p_avatar a on a.id = v.avatar_id join p_avatar_action action on action.avatar_version_id = v.id where v.id = ? and v.status = 'PUBLISHED' and a.status in ('PUBLISHED','UNLISTED') and (v.account_id = ? or a.visibility = 'OFFICIAL') and action.action_code in ('idle','speaking','listening','thinking','nod','shake_head','wave','happy')",
                 Integer.class, binding.avatarVersionId(), accountId);
         if (actionCount == null || actionCount != 8) throw new ServiceException("应用 Avatar 尚未发布完整八动作版本", HttpStatus.CONFLICT.value());
         return binding;

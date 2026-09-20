@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.asset.mapper.AvatarProductionMapper">
+    <select id="lockVersion" resultType="map">
+        select status, candidate_revision as candidateRevision from p_avatar_version
+        where id = #{versionId} and account_id = #{accountId} for update
+    </select>
+    <select id="operation" resultType="map">
+        select request_hash as requestHash, response_json as responseJson from p_avatar_production_operation
+        where account_id = #{accountId} and avatar_version_id = #{versionId} and action_code = #{actionCode}
+          and operation_code = 'SELECTION' and request_id = #{requestId}
+    </select>
+    <select id="generationOperation" resultType="map">
+        select request_hash as requestHash, response_json as responseJson from p_avatar_production_operation
+        where account_id = #{accountId} and avatar_version_id = #{versionId} and action_code = #{actionCode}
+          and operation_code = 'GENERATION' and request_id = #{requestId}
+    </select>
+    <select id="generationContext" resultType="map">
+        select cast(v.avatar_id as char) avatarId, v.status versionStatus, v.candidate_revision candidateRevision,
+            cast(v.source_file_id as char) sourceFileId, v.pipeline_version pipelineVersion,
+            cast(t.official_service_id as char) officialServiceId, cast(t.service_snapshot as char) serviceSnapshot,
+            src.status sourceStatus,
+            s.status latestStage, cast(coalesce(a.id, s.reserved_attempt_id) as char) latestAttemptId,
+            coalesce(sel.revision, 0) actionRevision
+        from p_avatar_version v
+        join p_generation_task t on t.id = (select max(t2.id) from p_generation_task t2
+            where t2.account_id = v.account_id and t2.avatar_version_id = coalesce(
+                cast(json_unquote(json_extract(v.generation_recipe, '$.inheritedFromVersionId')) as unsigned), v.id))
+        join p_official_service svc on svc.id = t.official_service_id and svc.status = 'ACTIVE' and svc.capability = 'AVATAR_GENERATION'
+        join p_secret sec on sec.id = svc.secret_id and sec.status = 'ACTIVE'
+        left join p_file src on src.id = v.source_file_id and src.account_id = v.account_id
+        left join p_generation_step s on s.id = (select max(s2.id) from p_generation_step s2
+            join p_generation_task t3 on t3.id = s2.task_id and t3.avatar_version_id = v.id
+            where s2.account_id = v.account_id and s2.action_code = #{actionCode})
+        left join p_generation_attempt a on a.step_id = s.id and a.attempt_no = s.attempt_no
+        left join p_avatar_action_selection sel on sel.avatar_version_id = v.id and sel.action_code = #{actionCode}
+        where v.id = #{versionId} and v.account_id = #{accountId}
+        for update
+    </select>
+    <insert id="insertActionTask">
+        insert into p_generation_task (id, created_at, updated_at, account_id, avatar_id, avatar_version_id,
+            source_file_id, task_kind, status, internal_state, progress, official_service_id, service_snapshot,
+            pipeline_version, quota_reservation_id, request_id, reservation_no)
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{avatarId}, #{versionId}, #{sourceFileId},
+            'REGENERATE', 'QUEUED', 'READY', 0, #{officialServiceId}, cast(#{serviceSnapshot} as json),
+            #{pipelineVersion}, #{reservationId}, #{requestId}, 1)
+    </insert>
+    <insert id="initializeSelection">
+        insert into p_avatar_action_selection (avatar_version_id, action_code, account_id, updated_at)
+        values (#{versionId}, #{actionCode}, #{accountId}, utc_timestamp(3))
+        on duplicate key update avatar_version_id = avatar_version_id
+    </insert>
+    <update id="startGeneration">
+        update p_avatar_action_selection set revision = revision + 1, latest_attempt_id = #{attemptId},
+            selection_closed = 0, updated_at = utc_timestamp(3)
+        where avatar_version_id = #{versionId} and account_id = #{accountId} and action_code = #{actionCode} and revision = #{revision}
+    </update>
+    <update id="saveSelection">
+        update p_avatar_action_selection set selected_result_id = #{resultId}, accepted_result_id = #{resultId}, selection_closed = 1,
+            accepted_by = #{accountId}, accepted_at = utc_timestamp(3), revision = revision + 1, updated_at = utc_timestamp(3)
+        where avatar_version_id = #{versionId} and account_id = #{accountId} and action_code = #{actionCode} and revision = #{revision}
+    </update>
+    <update id="invalidateAssembly">
+        update p_avatar_version set candidate_revision = candidate_revision + 1, assembly_revision = null,
+            status = 'BUILDING', updated_at = utc_timestamp(3)
+        where id = #{versionId} and account_id = #{accountId} and status in ('BUILDING','REVIEW')
+    </update>
+    <insert id="rememberSelection">
+        insert into p_avatar_production_operation (account_id, avatar_version_id, action_code, operation_code,
+            request_id, request_hash, response_json, created_at)
+        values (#{accountId}, #{versionId}, #{actionCode}, 'SELECTION', #{requestId}, #{hash}, cast(#{response} as json), utc_timestamp(3))
+    </insert>
+    <insert id="rememberGeneration">
+        insert into p_avatar_production_operation (account_id, avatar_version_id, action_code, operation_code,
+            request_id, request_hash, response_json, created_at)
+        values (#{accountId}, #{versionId}, #{actionCode}, 'GENERATION', #{requestId}, #{hash}, cast(#{response} as json), utc_timestamp(3))
+    </insert>
+    <select id="attemptOperation" resultType="map">
+        select request_hash requestHash, response_json responseJson from p_avatar_production_operation
+        where account_id = #{accountId} and avatar_version_id = #{versionId} and action_code = #{actionCode}
+          and operation_code = #{operationCode} and request_id = #{requestId}
+    </select>
+    <select id="attemptContext" resultType="map">
+        select cast(coalesce(a.id, s.reserved_attempt_id) as char) attemptId, cast(t.id as char) taskId,
+            cast(s.id as char) stepId, coalesce(a.status, 'PREPARED') attemptStatus, s.status stepStatus,
+            cast(sel.latest_attempt_id as char) latestAttemptId,
+            cast(sel.selected_result_id as char) selectedResultId, cast(sel.accepted_result_id as char) acceptedResultId,
+            sel.selection_closed selectionClosed, sel.revision actionRevision,
+            a.provider_task_id providerTaskId, a.provider_request_id providerRequestId,
+            json_unquote(json_extract(s.result_metadata, '$.providerReceipt.imageUrl')) imageUrl,
+            json_unquote(json_extract(s.result_metadata, '$.providerReceipt.providerTaskId')) receiptTaskId
+        from p_generation_step s
+        join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
+        join p_avatar_action_selection sel on sel.avatar_version_id = t.avatar_version_id
+            and sel.account_id = t.account_id and sel.action_code = s.action_code
+        join p_avatar_version v on v.id = t.avatar_version_id and v.account_id = t.account_id
+        left join p_generation_attempt a on a.id = #{attemptId} and a.step_id = s.id
+            and a.task_id = t.id and a.account_id = t.account_id
+        where t.account_id = #{accountId} and t.avatar_version_id = #{versionId}
+          and s.action_code = #{actionCode} and v.status in ('BUILDING','REVIEW')
+          and (a.id = #{attemptId} or s.reserved_attempt_id = #{attemptId})
+          and sel.latest_attempt_id = #{attemptId}
+        for update
+    </select>
+    <update id="scheduleAttemptRecovery">
+        update p_avatar_action_selection set selection_closed = 0, revision = revision + 1, updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and avatar_version_id = #{versionId} and action_code = #{actionCode}
+          and latest_attempt_id = #{attemptId} and revision = #{expectedRevision}
+    </update>
+    <update id="reactivateAttempt">
+        update p_generation_attempt a
+        join p_generation_step s on s.id = a.step_id and s.task_id = a.task_id and s.account_id = a.account_id
+        join p_generation_task t on t.id = a.task_id and t.account_id = a.account_id
+        set a.status = 'SUBMITTED', a.completed_at = null, a.error_code = null, a.updated_at = utc_timestamp(3),
+            s.status = 'POLLING', s.stage_started_at = utc_timestamp(3), s.error_code = null, s.next_run_at = utc_timestamp(3),
+            s.lease_owner = null, s.lease_expires_at = null, s.updated_at = utc_timestamp(3)
+        where a.id = #{attemptId} and a.account_id = #{accountId} and t.avatar_version_id = #{versionId}
+          and s.action_code = #{actionCode} and a.status in ('UNKNOWN','FAILED') and s.status in ('UNKNOWN','FAILED')
+          and (a.provider_task_id is not null
+               or json_extract(s.result_metadata, '$.providerReceipt.providerTaskId') is not null
+               or json_extract(s.result_metadata, '$.providerReceipt.imageUrl') is not null)
+    </update>
+    <update id="reactivateTask">
+        update p_generation_task t
+        join p_generation_step s on s.task_id = t.id and s.account_id = t.account_id
+        join p_generation_attempt a on a.step_id = s.id and a.task_id = t.id
+        set t.status = 'PROCESSING', t.internal_state = 'RUNNING', t.error_code = null,
+            t.error_message = null, t.finished_at = null, t.updated_at = utc_timestamp(3)
+        where t.account_id = #{accountId} and t.avatar_version_id = #{versionId}
+          and s.action_code = #{actionCode} and a.id = #{attemptId}
+    </update>
+    <update id="closeAttemptSelection">
+        update p_avatar_action_selection set selected_result_id = #{retainResultId}, accepted_result_id = #{retainResultId},
+            selection_closed = 1, revision = revision + 1, updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and avatar_version_id = #{versionId} and action_code = #{actionCode}
+          and latest_attempt_id = #{attemptId} and accepted_result_id = #{retainResultId} and revision = #{expectedRevision}
+    </update>
+    <update id="stopAttemptRecovery">
+        update p_generation_step s
+        join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
+        left join p_generation_attempt a on a.step_id = s.id and a.task_id = t.id and a.id = #{attemptId}
+        set s.status = case when s.status = 'READY' then 'FAILED' else 'UNKNOWN' end,
+            s.stage_started_at = utc_timestamp(3), s.error_code = 'USER_DISCARDED', s.next_run_at = null,
+            s.lease_expires_at = null, s.updated_at = utc_timestamp(3),
+            a.status = case when a.status = 'PREPARED' then 'FAILED' else 'UNKNOWN' end,
+            a.error_code = 'USER_DISCARDED', a.completed_at = coalesce(a.completed_at, utc_timestamp(3)), a.updated_at = utc_timestamp(3)
+        where t.account_id = #{accountId} and t.avatar_version_id = #{versionId} and s.action_code = #{actionCode}
+          and (a.id = #{attemptId} or (a.id is null and s.reserved_attempt_id = #{attemptId}))
+          and s.status in ('READY','RUNNING','POLLING','UNKNOWN','FAILED')
+    </update>
+    <insert id="rememberAttemptOperation">
+        insert into p_avatar_production_operation (account_id, avatar_version_id, action_code, operation_code,
+            request_id, request_hash, response_json, created_at)
+        values (#{accountId}, #{versionId}, #{actionCode}, #{operationCode}, #{requestId}, #{hash}, cast(#{response} as json), utc_timestamp(3))
+    </insert>
+    <select id="selectedResults" resultType="map">
+        select r.action_code actionCode, cast(r.id as char) resultId, r.atlas_file_id atlasFileId,
+            r.manifest_file_id manifestFileId, r.frame_count frameCount, r.fps, r.loop_enabled loopEnabled,
+            cast(r.frame_layout as char) frameLayout, hex(r.content_hash) contentHash,
+            atlas.object_key atlasObjectKey, base.id baseFileId, base.object_key baseObjectKey,
+            hex(base.sha256) baseContentHash
+        from p_avatar_action_selection sel
+        join p_avatar_action_result r on r.id = sel.accepted_result_id and r.id = sel.selected_result_id
+            and r.avatar_version_id = sel.avatar_version_id and r.action_code = sel.action_code and r.account_id = sel.account_id
+        join p_file atlas on atlas.id = r.atlas_file_id and atlas.account_id = r.account_id and atlas.status = 'AVAILABLE'
+        join p_file action_manifest on action_manifest.id = r.manifest_file_id
+            and action_manifest.account_id = r.account_id and action_manifest.status = 'AVAILABLE'
+        join p_file base on base.account_id = r.account_id and base.status = 'AVAILABLE'
+            and base.object_key = concat(substring_index(atlas.object_key, '/', 5), '/frame-00.png')
+        where sel.account_id = #{accountId} and sel.avatar_version_id = #{versionId} and sel.selection_closed = 1
+        order by field(r.action_code, 'idle','speaking','listening','thinking','nod','shake_head','wave','happy')
+    </select>
+    <select id="countAssemblyBlockers" resultType="int">
+        select (select count(*) from p_generation_step s join p_generation_task t on t.id = s.task_id
+            where t.account_id = #{accountId} and t.avatar_version_id = #{versionId}
+              and s.status in ('READY','RUNNING','POLLING','UNKNOWN'))
+          + (select count(*) from p_avatar_action_selection sel where sel.account_id = #{accountId}
+              and sel.avatar_version_id = #{versionId} and sel.latest_attempt_id is not null and sel.selection_closed = 0)
+    </select>
+    <delete id="deleteDraftActions">
+        delete a from p_avatar_action a join p_avatar_version v on v.id = a.avatar_version_id
+        where a.account_id = #{accountId} and a.avatar_version_id = #{versionId} and v.status = 'BUILDING'
+    </delete>
+    <insert id="insertFormalAction">
+        insert into p_avatar_action (id, created_at, updated_at, account_id, avatar_version_id, action_code,
+            atlas_file_id, preview_file_id, frame_count, fps, loop_enabled, frame_layout, content_hash)
+        select #{id}, utc_timestamp(3), utc_timestamp(3), r.account_id, r.avatar_version_id, r.action_code,
+            r.atlas_file_id, null, r.frame_count, r.fps, r.loop_enabled, r.frame_layout, r.content_hash
+        from p_avatar_action_result r where r.id = #{resultId} and r.account_id = #{accountId} and r.avatar_version_id = #{versionId}
+    </insert>
+    <update id="finishAssembly">
+        update p_avatar_version set base_file_id = #{baseFileId}, manifest_file_id = #{manifestFileId},
+            preview_file_id = #{previewFileId}, frame_width = 512, frame_height = 768,
+            anchor_x = 0.500000, anchor_y = 1.000000, manifest_schema = 'LN_AVATAR_V1',
+            capabilities = json_object('actions', json_array('idle','speaking','listening','thinking','nod','shake_head','wave','happy'),
+                'lipSyncMode', 'BASIC_SPEAKING'),
+            qa_report = json_object('passed', true, 'geometryOk', true, 'allActionsAccepted', true,
+                'candidateRevision', #{revision}),
+            assembly_revision = #{revision}, status = 'REVIEW', updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{versionId} and status = 'BUILDING'
+          and candidate_revision = #{revision}
+    </update>
+    <select id="assemblyOperation" resultType="map">
+        select request_hash requestHash, response_json responseJson from p_avatar_production_operation
+        where account_id = #{accountId} and avatar_version_id = #{versionId} and action_code = ''
+          and operation_code = 'ASSEMBLE' and request_id = #{requestId}
+    </select>
+    <insert id="rememberAssembly">
+        insert into p_avatar_production_operation (account_id, avatar_version_id, action_code, operation_code,
+            request_id, request_hash, response_json, created_at)
+        values (#{accountId}, #{versionId}, '', 'ASSEMBLE', #{requestId}, #{hash}, cast(#{response} as json), utc_timestamp(3))
+    </insert>
+    <select id="ownedVersion" resultType="map">
+        select cast(v.id as char) as versionId, cast(v.avatar_id as char) as avatarId,
+            v.status as versionStatus, v.candidate_revision as candidateRevision, v.assembly_revision as assemblyRevision
+        from p_avatar_version v join p_avatar a on a.id = v.avatar_id and a.account_id = v.account_id
+        where v.id = #{versionId} and v.avatar_id = #{avatarId} and v.account_id = #{accountId}
+          and a.status not in ('DELETING','DELETED','DISABLED') and v.status not in ('DELETING','DELETED')
+    </select>
+    <select id="selections" resultType="map">
+        select action_code as actionCode, revision as actionRevision,
+            cast(selected_result_id as char) as selectedResultId, cast(accepted_result_id as char) as acceptedResultId,
+            cast(latest_attempt_id as char) as latestAttemptId, selection_closed as selectionClosed
+        from p_avatar_action_selection where avatar_version_id = #{versionId} and account_id = #{accountId}
+    </select>
+    <select id="results" resultType="map">
+        select cast(r.id as char) as resultId, r.action_code as actionCode, cast(r.attempt_id as char) as attemptId
+        from p_avatar_action_result r join p_file f on f.id = r.atlas_file_id and f.account_id = r.account_id and f.status = 'AVAILABLE'
+        where r.avatar_version_id = #{versionId} and r.account_id = #{accountId} order by r.created_at, r.id
+    </select>
+    <select id="steps" resultType="map">
+        select s.action_code as actionCode, s.status as stage,
+            case when s.status = 'READY' and (svc.id is null or sec.id is null)
+                then 'SERVICE_UNAVAILABLE' else s.error_code end as errorCode,
+            case when s.status = 'READY' and (svc.id is null or sec.id is null)
+                then '生成服务当前不可用，尚未提交该动作请求' else null end as safeMessage,
+            s.next_run_at as nextRetryAt,
+            date_format(s.stage_started_at, '%Y-%m-%dT%H:%i:%s.%fZ') as stageStartedAt,
+            cast(coalesce(a.id, s.reserved_attempt_id) as char) as latestAttemptId,
+            case when a.id is not null and (a.provider_task_id is not null
+                 or json_extract(s.result_metadata, '$.providerReceipt.providerTaskId') is not null
+                 or json_extract(s.result_metadata, '$.providerReceipt.imageUrl') is not null)
+                 then 1 else 0 end as recoverable
+        from p_generation_step s join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
+        left join p_official_service svc on svc.id = t.official_service_id
+            and svc.status = 'ACTIVE' and svc.capability = 'AVATAR_GENERATION'
+        left join p_secret sec on sec.id = svc.secret_id and sec.status = 'ACTIVE'
+        left join p_generation_attempt a on a.step_id = s.id and a.attempt_no = s.attempt_no
+        where t.avatar_version_id = #{versionId} and t.account_id = #{accountId} and s.step_type = 'GENERATE_ACTION'
+        order by s.created_at, s.id
+    </select>
+    <select id="resultPreview" resultType="map">
+        select cast(r.id as char) as resultId, r.action_code as actionCode, r.frame_count as frameCount,
+            r.fps, r.loop_enabled as loopEnabled, r.frame_layout as frameLayout, r.qa_report as qaReport,
+            f.object_key as objectKey
+        from p_avatar_action_result r join p_file f on f.id = r.atlas_file_id and f.account_id = r.account_id and f.status = 'AVAILABLE'
+        where r.id = #{resultId} and r.account_id = #{accountId} and r.avatar_version_id = #{versionId} and r.action_code = #{actionCode}
+    </select>
+    <select id="lockOwnedAvatar" resultType="map">
+        select cast(a.id as char) avatarId, a.visibility, a.status, a.revision,
+            coalesce((select max(v.version_no) from p_avatar_version v where v.avatar_id = a.id), 0) maxVersionNo
+        from p_avatar a where a.id = #{avatarId} and a.account_id = #{accountId}
+          and a.status not in ('DELETING','DELETED','DISABLED') for update
+    </select>
+    <select id="versionOperation" resultType="map">
+        select request_hash requestHash, response_json responseJson from p_avatar_version_operation
+        where account_id = #{accountId} and avatar_id = #{avatarId} and request_id = #{requestId}
+    </select>
+    <select id="baseVersion" resultType="map">
+        select cast(v.id as char) versionId, cast(v.source_file_id as char) sourceFileId,
+            v.pipeline_version pipelineVersion, cast(v.generation_recipe as char) generationRecipe,
+            v.status, v.manifest_file_id manifestFileId,
+            (select count(*) from p_avatar_action a where a.avatar_version_id = v.id) actionCount,
+            (select count(*) from p_avatar_action_selection sel
+                join p_avatar_action_result r on r.id = sel.accepted_result_id
+                    and r.account_id = sel.account_id and r.avatar_version_id = sel.avatar_version_id
+                    and r.action_code = sel.action_code
+                join p_file atlas on atlas.id = r.atlas_file_id and atlas.account_id = r.account_id and atlas.status = 'AVAILABLE'
+                join p_file manifest on manifest.id = r.manifest_file_id and manifest.account_id = r.account_id and manifest.status = 'AVAILABLE'
+                where sel.account_id = v.account_id and sel.avatar_version_id = v.id
+                    and sel.selected_result_id = sel.accepted_result_id and sel.selection_closed = 1) reusableResultCount
+        from p_avatar_version v where v.account_id = #{accountId} and v.avatar_id = #{avatarId}
+          and v.id = #{baseVersionId}
+    </select>
+    <insert id="insertCandidateVersion">
+        insert into p_avatar_version (id, created_at, updated_at, account_id, avatar_id, version_no, status,
+            source_type, source_file_id, pipeline_version, generation_recipe, capabilities, qa_report, created_by,
+            candidate_revision)
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{avatarId}, #{versionNo}, 'BUILDING',
+            'IMAGE', #{sourceFileId}, #{pipelineVersion}, cast(#{generationRecipe} as json), json_object(), json_object(),
+            #{accountId}, 0)
+    </insert>
+    <insert id="copyActionResult">
+        insert into p_avatar_action_result (id, created_at, account_id, avatar_version_id, action_code,
+            step_id, attempt_id, atlas_file_id, manifest_file_id, frame_count, fps, loop_enabled,
+            frame_layout, qa_report, content_hash)
+        select #{id}, utc_timestamp(3), r.account_id, #{newVersionId}, r.action_code, null, null,
+            r.atlas_file_id, r.manifest_file_id, r.frame_count, r.fps, r.loop_enabled,
+            r.frame_layout, json_merge_patch(r.qa_report,
+                json_object('inheritedFromVersionId', cast(#{baseVersionId} as char))), r.content_hash
+        from p_avatar_version v
+        join p_avatar_action_selection sel on sel.avatar_version_id = v.id and sel.account_id = v.account_id
+            and sel.action_code = #{actionCode} and sel.selected_result_id = sel.accepted_result_id
+            and sel.accepted_result_id is not null and sel.selection_closed = 1
+        join p_avatar_action_result r on r.id = sel.accepted_result_id and r.account_id = sel.account_id
+            and r.avatar_version_id = sel.avatar_version_id and r.action_code = sel.action_code
+        join p_avatar_action a on a.account_id = r.account_id and a.avatar_version_id = r.avatar_version_id
+            and a.action_code = r.action_code and a.atlas_file_id = r.atlas_file_id and a.content_hash = r.content_hash
+        join p_file atlas on atlas.id = r.atlas_file_id and atlas.account_id = r.account_id and atlas.status = 'AVAILABLE'
+        join p_file manifest on manifest.id = r.manifest_file_id and manifest.account_id = r.account_id and manifest.status = 'AVAILABLE'
+        where v.account_id = #{accountId} and v.id = #{baseVersionId} and v.status = 'PUBLISHED'
+    </insert>
+    <insert id="initializeCopiedSelection">
+        insert into p_avatar_action_selection (avatar_version_id, action_code, account_id, revision,
+            selected_result_id, accepted_result_id, selection_closed, accepted_by, accepted_at, updated_at)
+        values (#{versionId}, #{actionCode}, #{accountId}, 0, #{resultId}, #{resultId}, 1, #{accountId},
+            utc_timestamp(3), utc_timestamp(3))
+    </insert>
+    <update id="bumpAvatarRevision">
+        update p_avatar set revision = revision + 1, updated_at = utc_timestamp(3)
+        where id = #{avatarId} and account_id = #{accountId} and revision = #{expectedRevision}
+          and status not in ('DELETING','DELETED','DISABLED')
+    </update>
+    <insert id="rememberVersionOperation">
+        insert into p_avatar_version_operation (account_id, avatar_id, request_id, request_hash, response_json, created_at)
+        values (#{accountId}, #{avatarId}, #{requestId}, #{hash}, cast(#{response} as json), utc_timestamp(3))
+    </insert>
+</mapper>

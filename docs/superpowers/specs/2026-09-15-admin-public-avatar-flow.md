@@ -1,12 +1,14 @@
 # 管理员：公共角色制作与管理执行说明书
 
-前置说明书：[项目整体说明书](../../../项目整体说明书.md) · [项目需求说明书](../../../项目需求说明书.md) · [数据库设计说明书](../../../数据库设计说明书.md) · [项目架构说明书](../../../项目架构说明书.md) · [接口设计说明书](../../../接口设计说明书01.md)
+前置说明书：[项目整体说明书](../../../项目整体说明书.md) · [项目需求说明书](../../../项目需求说明书.md) · [数据库设计说明书](../../../数据库设计说明书.md) · [项目架构说明书](../../../项目架构说明书.md)
 
-日期：2026-09-15。版本：1.0。状态：**用户已确认，计划阶段定稿；未进入本计划正式编码，不代表实现或验收通过。**
+如果有需求，设计不明确的地方先自行查看相关说明书，如果依旧不明确再主动想用户提问。不得自行随意猜测。
+
+日期：2026-09-15。版本：1.0。状态：**用户已确认，正式编码进行中；不代表实现或验收通过。**
 
 ## 执行状态与验收记录
 
-计划阶段：用户已确认，本文与私有计划、协作规则合并为一次计划阶段提交。正式编码、主代理正式逻辑验证、用户完整体验及修复复验均未执行。既有代码与未提交修复保留，不计作新计划完成。下一步按本计划进入编码阶段时直接由主代理实施；本次仅完成定稿提交，不启动编码或收费验证。正式编码完成提交一次，后续修复仅用户指定时提交。
+计划阶段已确认。2026-09-16进入主代理直接编码：已接入Worker本机回执路径、解析前原响应保存、发送标记防止未知请求自动重发；新增异步提交/单次查询适配器方法（尚未切换正式调度）；修正恢复claim的attempt编号与同摘要旧attempt复用。Python语法检查通过，Java编译检查进行中。仍需完成平台回执/taskId持久化、异步调度、动作结果/选择/组装、公共与私有管理及页面。正式逻辑验证、用户完整体验均未完成，未进行收费调用；改动未提交，正式编码完成后统一提交。
 
 阅读说明：第2节及标“现有”的接口描述是代码盘点；第4～7、10节是共享实施契约。标“新增/拟新增”只表示尚未实现，不表示业务规则待决策。第10节规定动作级行为，第4～6节的旧入口须按其兼容改造，不能保留整套失败即放弃所有动作的处理。
 
@@ -127,7 +129,7 @@ Preview 现有字段：avatarId、versionId:string，status:string，frameWidth/
 
 | 交接 | 当前接口/输入 → 输出 | 必须保持的关联和检查 |
 |---|---|---|
-| Outbox → Worker | POST `/outbox/claim`：workerId → id,eventType,eventId,traceId,accountId,payload | payload.taskId 必须回查所属账号；仅生成事件进入生成引擎，审核通知不能被误消费 |
+| Outbox → RabbitMQ → Worker | system 发布器将持久消息投递至 `ln.platform.events` / `avatar.generation.requested.v1`；Worker 手动 ACK | payload.taskId 必须回查所属账号；仅生成事件进入生成引擎，审核通知不能被误消费；发布确认后 Outbox 才 SENT |
 | 平台 → 动作执行 | POST `/claim`：accountId,taskId,workerId → accountId,taskId,stepId,action,attemptNo,leaseEpoch,leaseSeconds,model,parametersJson,referenceUrl,outputPrefix | accountId/taskId/stepId 一致；action 固定八选一；parametersJson 当前为 JSON 文本，只在边界解析一次 |
 | Worker → 调用账本 | POST `/attempts`：租约字段+requestHash → attemptId,providerRequestKey | 请求摘要固定；登记后才允许付费调用；新租约不能自动新建一次付费尝试 |
 | Worker → 续租/进度 | POST `/progress`：租约字段+attemptId,state,providerRequestId,errorCode → 成功确认 | 租约字段=accountId,taskId,stepId,workerId,leaseEpoch；旧租约写回必须拒绝 |

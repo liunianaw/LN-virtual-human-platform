@@ -14,6 +14,7 @@ import com.ruoyi.common.core.exception.ServiceException;
 import com.ruoyi.system.asset.domain.GenerationTask;
 import com.ruoyi.system.asset.dto.CreateGenerationTaskRequest;
 import com.ruoyi.system.asset.mapper.AssetMapper;
+import com.ruoyi.system.asset.service.impl.AssetServiceImpl;
 
 class AssetServiceTest
 {
@@ -29,11 +30,17 @@ class AssetServiceTest
         task.setInternalState("READY");
         task.setProgress(0);
         when(mapper.selectTaskByAccountAndRequest(7L, "request-1")).thenReturn(task);
+        when(mapper.countMatchingTaskRequest(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(101L),
+            org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(byte[].class))).thenReturn(1);
 
         var response = service(mapper).createGenerationTask(7L, request());
 
         assertEquals(101L, response.getTaskId());
         verify(mapper).selectTaskByAccountAndRequest(7L, "request-1");
+        verify(mapper).countMatchingTaskRequest(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(101L),
+            org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(byte[].class));
         verifyNoMoreInteractions(mapper);
     }
 
@@ -47,9 +54,9 @@ class AssetServiceTest
         assertEquals(403, error.getCode());
     }
 
-    private static AssetService service(AssetMapper mapper)
+    private static AssetServiceImpl service(AssetMapper mapper)
     {
-        return new AssetService(mapper, new StaticListableBeanFactory().getBeanProvider(com.ruoyi.system.storage.ObjectStorage.class),
+        return new AssetServiceImpl(mapper, new StaticListableBeanFactory().getBeanProvider(com.ruoyi.system.storage.ObjectStorage.class),
             new TransactionTemplate(), new ObjectMapper());
     }
 
@@ -58,6 +65,7 @@ class AssetServiceTest
         CreateGenerationTaskRequest request = new CreateGenerationTaskRequest();
         request.setSourceFileId(11L);
         request.setOfficialServiceId(12L);
+        request.setExpectedServiceRevision(1L);
         request.setRequestId("request-1");
         request.setName("演示形象");
         return request;

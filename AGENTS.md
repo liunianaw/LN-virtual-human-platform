@@ -111,5 +111,5 @@
 - 使用 `Start-Process` 时，以各模块 `target` 为工作目录并以 JAR 文件名传给 `-jar`，避免含非 ASCII 路径在 JVM 参数中被错误编码。Nacos 账号、数据库密码和双向内部 Bearer 仅通过子进程环境传入；system/session 必须在同一启动批次共享对应的内部 Bearer，绝不写回仓库或 Nacos。
 - 启动失败时只读取该服务末尾日志并定位一次根因；修复后只重启受影响服务及其直接依赖。所有服务启动完成后只运行一次 `RuoYi-Cloud/bin/check-m1-services.ps1`，并额外查看媒体 Worker 的 `ready/heartbeat`；不要在没有新证据时循环全量重启。
 - Windows 重新打包正在运行的 JAR 前，先保留该进程环境并停止对应服务；否则 Spring Boot repackage 可能因文件占用而无法重命名。Maven 从 `RuoYi-Cloud` 工作目录运行，使用 `Get-Command mvn` 已确认的路径。
-- Avatar Worker 必须使用 `--consume-outbox`；`ready/heartbeat` 仅证明进程存活。验收需沿 `p_outbox → p_generation_step → p_generation_attempt → provider_http_response` 核对具体任务，只有真实厂商响应 ID 才能证明厂商已响应。长调用期间必须续租，超时/中断且结果未知的 attempt 不得自动重发。
+- Avatar Worker 必须使用 `--consume-rabbit`；`ready/heartbeat` 仅证明进程存活。验收需沿 `p_outbox → RabbitMQ → p_generation_step → p_generation_attempt → provider_http_response` 核对具体任务，只有真实厂商响应 ID 才能证明厂商已响应。长调用期间必须续租，超时/中断且结果未知的 attempt 不得自动重发。
 - 本地媒体验证与启动要显式使用当前 `ruoyi-media/src`（`PYTHONPATH` 或已确认的 editable 安装），先确认实际导入位置，避免 venv 中旧安装包覆盖源码。复用已成功验证的模型、密钥与参数；只打印来源是否一致，不回显密钥。Windows TUN 存在时，`NO_PROXY` 不等于绕过透明代理；按实际连接路由核实，不凭端口推断根因。

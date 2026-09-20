@@ -42,6 +42,12 @@ public class CosObjectStorage implements ObjectStorage
         catch (RuntimeException e) { throw new ServiceException("COS 访问链接生成失败"); }
     }
 
+    @Override
+    public Instant readUrlExpiresAt()
+    {
+        return Instant.now().plusSeconds(config.getReadUrlSeconds());
+    }
+
     public void delete(String key)
     {
         try { client.deleteObject(config.getBucket(), key); }

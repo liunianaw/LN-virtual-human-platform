@@ -65,16 +65,16 @@ I1：业务事实与 Outbox 同事务；I2：Outbox 仅由 system publisher 标�
 | B | Outbox 发布 | system publisher/mapper XML/POM/配置 | confirm 后才 SENT；失败不丢失；旧 Worker Outbox API 无调用方。 |
 | C | Rabbit 消费 | media requirements、consumer、入口、Compose/本机启动 | durable 声明、手动 ACK、有限 retry/DLQ；继续复用 HTTP 步骤契约。 |
 | D | asset 定向规范化 | `asset` 的 Controller/DTO/Service/impl/Mapper | Controller 只保留边界；管理员判断在 Service；无嵌套请求 DTO。 |
-| E | 目录整理 | `ruoyi-session/runtime`、`ln-relay` | 仅在引用、启动脚本、文档同步后移动；无无关根目录搬迁。 |
+| E | 目录整理 | `ruoyi-session/runtime`、`ln-relay` | 已核对：前者当前不存在；后者是启动脚本、Nacos 配置和说明书共同引用的根目录服务，保持不移动。 |
 
 ## 8. 主代理静态逻辑验证
 
 | 要求 | 实际代码路径 | 当前结论 |
 |---|---|---|
-| I1/I2 | Asset 写 Outbox → publisher Mapper → RabbitTemplate confirm → p_outbox | 待编码后核对。 |
-| I3/I4 | Rabbit consumer → GenerationWorker.handle → system lease/attempt/result API → ACK/retry | 待编码后核对。 |
-| I5/I6 | event DTO/Python 校验、retry 头、SENDING lease 与退避 SQL | 待编码后核对。 |
-| 分层规范 | asset Controller → `I*Service` → `*ServiceImpl` → Mapper XML | 待切片 D 核对。 |
+| I1/I2 | Asset 写 Outbox → publisher Mapper → RabbitTemplate confirm → p_outbox | 已静态核对：confirm ACK 后才标记 SENT，异常回到 PENDING 并退避。 |
+| I3/I4 | Rabbit consumer → GenerationWorker.handle → system lease/attempt/result API → ACK/retry | 已静态核对：持久队列、手动 ACK、10 秒 retry 与 DLQ；仍待真实 Broker 终点验收。 |
+| I5/I6 | event DTO/Python 校验、retry 头、SENDING lease 与退避 SQL | 已静态核对：事件字段、有限重试、DB 租约和失败退避均有实现。 |
+| 分层规范 | asset Controller → `I*Service` → `*ServiceImpl` → Mapper XML | 已核对：控制器只处理 HTTP 边界；管理员规则进入 Service；请求 DTO 不再嵌套 Controller/Service。 |
 
 辅助检查仅运行受影响 Java 模块编译、Python 语法/聚焦测试及 Compose 配置校验，不默认连接外部厂商或数据库。
 
@@ -87,7 +87,7 @@ I1：业务事实与 Outbox 同事务；I2：Outbox 仅由 system publisher 标�
 | 重复消息/UNKNOWN | 重投同一消息或制造已提交结果未知 | 不新建付费请求；系统保留唯一 attempt 和 UNKNOWN 事实。 |
 | 管理员入口 | 使用公共角色创建/管理入口 | Controller 无业务编排，Service 拒绝非管理员伪造调用。 |
 
-正式编码完成后一次提交；用户体验验收和修复按 AGENTS.md 执行。
+本轮编码已完成并通过受影响模块验证；真实 Broker/业务链路验收和后续修复按 AGENTS.md 执行。
 
 ## 10. 跨模块交接
 

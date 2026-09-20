@@ -1,4 +1,4 @@
-package com.ruoyi.system.asset.service;
+package com.ruoyi.system.asset.service.impl;
 
 import java.io.ByteArrayInputStream;
 import java.security.MessageDigest;
@@ -18,6 +18,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ruoyi.common.core.constant.HttpStatus;
 import com.ruoyi.common.core.exception.ServiceException;
+import com.ruoyi.common.security.utils.SecurityUtils;
 import com.ruoyi.system.asset.domain.AssetFile;
 import com.ruoyi.system.asset.domain.GenerationServiceConfig;
 import com.ruoyi.system.asset.domain.GenerationTask;
@@ -26,11 +27,12 @@ import com.ruoyi.system.asset.dto.AvatarGenerationServiceResponse;
 import com.ruoyi.system.asset.dto.CreateGenerationTaskRequest;
 import com.ruoyi.system.asset.dto.GenerationTaskResponse;
 import com.ruoyi.system.asset.mapper.AssetMapper;
+import com.ruoyi.system.asset.service.IAssetService;
 import com.ruoyi.system.storage.ObjectStorage;
 
 /** M2 参考图账本、账户授权和制作任务提交。 */
 @Service
-public class AssetService
+public class AssetServiceImpl implements IAssetService
 {
     private static final long MAX_SOURCE_BYTES = 10 * 1024 * 1024;
     private static final int MAX_SOURCE_DIMENSION = 4096;
@@ -41,7 +43,7 @@ public class AssetService
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
 
-    public AssetService(AssetMapper assetMapper, ObjectProvider<ObjectStorage> storageProvider,
+    public AssetServiceImpl(AssetMapper assetMapper, ObjectProvider<ObjectStorage> storageProvider,
         TransactionTemplate transactionTemplate, ObjectMapper objectMapper)
     {
         this.assetMapper = assetMapper;
@@ -100,24 +102,39 @@ public class AssetService
         return fileResponse(file, requireStorage().readUrl(file.getObjectKey()));
     }
 
-    public GenerationTaskResponse createGenerationTask(Long accountId, CreateGenerationTaskRequest request)
+    private GenerationTaskResponse createGenerationTask(Long accountId, CreateGenerationTaskRequest request, boolean officialCreation)
     {
         requireAccount(accountId);
         validateCreateRequest(request);
+        String visibility = officialCreation ? "OFFICIAL" : "PRIVATE";
+        byte[] requestHash = taskRequestHash(accountId, request, visibility);
         GenerationTask existing = assetMapper.selectTaskByAccountAndRequest(accountId, request.getRequestId());
-        if (existing != null) return taskResponse(existing);
+        if (existing != null) return matchingExistingTask(accountId, request, visibility, requestHash, existing);
         try
         {
-            GenerationTaskResponse response = transactionTemplate.execute(status -> createGenerationTaskInTransaction(accountId, request));
+            GenerationTaskResponse response = transactionTemplate.execute(status -> createGenerationTaskInTransaction(accountId, request, visibility, requestHash));
             if (response == null) throw new ServiceException("创建制作任务失败");
             return response;
         }
         catch (DataIntegrityViolationException e)
         {
             GenerationTask duplicate = assetMapper.selectTaskByAccountAndRequest(accountId, request.getRequestId());
-            if (duplicate != null) return taskResponse(duplicate);
+            if (duplicate != null) return matchingExistingTask(accountId, request, visibility, requestHash, duplicate);
             throw e;
         }
+    }
+
+    @Override
+    public GenerationTaskResponse createGenerationTask(Long accountId, CreateGenerationTaskRequest request)
+    {
+        return createGenerationTask(accountId, request, false);
+    }
+
+    @Override
+    public GenerationTaskResponse createOfficialGenerationTask(Long accountId, CreateGenerationTaskRequest request)
+    {
+        if (!SecurityUtils.isAdmin()) throw forbidden("仅管理员可以创建官方公共角色");
+        return createGenerationTask(accountId, request, true);
     }
 
     public GenerationTaskResponse readGenerationTask(Long accountId, Long taskId)
@@ -142,30 +159,30 @@ public class AssetService
         return assetMapper.selectActiveAvatarGenerationServices();
     }
 
-    private GenerationTaskResponse createGenerationTaskInTransaction(Long accountId, CreateGenerationTaskRequest request)
+    private GenerationTaskResponse createGenerationTaskInTransaction(Long accountId, CreateGenerationTaskRequest request,
+        String visibility, byte[] requestHash)
     {
         GenerationTask existing = assetMapper.selectTaskByAccountAndRequest(accountId, request.getRequestId());
-        if (existing != null) return taskResponse(existing);
+        if (existing != null) return matchingExistingTask(accountId, request, visibility, requestHash, existing);
         AssetFile sourceFile = assetMapper.selectAvailableFile(accountId, request.getSourceFileId());
         if (sourceFile == null) throw forbidden("参考图不存在、不可用或不属于当前账号");
         GenerationServiceConfig service = assetMapper.selectActiveAvatarGenerationService(request.getOfficialServiceId());
         if (service == null) throw new ServiceException("指定的 Avatar 制作服务不可用");
-        if (assetMapper.reserveAvatarQuota(accountId) != 1)
-            throw new ServiceException("Avatar 制作额度不足或尚未配置");
-
+        if (service.getRevision() != request.getExpectedServiceRevision().longValue())
+            throw new ServiceException("制作服务配置已变化，请重新选择", HttpStatus.CONFLICT);
         Long avatarId = nextId();
         Long avatarVersionId = nextId();
         Long taskId = nextId();
         Long reservationId = nextId();
-        assetMapper.insertAvatar(avatarId, accountId, request.getName().trim());
+        assetMapper.insertAvatar(avatarId, accountId, request.getName().trim(), visibility);
         assetMapper.insertAvatarVersion(avatarVersionId, avatarId, accountId, sourceFile.getId(), PIPELINE_VERSION,
             json(Map.of("pipelineVersion", PIPELINE_VERSION, "sourceSha256", hex(sourceFile.getSha256()))));
         assetMapper.insertQuotaReservation(reservationId, accountId, taskId.toString());
         assetMapper.insertQuotaEntry(nextId(), accountId, reservationId, "generation:" + taskId + ":reserve:1");
         assetMapper.insertGenerationTask(taskId, accountId, avatarId, avatarVersionId, sourceFile.getId(), service.getId(),
-            serviceSnapshot(service), PIPELINE_VERSION, reservationId, request.getRequestId());
+            serviceSnapshot(service), PIPELINE_VERSION, reservationId, request.getRequestId(), requestHash);
         for (String action : List.of("idle", "speaking", "listening", "thinking", "nod", "shake_head", "wave", "happy"))
-            assetMapper.insertGenerationActionStep(nextId(), accountId, taskId, "ACTION_" + action, action);
+            assetMapper.insertGenerationActionStep(nextId(), accountId, taskId, "ACTION_" + action, action, nextId());
         String eventId = UUID.randomUUID().toString().replace("-", "");
         assetMapper.insertOutbox(nextId(), accountId, eventId, "AVATAR_GENERATION_REQUESTED", "GENERATION_TASK",
             taskId.toString(), UUID.randomUUID().toString().replace("-", ""), json(Map.of(
@@ -224,6 +241,7 @@ public class AssetService
     {
         if (request == null || request.getSourceFileId() == null || request.getSourceFileId() <= 0
             || request.getOfficialServiceId() == null || request.getOfficialServiceId() <= 0
+            || request.getExpectedServiceRevision() == null || request.getExpectedServiceRevision() <= 0
             || isBlank(request.getRequestId()) || request.getRequestId().length() > 64
             || !request.getRequestId().matches("[A-Za-z0-9._:-]+")
             || isBlank(request.getName()) || request.getName().trim().length() > 100)
@@ -282,6 +300,27 @@ public class AssetService
         Long id = assetMapper.nextId();
         if (id == null || id <= 0) throw new ServiceException("无法生成业务标识");
         return id;
+    }
+
+    private GenerationTaskResponse matchingExistingTask(Long accountId, CreateGenerationTaskRequest request,
+        String visibility, byte[] requestHash, GenerationTask task)
+    {
+        if (assetMapper.countMatchingTaskRequest(accountId, task.getId(), request.getSourceFileId(),
+            request.getOfficialServiceId(), request.getName().trim(), visibility, requestHash) != 1)
+            throw new ServiceException("同一 requestId 的制作参数不同", HttpStatus.CONFLICT);
+        return taskResponse(task);
+    }
+
+    private byte[] taskRequestHash(Long accountId, CreateGenerationTaskRequest request, String visibility)
+    {
+        try
+        {
+            return MessageDigest.getInstance("SHA-256").digest(objectMapper.writeValueAsBytes(Map.of(
+                "accountId", accountId.toString(), "sourceFileId", request.getSourceFileId().toString(),
+                "officialServiceId", request.getOfficialServiceId().toString(), "name", request.getName().trim(),
+                "expectedServiceRevision", request.getExpectedServiceRevision(), "visibility", visibility)));
+        }
+        catch (Exception e) { throw new ServiceException("无法生成任务幂等摘要"); }
     }
 
     private ObjectStorage requireStorage()

@@ -36,17 +36,17 @@ class WorkerLeaseTest(unittest.TestCase):
         )
         platform.prepare_attempt.return_value = PreparedAttempt("4", "request-key")
         provider = Mock()
-        def slow_call(_):
+        def slow_call(*_):
             time.sleep(0.08)
             raise ProviderUncertain({"reason": "TimeoutError"})
-        provider.generate.side_effect = slow_call
+        provider.submit_async.side_effect = slow_call
         worker = GenerationWorker("worker", platform, provider, Mock())
         with patch("ruoyi_media.worker.generation._LEASE_RENEWAL_SECONDS", 0.01):
             result = worker.handle({"eventId": "event", "traceId": "trace", "eventType": "AVATAR_GENERATION_REQUESTED",
                                     "accountId": "1", "payload": {"taskId": "2"}})
         self.assertEqual(result, WorkerOutcome.REPORTED_UNKNOWN)
         self.assertGreaterEqual(sum(call.args[2] is StepStatus.RUNNING for call in platform.progress.call_args_list), 2)
-        provider.generate.assert_called_once()
+        provider.submit_async.assert_called_once()
         platform.submit_result.assert_called_once()
         self.assertEqual(platform.submit_result.call_args.args[0].status, StepStatus.UNKNOWN)
         calls_after_return = platform.progress.call_count

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.asset.mapper.GenerationOutboxMapper">
+    <resultMap id="OutboxResult" type="com.ruoyi.system.asset.domain.OutboxEvent">
+        <id property="id" column="id"/>
+        <result property="accountId" column="account_id"/>
+        <result property="eventId" column="event_id"/>
+        <result property="eventType" column="event_type"/>
+        <result property="schemaVersion" column="schema_version"/>
+        <result property="traceId" column="trace_id"/>
+        <result property="payload" column="payload"/>
+        <result property="attemptCount" column="attempt_count"/>
+    </resultMap>
+
+    <select id="selectPublishableForUpdate" resultMap="OutboxResult">
+        select id, account_id, event_id, event_type, schema_version, trace_id, payload, attempt_count
+        from p_outbox
+        where event_type = 'AVATAR_GENERATION_REQUESTED'
+          and ((status = 'PENDING' and (next_run_at is null or next_run_at &lt;= utc_timestamp(3)))
+            or (status = 'SENDING' and lease_expires_at &lt;= utc_timestamp(3)))
+        order by id limit 1 for update skip locked
+    </select>
+
+    <update id="claimForPublish">
+        update p_outbox
+        set status = 'SENDING', lease_owner = #{publisherId},
+            lease_expires_at = date_add(utc_timestamp(3), interval 30 second),
+            attempt_count = attempt_count + 1, updated_at = utc_timestamp(3)
+        where id = #{id}
+          and (status = 'PENDING' or (status = 'SENDING' and lease_expires_at &lt;= utc_timestamp(3)))
+    </update>
+
+    <update id="markPublished">
+        update p_outbox
+        set status = 'SENT', published_at = utc_timestamp(3), lease_owner = null,
+            lease_expires_at = null, updated_at = utc_timestamp(3)
+        where id = #{id} and status = 'SENDING' and lease_owner = #{publisherId}
+          and lease_expires_at > utc_timestamp(3)
+    </update>
+
+    <update id="releaseForRetry">
+        update p_outbox
+        set status = 'PENDING', lease_owner = null, lease_expires_at = null,
+            next_run_at = date_add(utc_timestamp(3), interval #{retryDelaySeconds} second),
+            updated_at = utc_timestamp(3)
+        where id = #{id} and status = 'SENDING' and lease_owner = #{publisherId}
+    </update>
+</mapper>

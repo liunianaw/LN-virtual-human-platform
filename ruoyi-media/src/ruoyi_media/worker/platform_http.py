@@ -85,14 +85,6 @@ class PlatformHttpSettings:
         return cls(base_url=validate_platform_url(base_url), internal_token=internal_token)
 
 
-@dataclass(frozen=True)
-class ClaimedOutboxEvent:
-    """One leased platform outbox event, normalized for the generation engine."""
-
-    outbox_id: str
-    message: dict[str, object]
-
-
 def validate_platform_url(value: str) -> str:
     parsed = urlsplit(value)
     if (
@@ -119,52 +111,21 @@ class SystemGenerationPlatform(GenerationPlatformPort):
     def from_environment(cls) -> "SystemGenerationPlatform":
         return cls(PlatformHttpSettings.from_environment())
 
-    def claim_outbox(self, worker_id: str) -> ClaimedOutboxEvent | None:
-        """Lease one pending outbox event without acknowledging it.
-
-        The caller must only acknowledge the returned event after it has
-        reached a terminal delivery outcome.  A missing event is normal when
-        the worker is idle.
-        """
-        safe_worker_id = _safe_token(worker_id, "workerId")
-        data = self._post("/asset/internal/generation/outbox/claim", {"workerId": safe_worker_id})
-        if data is None:
-            return None
-        if not isinstance(data, Mapping):
-            raise PlatformTransportError("platform outbox claim response is invalid")
-        outbox_id = str(_positive_int(data.get("id"), "outboxId"))
-        event_type = _safe_token(_required_string(data.get("eventType"), "eventType"), "eventType")
-        event_id = _safe_token(_required_string(data.get("eventId"), "eventId"), "eventId")
-        trace_id = _safe_token(_required_string(data.get("traceId"), "traceId"), "traceId")
-        account_id = str(_positive_int(data.get("accountId"), "accountId"))
-        payload = _outbox_payload(data.get("payload"))
-        if event_type == "AVATAR_GENERATION_REQUESTED":
-            payload["taskId"] = str(_positive_int(payload.get("taskId"), "taskId"))
-            payload["accountId"] = account_id
-        return ClaimedOutboxEvent(
-            outbox_id=outbox_id,
-            message={
-                "schemaVersion": 1,
-                "eventId": event_id,
-                "eventType": event_type,
-                "traceId": trace_id,
-                "accountId": account_id,
-                "payload": payload,
-            },
-        )
-
-    def mark_outbox_sent(self, outbox_id: str, worker_id: str) -> None:
-        self._post("/asset/internal/generation/outbox/sent", {
-            "outboxId": _positive_int(outbox_id, "outboxId"),
-            "workerId": _safe_token(worker_id, "workerId"),
-        })
-
     def release_preflight_claim(self, claim: ClaimedActionStep, code: str) -> None:
         """Return a leased, never-submitted step to READY for a repaired Worker."""
         self._post("/asset/internal/generation/claim-release", {
             **self._lease_payload(claim),
             "errorCode": _safe_token(code, "errorCode"),
         })
+
+    def has_active_steps(self, event: AvatarGenerationRequested) -> bool:
+        data = self._post("/asset/internal/generation/task-active", {
+            "accountId": _positive_int(event.account_id, "accountId"),
+            "taskId": _positive_int(event.task_id, "taskId"),
+        })
+        if type(data) is not bool:
+            raise PlatformTransportError("platform task-active response is invalid")
+        return data
 
     def claim_next_action_step(self, event: AvatarGenerationRequested, worker_id: str) -> ClaimedActionStep | None:
         self._worker_id = _safe_token(worker_id, "workerId")
@@ -238,9 +199,16 @@ class SystemGenerationPlatform(GenerationPlatformPort):
         })
         if not isinstance(data, Mapping):
             raise PlatformTransportError("platform attempt response is invalid")
+        receipt = data.get("receiptJson")
+        if isinstance(receipt, str):
+            receipt = json.loads(receipt)
+        if receipt is not None and not isinstance(receipt, dict):
+            raise PlatformTransportError("platform attempt receipt is invalid")
         return PreparedAttempt(
             attempt_id=str(_positive_int(data.get("attemptId"), "attemptId")),
             provider_request_key=_safe_token(_required_string(data.get("providerRequestKey"), "providerRequestKey"), "providerRequestKey"),
+            recovery_only=data.get("recoveryOnly") is True,
+            receipt=receipt,
         )
 
     def progress(
@@ -251,7 +219,7 @@ class SystemGenerationPlatform(GenerationPlatformPort):
         provider_request_id: str | None,
         details: dict[str, object] | None = None,
     ) -> None:
-        if state not in {StepStatus.RUNNING, StepStatus.UNKNOWN, StepStatus.FAILED}:
+        if state not in {StepStatus.RUNNING, StepStatus.POLLING, StepStatus.UNKNOWN, StepStatus.FAILED}:
             raise ValueError("unsupported progress state")
         self._post("/asset/internal/generation/progress", {
             **self._lease_payload(claim),
@@ -259,6 +227,13 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             "state": state.value,
             "providerRequestId": provider_request_id,
             "errorCode": _error_code(details),
+        })
+
+    def save_receipt(self, claim: ClaimedActionStep, attempt: PreparedAttempt, receipt: dict[str, object]) -> None:
+        self._post("/asset/internal/generation/receipt", {
+            **self._lease_payload(claim),
+            "attemptId": _positive_int(attempt.attempt_id, "attemptId"),
+            "receipt": receipt,
         })
 
     def submit_result(self, result: GenerationStepResult) -> None:
@@ -422,17 +397,6 @@ def _parameters(value: object) -> dict[str, object]:
         return {}
     if not isinstance(value, Mapping):
         raise PlatformTransportError("platform parameters are invalid")
-    return dict(value)
-
-
-def _outbox_payload(value: object) -> dict[str, object]:
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError as error:
-            raise PlatformTransportError("platform outbox payload is invalid") from error
-    if not isinstance(value, Mapping):
-        raise PlatformTransportError("platform outbox payload is invalid")
     return dict(value)
 
 
