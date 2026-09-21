@@ -26,12 +26,12 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
     private static final ObjectMapper JSON = new ObjectMapper();
     private final VoiceRuntimeProperties properties;
     private final TtsAdapterSupport support;
+    private final OfficialServiceResolver resolver;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
-    public OfficialDashScopeTtsRuntimeAdapter(VoiceRuntimeProperties properties, TtsAdapterSupport support)
+    public OfficialDashScopeTtsRuntimeAdapter(VoiceRuntimeProperties properties, TtsAdapterSupport support, OfficialServiceResolver resolver)
     {
-        this.properties = properties;
-        this.support = support;
+        this.properties = properties; this.support = support; this.resolver = resolver;
     }
 
     @Override
@@ -48,19 +48,13 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
 
     private void synthesize(TtsSynthesisWork work, TtsCompletionSink completionSink)
     {
-        VoiceRuntimeProperties.Provider config = properties.getOfficial();
-        String apiKey = System.getenv("DASHSCOPE_API_KEY");
-        if (blank(apiKey))
-        {
-            support.fail(work, completionSink, "OFFICIAL_TTS_NOT_CONFIGURED");
-            return;
-        }
         try
         {
-            Duration timeout = config.getTimeout();
-            AudioListener listener = new AudioListener(work.text(), configuredVoice(work, config), properties.getMaxAudioBytes());
-            WebSocket socket = client.newWebSocketBuilder().header("Authorization", "Bearer " + apiKey.trim())
-                    .header("User-Agent", "LN-Session/1").buildAsync(endpoint(config), listener)
+            OfficialServiceResolver.Resolved config = resolver.resolve(work.voice());
+            Duration timeout = properties.getOfficial().getTimeout();
+            AudioListener listener = new AudioListener(work.text(), configuredVoice(work), properties.getMaxAudioBytes());
+            WebSocket socket = client.newWebSocketBuilder().header("Authorization", "Bearer " + config.credential())
+                    .header("User-Agent", "LN-Session/1").buildAsync(endpoint(config.endpoint(), config.model()), listener)
                     .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             try
             {
@@ -92,28 +86,24 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
         }
     }
 
-    private URI endpoint(VoiceRuntimeProperties.Provider config)
+    private URI endpoint(String configuredEndpoint, String model)
     {
-        if (blank(config.getEndpoint()) || blank(config.getModel()))
+        if (blank(configuredEndpoint) || blank(model))
         {
             throw new IllegalArgumentException("Official TTS endpoint is not configured");
         }
-        URI base = URI.create(config.getEndpoint());
+        URI base = URI.create(configuredEndpoint);
         if (!"wss".equalsIgnoreCase(base.getScheme()) || blank(base.getHost()))
         {
             throw new IllegalArgumentException("Official TTS endpoint must use wss");
         }
         String separator = base.getQuery() == null ? "?" : "&";
-        return URI.create(base + separator + "model=" + URLEncoder.encode(config.getModel(), StandardCharsets.UTF_8));
+        return URI.create(base + separator + "model=" + URLEncoder.encode(model, StandardCharsets.UTF_8));
     }
 
-    private static String configuredVoice(TtsSynthesisWork work, VoiceRuntimeProperties.Provider config)
+    private static String configuredVoice(TtsSynthesisWork work)
     {
         String voice = work.voice().providerVoiceRef();
-        if (blank(voice))
-        {
-            voice = config.getVoice();
-        }
         if (blank(voice) || voice.length() > 128)
         {
             throw new IllegalArgumentException("Official TTS voice is not configured");

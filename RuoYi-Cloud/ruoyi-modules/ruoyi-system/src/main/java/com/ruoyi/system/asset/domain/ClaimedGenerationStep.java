@@ -19,6 +19,8 @@ public class ClaimedGenerationStep
     private Long reservedAttemptId;
     private String providerRequestKey;
     private String receiptJson;
+    private Long officialServiceId;
+    private Long serviceRevision;
 
     public String getStepStatus() { return stepStatus; }
     public void setStepStatus(String value) { stepStatus = value; }
@@ -30,6 +32,10 @@ public class ClaimedGenerationStep
     public void setProviderRequestKey(String value) { providerRequestKey = value; }
     public String getReceiptJson() { return receiptJson; }
     public void setReceiptJson(String value) { receiptJson = value; }
+    public Long getOfficialServiceId() { return officialServiceId; }
+    public void setOfficialServiceId(Long value) { officialServiceId = value; }
+    public Long getServiceRevision() { return serviceRevision; }
+    public void setServiceRevision(Long value) { serviceRevision = value; }
 
     public Long getStepId() { return stepId; }
     public void setStepId(Long value) { stepId = value; }

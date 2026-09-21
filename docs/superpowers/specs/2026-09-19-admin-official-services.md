@@ -2,17 +2,17 @@
 
 前置说明书：[编写与执行规范](../../../执行计划书编写与执行规范.md) · [项目整体说明书](../../../项目整体说明书.md) · [需求](../../../项目需求说明书.md) · [数据库](../../../数据库设计说明书.md) · [架构](../../../项目架构说明书.md) · [接口约定（本计划及共享契约）](platform-console-shared-contract.md)
 共享契约：[平台内使用共享契约](platform-console-shared-contract.md)。
-日期：2026-09-19。版本：0.1。确认状态：范围依据用户本轮决定，具体计划待确认；本轮只编写文档，不授权编码或运行时操作。
+日期：2026-09-19。版本：0.2。确认状态：用户于 2026-09-21 授权按本计划编码；本轮只做静态逻辑验收，不启动服务、执行迁移或发起真实厂商调用。
 
 ## 1. 当前执行状态
 
 | 项目 | 当前事实与证据 |
 |---|---|
-| 阶段/基线 | 计划讨论稿；实施前以 2026-09-21 当前源码和 `41c85b8`、`d6f8b7b` 为基线复核。 |
-| 已有能力 | 图像服务查询及任务快照；官方TTS适配器；没有完整服务管理页面/CRUD |
-| 静态核对 | 已盘点以下调用点；新管理与动态配置链路未实现，结论为证据不足 |
-| 用户验收 | 本计划未执行；已完成角色制作不重验 |
-| 剩余/下一步 | 确认计划后按切片实现；本轮无代码/配置发布/收费调用 |
+| 阶段/基线 | S-A～S-C 静态实现完成；以 2026-09-21 当前源码和 `487355c` 为基线，未触碰未跟踪 `logs/`。 |
+| 已有能力 | 图像服务查询及任务快照、官方 TTS 适配器，以及本计划新增的服务管理、安全凭证和运行时解析链路。 |
+| 静态核对 | `ruoyi-system`、`ruoyi-session` Maven compile、Vue typecheck、媒体 Worker 定向测试及 XML/差异检查通过；未以这些替代真实服务验收。 |
+| 用户验收 | 未启动服务、未执行 Flyway、未保存真实凭证、未发起图片/TTS 调用；已完成角色制作不重验。 |
+| 剩余/下一步 | 用户按第9节在受控环境验收保存、检查、启停、制作和试听；部署时提供受保护的 `LN_OFFICIAL_SERVICE_MASTER_KEY`，不写入仓库。 |
 
 ## 2. 目标、范围和执行边界
 
@@ -101,3 +101,11 @@ ServiceInput：name必填1～100；capability必填AVATAR_GENERATION/TTS；provi
 ## 10. 跨模块交接与项目贯通
 
 输出Service与内部解析给[官方声音](2026-09-19-admin-official-voices.md)，输出状态变更给[生命周期](2026-09-19-admin-public-asset-lifecycle.md)/播报。原制作只消费同一可用服务查询，不重做制作；菜单完成不代表实际TTS读取正确。最终由用户从管理保存到平台内真实试听证明接通。
+
+## 11. 执行记录（2026-09-21）
+
+- [x] S-A：新增 `official-services` 管理 API、菜单与 Vue 页面；分页/权限、ETag、非秘密 DTO、适配器地址/模型/参数白名单及凭证配置状态已接通。新凭证以部署主密钥 AES-GCM 加密写入 `p_secret`，响应、页面和日志路径均不回显明文。
+- [x] S-B：新增仅内部可访问的服务解析接口，逐次复核服务 ACTIVE、冻结修订、任务或 Voice 版本绑定及可解密凭证。制作 Worker 在提交前按任务快照解析图像服务；官方 TTS 在每个提交前解析固定服务修订，移除对全局 `DASHSCOPE_API_KEY` 的调用依赖。
+- [x] S-C：停用后的新制作领取/提交和新 TTS 提交均失败关闭；已冻结任务/Voice 只匹配原服务修订，不会静默换模型或回退任意全局 Key。新增菜单迁移和 session ticket 服务修订迁移已落库文件，未执行。
+- [x] 静态检查：`mvn -B -ntp -pl ruoyi-modules/ruoyi-system -am compile -DskipTests`、`mvn -B -ntp -pl ruoyi-modules/ruoyi-session -am compile -DskipTests`、Vue `npm run typecheck`、`PYTHONPATH=src python -m pytest -q tests/test_worker_lease.py`（2 passed）、`python -m compileall -q src`、相关 Mapper XML 解析及 `git diff --check` 均通过。
+- [ ] 用户终点验收：按第9节验证管理员保存/检查/启停、普通用户 403、停用阻断新调用及一次已授权真实 TTS；本轮未启动任何服务、数据库或浏览器，不将静态检查记为终点验收。

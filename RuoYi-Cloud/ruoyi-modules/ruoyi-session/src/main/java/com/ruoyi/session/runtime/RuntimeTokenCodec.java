@@ -22,7 +22,9 @@ public class RuntimeTokenCodec
         String payload = String.join("|", "v1", claims.tokenId(), Long.toString(claims.accountId()), Long.toString(claims.applicationId()),
                 Long.toString(claims.sessionId()), Long.toString(claims.configVersionId()), Long.toString(claims.expiresAt().toEpochMilli()),
                 claims.issuerConsoleRef(), Long.toString(claims.voice().voiceVersionId()), claims.voice().providerKind().name(), claims.voice().providerVoiceRef(),
-                claims.voice().relayVersionRef() == null ? "" : claims.voice().relayVersionRef());
+                claims.voice().relayVersionRef() == null ? "" : claims.voice().relayVersionRef(),
+                claims.voice().officialServiceId() == null ? "" : claims.voice().officialServiceId().toString(),
+                claims.voice().officialServiceRevision() == null ? "" : claims.voice().officialServiceRevision().toString());
         String body = ENCODER.encodeToString(payload.getBytes(StandardCharsets.UTF_8));
         return body + "." + ENCODER.encodeToString(sign(body));
     }
@@ -35,10 +37,11 @@ public class RuntimeTokenCodec
         try
         {
             String[] value = new String(DECODER.decode(parts[0]), StandardCharsets.UTF_8).split("\\|", -1);
-            if (value.length != 12 || !"v1".equals(value[0])) throw rejected();
+            if (value.length != 14 || !"v1".equals(value[0])) throw rejected();
             Claims claims = new Claims(value[1], Long.parseLong(value[2]), Long.parseLong(value[3]), Long.parseLong(value[4]),
                     Long.parseLong(value[5]), Instant.ofEpochMilli(Long.parseLong(value[6])), value[7],
-                    new VoiceRuntimeBinding(Long.parseLong(value[8]), TtsProviderKind.valueOf(value[9]), value[10], value[11].isBlank() ? null : value[11]));
+                    new VoiceRuntimeBinding(Long.parseLong(value[8]), TtsProviderKind.valueOf(value[9]), value[10], value[11].isBlank() ? null : value[11],
+                        value[12].isBlank() ? null : Long.parseLong(value[12]), value[13].isBlank() ? null : Long.parseLong(value[13])));
             if (!claims.expiresAt().isAfter(Instant.now())) throw rejected();
             return claims;
         }

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.officialservice.mapper.OfficialServiceMapper">
+    <resultMap id="Service" type="com.ruoyi.system.officialservice.domain.OfficialService">
+        <id property="id" column="id"/><result property="accountId" column="account_id"/><result property="name" column="name"/>
+        <result property="capability" column="capability"/><result property="providerCode" column="provider_code"/><result property="endpoint" column="endpoint"/>
+        <result property="modelId" column="model_id"/><result property="secretId" column="secret_id"/><result property="parameters" column="parameters"/>
+        <result property="status" column="status"/><result property="revision" column="revision"/><result property="createdAt" column="created_at"/><result property="updatedAt" column="updated_at"/>
+        <result property="credentialConfigured" column="credential_configured"/>
+    </resultMap>
+    <resultMap id="Secret" type="com.ruoyi.system.officialservice.domain.OfficialSecret">
+        <id property="id" column="id"/><result property="ciphertext" column="ciphertext"/><result property="nonce" column="nonce"/><result property="authTag" column="auth_tag"/>
+        <result property="keyVersion" column="key_version"/><result property="algorithm" column="algorithm"/><result property="status" column="status"/>
+    </resultMap>
+    <resultMap id="Idempotency" type="com.ruoyi.system.officialservice.domain.OfficialIdempotency"><result property="requestHash" column="request_hash"/><result property="resourceId" column="resource_id"/></resultMap>
+    <sql id="serviceColumns">s.id,s.account_id,s.name,s.capability,s.provider_code,s.endpoint,s.model_id,s.secret_id,s.parameters,s.status,s.revision,s.created_at,s.updated_at,
+        exists(select 1 from p_secret ps where ps.id=s.secret_id and ps.status='ACTIVE') as credential_configured</sql>
+    <select id="nextId" resultType="java.lang.Long">select uuid_short()</select>
+    <select id="selectPage" resultMap="Service">
+        select <include refid="serviceColumns"/> from p_official_service s
+        <where><if test="capability != null">s.capability=#{capability}</if><if test="status != null">and s.status=#{status}</if></where>
+        order by s.created_at desc,s.id desc limit #{limit} offset #{offset}
+    </select>
+    <select id="countPage" resultType="int">select count(*) from p_official_service s <where><if test="capability != null">s.capability=#{capability}</if><if test="status != null">and s.status=#{status}</if></where></select>
+    <select id="selectById" resultMap="Service">select <include refid="serviceColumns"/> from p_official_service s where s.id=#{serviceId}</select>
+    <select id="selectByIdForUpdate" resultMap="Service">select <include refid="serviceColumns"/> from p_official_service s where s.id=#{serviceId} for update</select>
+    <select id="selectResolvable" resultMap="Service">
+        select <include refid="serviceColumns"/> from p_official_service s join p_secret ps on ps.id=s.secret_id and ps.status='ACTIVE'
+        where s.id=#{serviceId} and s.revision=#{expectedRevision} and s.capability=#{capability} and s.status='ACTIVE'
+    </select>
+    <select id="selectSecret" resultMap="Secret">select id,ciphertext,nonce,auth_tag,key_version,algorithm,status from p_secret where id=#{secretId} and status='ACTIVE'</select>
+    <select id="selectIdempotencyForUpdate" resultMap="Idempotency">select request_hash,resource_id from p_api_idempotency where account_id=#{accountId} and scope=#{scope} and request_id=#{requestId} for update</select>
+    <select id="countGenerationBinding" resultType="int">select count(*) from p_generation_task where id=#{taskId} and official_service_id=#{serviceId} and cast(json_unquote(json_extract(service_snapshot,'$.revision')) as unsigned)=#{revision}</select>
+    <select id="countVoiceBinding" resultType="int">select count(*) from p_voice_version where id=#{voiceVersionId} and official_service_id=#{serviceId} and cast(json_unquote(json_extract(official_config_snapshot,'$.revision')) as unsigned)=#{revision}</select>
+    <insert id="insert">insert into p_official_service (id,created_at,updated_at,account_id,name,capability,provider_code,endpoint,model_id,secret_id,parameters,status,revision)
+        values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{name},#{capability},#{providerCode},#{endpoint},#{modelId},#{secretId},cast(#{parameters} as json),#{status},#{revision})</insert>
+    <update id="update">update p_official_service set name=#{name},capability=#{capability},provider_code=#{providerCode},endpoint=#{endpoint},model_id=#{modelId},secret_id=#{secretId},parameters=cast(#{parameters} as json),status=#{status},revision=#{revision},updated_at=utc_timestamp(3) where id=#{id} and revision=#{revision}-1</update>
+    <update id="updateStatus">update p_official_service set status=#{status},revision=#{revision},updated_at=utc_timestamp(3) where id=#{serviceId} and revision=#{revision}-1</update>
+    <insert id="insertSecret">insert into p_secret (id,created_at,updated_at,account_id,purpose,name,ciphertext,nonce,auth_tag,key_version,algorithm,display_suffix,status,revision)
+        values (#{secret.id},utc_timestamp(3),utc_timestamp(3),#{accountId},'OFFICIAL_PROVIDER',#{name},#{secret.ciphertext},#{secret.nonce},#{secret.authTag},#{secret.keyVersion},#{secret.algorithm},#{suffix},'ACTIVE',1)</insert>
+    <insert id="insertIdempotency">insert into p_api_idempotency (id,created_at,updated_at,account_id,scope,request_id,request_hash,resource_type,resource_id,status,expires_at)
+        values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{scope},#{requestId},#{requestHash},'OFFICIAL_SERVICE',#{resourceId},'SUCCEEDED',date_add(utc_timestamp(3),interval 24 hour))</insert>
+</mapper>

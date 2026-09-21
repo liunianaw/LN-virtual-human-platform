@@ -64,7 +64,8 @@ public class SessionDebugClient
 
     public record CreateBody(long accountId, long applicationId, long configVersionId, String requestId) { }
     public record MintBody(long accountId, long applicationId, long sessionId, long configVersionId, String issuerConsoleRef,
-            long expiresAtEpochMs, long voiceVersionId, String providerKind, String providerVoiceRef, String relayVersionRef) { }
+            long expiresAtEpochMs, long voiceVersionId, String providerKind, String providerVoiceRef, String relayVersionRef,
+            Long officialServiceId, Long officialServiceRevision) { }
     public record CloseBody(long accountId) { }
     public record CreatedSession(long sessionId, long applicationId, long configVersionId) { }
     public record IssuedToken(String token, String expiresAt) { }

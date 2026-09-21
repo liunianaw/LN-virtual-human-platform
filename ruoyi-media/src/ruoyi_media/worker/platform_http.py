@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from PIL import Image, ImageOps
 from ruoyi_media.providers.avatar_prompts import prompt as validated_action_prompt
+from ruoyi_media.providers.qwen_image import QwenImageSettings
 
 from .generation import (
     AvatarGenerationRequested,
@@ -190,7 +191,20 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             model=model,
             parameters=parameters,
             output_prefix=output_prefix,
+            official_service_id=str(_positive_int(data.get("officialServiceId"), "officialServiceId")),
+            service_revision=_positive_int(data.get("serviceRevision"), "serviceRevision"),
         )
+
+    def resolve_generation_service(self, claim: ClaimedActionStep) -> QwenImageSettings:
+        value = self._post("/internal/v1/official-services/" + claim.official_service_id + "/resolve", {
+            "expectedServiceRevision": claim.service_revision,
+            "purpose": "AVATAR_GENERATION",
+            "taskId": _positive_int(claim.task_id, "taskId"),
+            "voiceVersionId": None,
+        }, raw=True)
+        if not isinstance(value, Mapping) or value.get("providerCode") != "DASHSCOPE_IMAGE":
+            raise PlatformTransportError("platform official service resolution is invalid")
+        return QwenImageSettings(api_key=_required_string(value.get("credential"), "credential"), endpoint=_required_string(value.get("endpoint"), "endpoint"))
 
     def prepare_attempt(self, claim: ClaimedActionStep, request_hash: str) -> PreparedAttempt:
         data = self._post("/asset/internal/generation/attempts", {
@@ -274,7 +288,7 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             raise PlatformTransportError("platform worker identity is not bound")
         return worker_id
 
-    def _post(self, path: str, payload: dict[str, object]) -> object:
+    def _post(self, path: str, payload: dict[str, object], raw: bool = False) -> object:
         request = urllib.request.Request(
             self._settings.base_url + path,
             data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
@@ -290,9 +304,9 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             raise AssertionError("unreachable")
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             raise PlatformTransportError("platform Worker API is unavailable") from error
-        return self._unwrap(body)
+        return self._unwrap(body, raw)
 
-    def _unwrap(self, body: bytes) -> object:
+    def _unwrap(self, body: bytes, raw: bool = False) -> object:
         if len(body) > _MAX_JSON_BYTES:
             raise PlatformTransportError("platform response is too large")
         try:
@@ -301,6 +315,8 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             raise PlatformTransportError("platform response is not JSON") from error
         if not isinstance(payload, Mapping):
             raise PlatformTransportError("platform response is invalid")
+        if raw:
+            return payload
         if payload.get("code") == 409 or payload.get("msg") == "STALE_LEASE":
             raise StaleLeaseError()
         if payload.get("code") != 200:

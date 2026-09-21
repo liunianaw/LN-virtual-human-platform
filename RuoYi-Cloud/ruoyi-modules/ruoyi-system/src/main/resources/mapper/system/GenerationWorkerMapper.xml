@@ -8,6 +8,7 @@
         <result property="sourceObjectKey" column="source_object_key"/><result property="actionCode" column="action_code"/>
         <result property="attemptNo" column="attempt_no"/><result property="leaseEpoch" column="lease_epoch"/>
         <result property="modelId" column="model_id"/><result property="parameters" column="parameters"/>
+        <result property="officialServiceId" column="official_service_id"/><result property="serviceRevision" column="service_revision"/>
         <result property="stepStatus" column="step_status"/><result property="existingAttemptId" column="existing_attempt_id"/>
         <result property="reservedAttemptId" column="reserved_attempt_id"/>
         <result property="providerRequestKey" column="provider_request_key"/><result property="receiptJson" column="receipt_json"/>
@@ -15,7 +16,8 @@
     <sql id="claimColumns">
         s.id as step_id, t.id as task_id, t.account_id, t.avatar_version_id, t.source_file_id, f.object_key as source_object_key,
         s.action_code, s.attempt_no, s.lease_epoch, json_unquote(json_extract(t.service_snapshot, '$.modelId')) as model_id,
-        json_unquote(json_extract(t.service_snapshot, '$.parameters')) as parameters,
+        json_unquote(json_extract(t.service_snapshot, '$.parameters')) as parameters, t.official_service_id,
+        cast(json_unquote(json_extract(t.service_snapshot, '$.revision')) as unsigned) as service_revision,
         s.status as step_status, a.id as existing_attempt_id, s.reserved_attempt_id, a.provider_request_key,
         json_extract(s.result_metadata, '$.providerReceipt') as receipt_json
     </sql>

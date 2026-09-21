@@ -8,9 +8,9 @@
 
 | 项目 | 当前事实与证据 |
 |---|---|
-| 阶段/基线 | V-A～V-C 已实施；基线为 2026-09-21 当前源码和 `41c85b8`、`d6f8b7b`；未触碰未跟踪的 `logs/`。 |
+| 阶段/基线 | V-A～V-C 静态实现完成；提交 `487355c` 已于 2026-09-21 推送至 `origin/main`。未触碰未跟踪的 `logs/`。 |
 | 已有能力 | 官方候选/版本/发布、公开目录、管理页、候选专用 `VOICE_PREVIEW` DEBUG、S→一次性票据→首帧WSS→音频读取/顺序播放回执/停止和临时音频清理已接线；官方TTS适配器继续复用。 |
-| 静态逻辑验证 | system/session Maven compile 与 Vue typecheck 均通过；已审阅候选隔离、版本指针、服务修订、幂等、票据、WSS、媒体读取与清理的生产/消费链。 |
+| 静态逻辑验证 | `ruoyi-system`、`ruoyi-session` Maven compile、Vue `npm run typecheck` 与 `git diff --check` 均通过；已审阅候选隔离、版本指针、服务修订、幂等、票据、WSS、媒体读取与清理的生产/消费链。 |
 | 用户体验/修复 | 未启动服务、未创建真实 DEBUG 会话、未发起合成或播放；角色制作仍只作为输入。 |
 | 下一步 | 用户在已有服务和角色下按第9节触发试听与发布终点验收；代理不启动服务、不执行迁移或真实合成。 |
 
@@ -101,9 +101,11 @@ C4“专用试听应用”是待确认设计，用于候选不公开即可试听
 
 ## 10. 跨模块交接与项目贯通
 
-[服务管理](2026-09-19-admin-official-services.md)提供服务/秘密解析；本计划输出voiceVersionId、公开可见性与不可变配置；[应用](2026-09-19-user-application-config.md)负责绑定；[播报](2026-09-19-user-console-speech.md)负责真实播放。试听先依赖播报内核，不能将声音页面保存完成冒充本计划完成。
+[服务管理](2026-09-19-admin-official-services.md)提供服务/秘密解析；本计划输出voiceVersionId、公开可见性与不可变配置；[应用](2026-09-19-user-application-config.md)负责绑定；[播报](2026-09-19-user-console-speech.md)负责真实播放。本计划的静态实现已完成，但未经服务启动、迁移或真实合成/播放验证，不能将其当作终点用户体验验收完成。
 
 ## 11. 执行记录（2026-09-21）
+
+- [x] 提交与同步：上述实现以 `487355c feat: 完成官方音色候选与试听链路` 提交，并已推送至 `origin/main`；工作树中的 `logs/` 未纳入提交。
 
 - [x] V-A：新增管理候选、详情、版本、官方服务选择和公共已发布目录；服务快照只保留非秘密字段，写操作要求 Idempotency-Key，版本/发布要求 If-Match。
 - [x] V-B：候选版本只能通过 `VOICE_PREVIEW` 应用配置进入既有 DEBUG Session 流程；S换一次性票据，浏览器首帧认证WSS，`AudioReadyResult`发布有序`audio.segment`，S读取WAV并回传播放状态；关闭预览会停止轮次、撤销grant并触发临时音频清理。普通 `USER` 应用查询明确只允许已发布 Voice，预览配置保存 `APP_CURRENT` 引用。

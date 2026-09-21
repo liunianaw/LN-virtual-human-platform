@@ -61,6 +61,8 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
             response.put("leaseSeconds", 300);
             response.put("model", step.getModelId());
             response.put("parametersJson", step.getParameters() == null ? "{}" : step.getParameters());
+            response.put("officialServiceId", step.getOfficialServiceId());
+            response.put("serviceRevision", step.getServiceRevision());
             response.put("referenceUrl", storage.readUrl(step.getSourceObjectKey()));
             response.put("outputPrefix", "avatar-generation/" + accountId + "/" + taskId + "/" + step.getStepId() + "/" + epoch);
             return response;

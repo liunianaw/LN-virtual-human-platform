@@ -28,8 +28,7 @@ public class TtsRuntimeAdapterRegistry
 
     public TtsRuntimeAdapter requireAdapter(VoiceRuntimeBinding voice)
     {
-        boolean enabled = voice.providerKind() == TtsProviderKind.OFFICIAL
-                ? properties.getOfficial().isEnabled() : properties.getRelay().isEnabled();
+        boolean enabled = voice.providerKind() == TtsProviderKind.OFFICIAL || properties.getRelay().isEnabled();
         if (!enabled)
         {
             throw new RuntimeProblem(HttpStatus.SERVICE_UNAVAILABLE, "TTS_PROVIDER_NOT_CONFIGURED",

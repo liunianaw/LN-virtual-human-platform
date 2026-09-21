@@ -104,7 +104,7 @@ def _generation_worker():
     from .cos_writer import TencentCosObjectWriter
     from .generation import GenerationWorker
     from .platform_http import SystemGenerationPlatform
-    from ruoyi_media.providers import QwenImageProvider
+    from ruoyi_media.providers import QwenImageProvider, QwenImageSettings
 
     worker_id = os.environ.get("RUOYI_MEDIA_WORKER_ID", "")
     if not worker_id:
@@ -114,7 +114,7 @@ def _generation_worker():
     return GenerationWorker(
         worker_id=worker_id,
         platform=SystemGenerationPlatform.from_environment(),
-        provider=QwenImageProvider.from_environment(),
+        provider=QwenImageProvider(QwenImageSettings(api_key="unresolved", endpoint="https://dashscope.aliyuncs.com")),
         objects=TencentCosObjectWriter.from_environment(),
     )
 

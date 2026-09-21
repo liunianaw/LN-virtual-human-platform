@@ -27,6 +27,7 @@ from ruoyi_media.providers.qwen_image import (
     ProviderRejected,
     ProviderUncertain,
     QwenImageProvider,
+    QwenImageSettings,
     persist_receipt,
     safe_provider_details,
 )
@@ -95,6 +96,8 @@ class ClaimedActionStep:
     model: str
     parameters: dict[str, object]
     output_prefix: str
+    official_service_id: str = ""
+    service_revision: int = 0
 
 
 @dataclass(frozen=True)
@@ -165,7 +168,11 @@ class GenerationPlatformPort(Protocol):
 
     def prepare_attempt(self, claim: ClaimedActionStep, request_hash: str) -> PreparedAttempt: ...
 
+    def resolve_generation_service(self, claim: ClaimedActionStep) -> QwenImageSettings: ...
+
     def save_receipt(self, claim: ClaimedActionStep, attempt: PreparedAttempt, receipt: dict[str, object]) -> None: ...
+
+    def release_preflight_claim(self, claim: ClaimedActionStep, code: str) -> None: ...
 
     def progress(
         self,
@@ -211,6 +218,14 @@ class GenerationWorker:
         _validate_claim(claim, event)
         if claim.lease_expires_at <= datetime.now(UTC):
             return WorkerOutcome.IGNORED_STALE
+        provider = self._provider
+        if claim.official_service_id:
+            try:
+                provider = QwenImageProvider(self._platform.resolve_generation_service(claim))
+            except Exception as error:
+                self._platform.release_preflight_claim(claim, "OFFICIAL_SERVICE_UNAVAILABLE")
+                print(json.dumps({"event": "generation_service_unavailable", "taskId": claim.task_id, "errorType": type(error).__name__}), flush=True)
+                return WorkerOutcome.NO_WORK
 
         request_hash = _request_hash(claim)
         try:
@@ -219,7 +234,7 @@ class GenerationWorker:
             return WorkerOutcome.IGNORED_STALE
         try:
             with self._keep_lease(claim, attempt):
-                return self._generate_claim(event, claim, attempt)
+                return self._generate_claim(event, claim, attempt, provider)
         except StaleLeaseError:
             return WorkerOutcome.IGNORED_STALE
 
@@ -245,7 +260,7 @@ class GenerationWorker:
             stopped.set()
             thread.join(timeout=35)
 
-    def _generate_claim(self, event, claim, attempt):
+    def _generate_claim(self, event, claim, attempt, provider):
         print(json.dumps({"event": "generation_dispatch", "taskId": claim.task_id, "stepId": claim.step_id,
                           "attemptId": attempt.attempt_id, "action": claim.action, "model": claim.model}), flush=True)
         try:
@@ -255,7 +270,7 @@ class GenerationWorker:
                 persist_receipt(receipt_path, attempt.receipt)
             if attempt.recovery_only and not receipt_path.is_file() and not receipt_path.with_name("provider-response.local.json").is_file():
                 raise ProviderUncertain({"reason": "recovery_evidence_missing"})
-            generated = self._obtain_image(
+            generated = self._obtain_image(provider,
                 ImageGenerationRequest(
                     model=claim.model,
                     prompt=claim.prompt,
@@ -316,13 +331,13 @@ class GenerationWorker:
             return WorkerOutcome.IGNORED_STALE
         return WorkerOutcome.REPORTED_SUCCEEDED
 
-    def _obtain_image(self, request, receipt_path, claim, attempt):
+    def _obtain_image(self, provider, request, receipt_path, claim, attempt):
         receipt = json.loads(receipt_path.read_text(encoding="utf-8")) if receipt_path.is_file() else None
         if receipt and receipt.get("imageUrl"):
-            return self._provider.recover(receipt_path, lambda value: self._platform.save_receipt(claim, attempt, value))
+            return provider.recover(receipt_path, lambda value: self._platform.save_receipt(claim, attempt, value))
         if receipt and receipt.get("providerTaskId"):
             try:
-                receipt = self._provider.query_async(receipt_path)
+                receipt = provider.query_async(receipt_path)
             except (urllib.error.URLError, TimeoutError, OSError):
                 failures = int(receipt.get("recoveryFailures", 0)) + 1
                 receipt["recoveryFailures"] = failures
@@ -334,13 +349,13 @@ class GenerationWorker:
                 return None
         elif attempt.recovery_only:
             # Legacy synchronous raw response recovery is parse/download-only.
-            return self._provider.generate(request, receipt_path,
+            return provider.generate(request, receipt_path,
                 lambda value: self._platform.save_receipt(claim, attempt, value))
         else:
-            receipt = self._provider.submit_async(request, receipt_path)
+            receipt = provider.submit_async(request, receipt_path)
         self._platform.save_receipt(claim, attempt, receipt)
         if receipt.get("stage") == "SUCCEEDED":
-            return self._provider.recover(receipt_path)
+            return provider.recover(receipt_path)
         if receipt.get("stage") in {"FAILED", "CANCELED"}:
             raise ProviderRejected("ASYNC_TASK_FAILED")
         if receipt.get("stage") not in {"PENDING", "RUNNING"}:

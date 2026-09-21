@@ -39,7 +39,7 @@ public class ConsoleDebugInternalController
     {
         guard.requireSystem(authorization);
         VoiceRuntimeBinding voice = new VoiceRuntimeBinding(body.voiceVersionId(), TtsProviderKind.valueOf(body.providerKind()),
-                body.providerVoiceRef(), body.relayVersionRef());
+                body.providerVoiceRef(), body.relayVersionRef(), body.officialServiceId(), body.officialServiceRevision());
         return grants.mint(new ConsoleDebugGrantService.MintRequest(body.accountId(), body.applicationId(), body.sessionId(),
                 body.configVersionId(), body.issuerConsoleRef(), Instant.ofEpochMilli(body.expiresAtEpochMs()), voice));
     }
@@ -55,6 +55,7 @@ public class ConsoleDebugInternalController
 
     public record CreateBody(long accountId, long applicationId, long configVersionId, String requestId) { }
     public record MintBody(long accountId, long applicationId, long sessionId, long configVersionId, String issuerConsoleRef,
-            long expiresAtEpochMs, long voiceVersionId, String providerKind, String providerVoiceRef, String relayVersionRef) { }
+            long expiresAtEpochMs, long voiceVersionId, String providerKind, String providerVoiceRef, String relayVersionRef,
+            Long officialServiceId, Long officialServiceRevision) { }
     public record CloseBody(long accountId) { }
 }

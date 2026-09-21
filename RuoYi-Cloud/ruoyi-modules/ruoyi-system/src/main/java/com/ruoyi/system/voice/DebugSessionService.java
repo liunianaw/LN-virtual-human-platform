@@ -59,7 +59,7 @@ public class DebugSessionService
         Binding binding = registration.binding();
         return sessionClient.mint(new SessionDebugClient.MintBody(accountId, registration.applicationId(), sessionId, binding.configVersionId(),
                 registration.issuerConsoleRef(), expiresAt.toEpochMilli(), binding.voiceVersionId(), binding.providerKind(),
-                binding.providerVoiceRef(), binding.relayVersionRef()));
+                binding.providerVoiceRef(), binding.relayVersionRef(), binding.officialServiceId(), binding.officialServiceRevision()));
     }
 
     public void close(long accountId, LoginUser login, long sessionId)
@@ -78,8 +78,8 @@ public class DebugSessionService
 
     private Binding binding(long accountId, long applicationId, boolean allowVoicePreview)
     {
-        Binding binding = jdbc.query("select c.id,c.voice_version_id,v.service_type,v.voice_code,v.relay_version_id,c.avatar_version_id from p_application a join p_app_config c on c.id = a.current_config_id join p_voice_version v on v.id = c.voice_version_id join p_voice voice on voice.id = v.voice_id left join p_official_service official on official.id = v.official_service_id where a.id = ? and a.account_id = ? and a.status = 'ACTIVE' and c.mode = 'SPEAK_ONLY' and ((a.purpose = 'USER' and voice.status = 'PUBLISHED' and (voice.account_id = a.account_id or voice.visibility = 'OFFICIAL')) or (? = 1 and a.purpose = 'VOICE_PREVIEW' and a.preview_voice_version_id = v.id and voice.visibility = 'OFFICIAL')) and (v.service_type = 'RELAY' or (official.capability = 'TTS' and official.status = 'ACTIVE'))",
-            rs -> rs.next() ? new Binding(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getObject(5) == null ? null : rs.getString(5), rs.getLong(6)) : null,
+        Binding binding = jdbc.query("select c.id,c.voice_version_id,v.service_type,v.voice_code,v.relay_version_id,c.avatar_version_id,official.id,official.revision from p_application a join p_app_config c on c.id = a.current_config_id join p_voice_version v on v.id = c.voice_version_id join p_voice voice on voice.id = v.voice_id left join p_official_service official on official.id = v.official_service_id where a.id = ? and a.account_id = ? and a.status = 'ACTIVE' and c.mode = 'SPEAK_ONLY' and ((a.purpose = 'USER' and voice.status = 'PUBLISHED' and (voice.account_id = a.account_id or voice.visibility = 'OFFICIAL')) or (? = 1 and a.purpose = 'VOICE_PREVIEW' and a.preview_voice_version_id = v.id and voice.visibility = 'OFFICIAL')) and (v.service_type = 'RELAY' or (official.capability = 'TTS' and official.status = 'ACTIVE'))",
+            rs -> rs.next() ? new Binding(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getObject(5) == null ? null : rs.getString(5), rs.getLong(6), rs.getObject(7) == null ? null : rs.getLong(7), rs.getObject(8) == null ? null : rs.getLong(8)) : null,
                 applicationId, accountId, allowVoicePreview ? 1 : 0);
         if (binding == null) throw new ServiceException("应用没有可用的 SPEAK_ONLY 已发布 Voice 配置", HttpStatus.CONFLICT.value());
         Integer actionCount = jdbc.queryForObject("select count(1) from p_avatar_version v join p_avatar a on a.id = v.avatar_id join p_avatar_action action on action.avatar_version_id = v.id where v.id = ? and v.status = 'PUBLISHED' and a.status in ('PUBLISHED','UNLISTED') and (v.account_id = ? or a.visibility = 'OFFICIAL') and action.action_code in ('idle','speaking','listening','thinking','nod','shake_head','wave','happy')",
@@ -91,6 +91,6 @@ public class DebugSessionService
     private static boolean blank(String value) { return value == null || value.isBlank(); }
     private record Registration(long accountId, long applicationId, Binding binding, String issuerConsoleRef) { }
     private record Binding(long configVersionId, long voiceVersionId, String providerKind, String providerVoiceRef,
-            String relayVersionRef, long avatarVersionId) { }
+            String relayVersionRef, long avatarVersionId, Long officialServiceId, Long officialServiceRevision) { }
     public record DebugSession(long sessionId, long applicationId, long configVersionId) { }
 }

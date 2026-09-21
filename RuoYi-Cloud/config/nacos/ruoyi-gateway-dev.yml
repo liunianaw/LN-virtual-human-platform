@@ -33,7 +33,7 @@ spring:
           - id: platform-official-voices
             uri: lb://ruoyi-system
             predicates:
-            - Path=/api/v1/voices/**,/api/v1/admin/voices/**
+            - Path=/api/v1/voices/**,/api/v1/admin/voices/**,/api/v1/admin/official-services/**
           - id: platform-debug-system
             uri: lb://ruoyi-system
             predicates:
