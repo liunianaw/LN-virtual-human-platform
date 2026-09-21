@@ -31,6 +31,7 @@ public class DebugSessionService
         SessionDebugClient.CreatedSession created = sessionClient.create(accountId, applicationId, binding.configVersionId(), requestId);
         if (created.sessionId() <= 0 || created.applicationId() != applicationId || created.configVersionId() != binding.configVersionId())
             throw new ServiceException("会话服务返回无效 DEBUG Session", HttpStatus.BAD_GATEWAY.value());
+        recordSessionReferences(accountId, created.sessionId(), binding, requestId);
         sessions.put(created.sessionId(), new Registration(accountId, applicationId, binding, issuerRef));
         return new DebugSession(created.sessionId(), applicationId, binding.configVersionId());
     }
@@ -44,6 +45,7 @@ public class DebugSessionService
         SessionDebugClient.CreatedSession created = sessionClient.create(accountId, applicationId, binding.configVersionId(), requestId);
         if (created.sessionId() <= 0 || created.applicationId() != applicationId || created.configVersionId() != binding.configVersionId())
             throw new ServiceException("会话服务返回无效 DEBUG Session", HttpStatus.BAD_GATEWAY.value());
+        recordSessionReferences(accountId, created.sessionId(), binding, requestId);
         sessions.put(created.sessionId(), new Registration(accountId, applicationId, binding, issuerRef));
         return new DebugSession(created.sessionId(), applicationId, binding.configVersionId());
     }
@@ -74,6 +76,7 @@ public class DebugSessionService
         }
         // After a system restart the map is empty; the trusted session service still checks persistent account ownership.
         sessionClient.close(accountId, sessionId);
+        jdbc.update("update p_resource_reference set state='RELEASED',released_at=utc_timestamp(3),updated_at=utc_timestamp(3) where holder_type='SESSION' and holder_id=? and account_id=? and state in ('RESERVED','CONFIRMED')", sessionId, accountId);
     }
 
     private Binding binding(long accountId, long applicationId, boolean allowVoicePreview)
@@ -89,6 +92,18 @@ public class DebugSessionService
     }
 
     private static boolean blank(String value) { return value == null || value.isBlank(); }
+    private void recordSessionReferences(long accountId, long sessionId, Binding binding, String operationId)
+    {
+        Instant now = Instant.now();
+        insertSessionReference(accountId, sessionId, operationId, "APP_CONFIG", binding.configVersionId(), now);
+        insertSessionReference(accountId, sessionId, operationId, "AVATAR_VERSION", binding.avatarVersionId(), now);
+        insertSessionReference(accountId, sessionId, operationId, "VOICE_VERSION", binding.voiceVersionId(), now);
+    }
+    private void insertSessionReference(long accountId, long sessionId, String operationId, String type, long resourceId, Instant now)
+    {
+        jdbc.update("insert ignore into p_resource_reference (id,created_at,updated_at,account_id,holder_type,holder_id,operation_id,resource_type,resource_id,state,confirmed_at) values (uuid_short(),?,?,?,'SESSION',?,?,?,'CONFIRMED',?)",
+            now, now, accountId, sessionId, "debug:" + operationId, type, resourceId, now);
+    }
     private record Registration(long accountId, long applicationId, Binding binding, String issuerConsoleRef) { }
     private record Binding(long configVersionId, long voiceVersionId, String providerKind, String providerVoiceRef,
             String relayVersionRef, long avatarVersionId, Long officialServiceId, Long officialServiceRevision) { }

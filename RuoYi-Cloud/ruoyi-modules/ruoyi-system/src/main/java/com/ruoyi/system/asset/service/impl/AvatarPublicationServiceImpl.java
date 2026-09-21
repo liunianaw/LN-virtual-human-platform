@@ -23,6 +23,7 @@ import com.ruoyi.system.asset.dto.AvatarStatusReasonRequest;
 import com.ruoyi.system.asset.dto.PublishAvatarVersionRequest;
 import com.ruoyi.system.asset.mapper.AssetMapper;
 import com.ruoyi.system.asset.mapper.AvatarPublicationMapper;
+import com.ruoyi.system.asset.lifecycle.PublicAssetLifecycleService;
 import com.ruoyi.system.asset.service.IAvatarPublicationService;
 import com.ruoyi.system.storage.ObjectStorage;
 import com.ruoyi.common.security.utils.SecurityUtils;
@@ -39,15 +40,18 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
     private final ObjectProvider<ObjectStorage> storageProvider;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
+    private final PublicAssetLifecycleService lifecycle;
 
     public AvatarPublicationServiceImpl(AvatarPublicationMapper publicationMapper, AssetMapper assetMapper,
-        ObjectProvider<ObjectStorage> storageProvider, TransactionTemplate transactionTemplate, ObjectMapper objectMapper)
+        ObjectProvider<ObjectStorage> storageProvider, TransactionTemplate transactionTemplate, ObjectMapper objectMapper,
+        PublicAssetLifecycleService lifecycle)
     {
         this.publicationMapper = publicationMapper;
         this.assetMapper = assetMapper;
         this.storageProvider = storageProvider;
         this.transactionTemplate = transactionTemplate;
         this.objectMapper = objectMapper;
+        this.lifecycle = lifecycle;
     }
 
     public AvatarPreviewResponse preview(Long accountId, Long avatarId, Long versionId)
@@ -135,13 +139,13 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
     public Map<String, Object> unpublish(Long operatorId, Long avatarId, AvatarStatusReasonRequest request)
     {
         requireAdministrator();
-        return changeOfficialStatus(operatorId, avatarId, request, "PUBLISHED", "UNLISTED");
+        return lifecycle.legacyStatusChange(operatorId, avatarId, request == null ? null : request.reason(), false);
     }
 
     public Map<String, Object> disable(Long operatorId, Long avatarId, AvatarStatusReasonRequest request)
     {
         requireAdministrator();
-        return changeOfficialStatus(operatorId, avatarId, request, null, "DISABLED");
+        return lifecycle.legacyStatusChange(operatorId, avatarId, request == null ? null : request.reason(), true);
     }
 
     public void deleteAvatar(Long accountId, Long avatarId)
@@ -298,30 +302,6 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
         String eventId = UUID.randomUUID().toString().replace("-", "");
         assetMapper.insertOutbox(id, accountId, eventId, eventType, aggregateType, aggregateId,
             UUID.randomUUID().toString().replace("-", ""), json(payload));
-    }
-
-    private Map<String, Object> changeOfficialStatus(Long operatorId, Long avatarId, AvatarStatusReasonRequest request,
-        String expectedStatus, String newStatus)
-    {
-        requireAccount(operatorId);
-        if (avatarId == null || avatarId <= 0 || request == null || isBlank(request.reason()) || request.reason().trim().length() > 500)
-            throw new ServiceException("必须填写不超过 500 字的状态变更原因", HttpStatus.BAD_REQUEST);
-        return transactionTemplate.execute(status -> {
-            Map<String, Object> avatar = publicationMapper.selectOfficialAvatarForUpdate(avatarId);
-            if (avatar == null) throw new ServiceException("官方角色不存在或已进入删除流程", HttpStatus.NOT_FOUND);
-            String current = (String) avatar.get("status");
-            if (newStatus.equals(current)) return Map.of("avatarId", avatarId.toString(), "status", newStatus);
-            if (expectedStatus != null && !expectedStatus.equals(current))
-                throw new ServiceException("只有已发布官方角色可以普通下架", HttpStatus.CONFLICT);
-            if ("DISABLED".equals(newStatus) && !Set.of("DRAFT","PUBLISHED","UNLISTED").contains(current))
-                throw new ServiceException("当前状态不能紧急停用", HttpStatus.CONFLICT);
-            if (publicationMapper.changeOfficialAvatarStatus(avatarId, current, newStatus) != 1)
-                throw new ServiceException("官方角色状态已变化，请重新查询", HttpStatus.CONFLICT);
-            writeOutbox(operatorId, "AVATAR_STATUS_CHANGED", "AVATAR", avatarId.toString(), Map.of(
-                "avatarId", avatarId.toString(), "previousStatus", current, "status", newStatus,
-                "reason", request.reason().trim(), "operatorId", operatorId.toString()));
-            return Map.of("avatarId", avatarId.toString(), "status", newStatus);
-        });
     }
 
     private void addPreviewUrls(List<Map<String, Object>> items)
