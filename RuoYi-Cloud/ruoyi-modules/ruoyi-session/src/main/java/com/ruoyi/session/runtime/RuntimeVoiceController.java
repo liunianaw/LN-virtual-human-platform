@@ -2,6 +2,7 @@ package com.ruoyi.session.runtime;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -17,13 +18,38 @@ public class RuntimeVoiceController
     private final ConsoleDebugSessionAuthenticator authenticator;
     private final TtsRuntimeAdapterRegistry adapters;
     private final SpeakOnlyRuntimeService runtime;
+    private final RuntimeConnectionTicketService tickets;
+    private final PersistentRuntimeStore store;
+    private final TemporaryWavStorage audioStorage;
 
     public RuntimeVoiceController(ConsoleDebugSessionAuthenticator authenticator, TtsRuntimeAdapterRegistry adapters,
-            SpeakOnlyRuntimeService runtime)
+            SpeakOnlyRuntimeService runtime, RuntimeConnectionTicketService tickets, PersistentRuntimeStore store,
+            TemporaryWavStorage audioStorage)
     {
         this.authenticator = authenticator;
         this.adapters = adapters;
         this.runtime = runtime;
+        this.tickets = tickets;
+        this.store = store;
+        this.audioStorage = audioStorage;
+    }
+
+    @PostMapping("/connection-tickets")
+    public RuntimeEnvelope<TicketResponse> ticket(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @RequestBody TicketRequest request)
+    {
+        RuntimePrincipal principal = authenticator.authenticate(authorization);
+        RuntimeConnectionTicketService.IssuedTicket issued = tickets.issue(principal, request == null ? null : request.purpose());
+        return RuntimeEnvelope.ok(new TicketResponse(issued.ticket(), issued.expiresAt().toString(), "ln-avatar.v1"));
+    }
+
+    @org.springframework.web.bind.annotation.GetMapping(value = "/media/{mediaId}", produces = "audio/wav")
+    public ResponseEntity<byte[]> media(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+            @org.springframework.web.bind.annotation.PathVariable String mediaId)
+    {
+        RuntimePrincipal principal = authenticator.authenticate(authorization);
+        return ResponseEntity.ok().contentType(MediaType.valueOf("audio/wav")).header(HttpHeaders.CACHE_CONTROL, "no-store")
+            .body(audioStorage.read(store.readableAudio(principal, mediaId)));
     }
 
     @PostMapping("/debug/speech")
@@ -78,6 +104,9 @@ public class RuntimeVoiceController
     public record SpeechRequest(String requestId, String text)
     {
     }
+
+    public record TicketRequest(String purpose) { }
+    public record TicketResponse(String ticket, String expiresAt, String protocol) { }
 
     public record StopRequest(String turnId, String reason)
     {

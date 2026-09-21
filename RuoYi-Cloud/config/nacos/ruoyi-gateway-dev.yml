@@ -30,6 +30,18 @@ spring:
             - Path=/system/**
             filters:
             - StripPrefix=1
+          - id: platform-official-voices
+            uri: lb://ruoyi-system
+            predicates:
+            - Path=/api/v1/voices/**,/api/v1/admin/voices/**
+          - id: platform-debug-system
+            uri: lb://ruoyi-system
+            predicates:
+            - Path=/api/v1/debug-sessions/**
+          - id: platform-runtime
+            uri: lb://ruoyi-session
+            predicates:
+            - Path=/api/v1/runtime/**,/api/v1/realtime
 security:
   captcha:
     enabled: true

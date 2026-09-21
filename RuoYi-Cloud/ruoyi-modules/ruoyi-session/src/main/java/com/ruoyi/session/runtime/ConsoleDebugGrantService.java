@@ -66,6 +66,17 @@ public class ConsoleDebugGrantService
         return new IssuedToken(tokenCodec.encode(claims), expiresAt);
     }
 
+    @Transactional
+    public void close(long accountId, long sessionId)
+    {
+        Instant now = Instant.now();
+        Integer changed = jdbcTemplate.queryForObject("select count(1) from s_session where id = ? and account_id = ? and status = 'ACTIVE' for update",
+            Integer.class, sessionId, accountId);
+        if (changed == null || changed != 1) throw new RuntimeProblem(org.springframework.http.HttpStatus.NOT_FOUND, "SESSION_NOT_FOUND", "DEBUG Session is unavailable.");
+        jdbcTemplate.update("update s_session_grant set status = 'REVOKED',updated_at = ? where session_id = ? and status = 'ACTIVE'", now, sessionId);
+        jdbcTemplate.update("update s_session set status = 'DELETED',auth_epoch = auth_epoch + 1,active_turn_id = null,updated_at = ?,revision = revision + 1 where id = ?", now, sessionId);
+    }
+
     private long nextId()
     {
         try

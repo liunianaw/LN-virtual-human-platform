@@ -23,15 +23,17 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
     private final VoiceRuntimeProperties properties;
     private final TemporaryAudioCleanupQueue cleanupQueue;
     private final PersistentRuntimeStore persistentStore;
+    private final RuntimeEventPublisher events;
     private final Map<String, TurnState> turns = new ConcurrentHashMap<>();
     private final Map<Long, String> activeTurnBySession = new ConcurrentHashMap<>();
 
     public SpeakOnlyRuntimeService(VoiceRuntimeProperties properties, TemporaryAudioCleanupQueue cleanupQueue,
-            PersistentRuntimeStore persistentStore)
+            PersistentRuntimeStore persistentStore, RuntimeEventPublisher events)
     {
         this.properties = properties;
         this.cleanupQueue = cleanupQueue;
         this.persistentStore = persistentStore;
+        this.events = events;
     }
 
     public SpeechStarted start(RuntimePrincipal principal, String requestId, String text)
@@ -72,7 +74,9 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 return AudioReadyResult.ignored();
             }
             persistentStore.markAudioReady(Long.parseLong(state.turnId), input.ordinal(), principal, input.temporaryAudio(), input.bytes());
-            return new AudioReadyResult(true, state.drainOrderedEvents(), List.of());
+            List<AudioSegmentEvent> ready = state.drainOrderedEvents();
+            ready.forEach(event -> events.audioSegment(principal, event));
+            return new AudioReadyResult(true, ready, List.of());
         }
     }
 
@@ -92,6 +96,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
             }
             persistentStore.markAudioFailed(Long.parseLong(state.turnId), work.ordinal(), failureCode);
             finishFailed(state);
+            events.failed(principal, work.turnId(), failureCode);
         }
     }
 

@@ -43,6 +43,33 @@ public class TemporaryWavStorage
         }
     }
 
+    public byte[] read(TemporaryAudioReference reference)
+    {
+        if (!"LOCAL_TEMP".equals(reference.storageProvider()) || !"session-audio".equals(reference.bucket())
+            || !reference.expiresAt().isAfter(Instant.now())) throw new IllegalArgumentException("Temporary audio is unavailable");
+        try
+        {
+            Path directory = Path.of(properties.getTemporaryAudioDirectory()).toAbsolutePath().normalize();
+            Path file = directory.resolve(reference.objectKey()).normalize();
+            if (!file.startsWith(directory) || !Files.isRegularFile(file)) throw new IllegalArgumentException("Temporary audio is unavailable");
+            return Files.readAllBytes(file);
+        }
+        catch (IOException | InvalidPathException exception) { throw new IllegalArgumentException("Temporary audio is unavailable", exception); }
+    }
+
+    public void delete(TemporaryAudioReference reference)
+    {
+        if (!"LOCAL_TEMP".equals(reference.storageProvider()) || !"session-audio".equals(reference.bucket())) return;
+        try
+        {
+            Path directory = Path.of(properties.getTemporaryAudioDirectory()).toAbsolutePath().normalize();
+            Path file = directory.resolve(reference.objectKey()).normalize();
+            if (!file.startsWith(directory)) throw new IllegalArgumentException("Invalid temporary audio path");
+            Files.deleteIfExists(file);
+        }
+        catch (IOException | InvalidPathException exception) { throw new IllegalStateException("Temporary audio deletion failed", exception); }
+    }
+
     public record StoredWav(TemporaryAudioReference reference, long durationMs, long bytes)
     {
     }

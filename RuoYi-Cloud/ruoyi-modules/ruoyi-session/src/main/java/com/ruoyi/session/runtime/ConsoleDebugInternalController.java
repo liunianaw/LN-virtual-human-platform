@@ -3,6 +3,7 @@ package com.ruoyi.session.runtime;
 import java.time.Instant;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,11 +16,13 @@ public class ConsoleDebugInternalController
 {
     private final InternalBearerGuard guard;
     private final ConsoleDebugGrantService grants;
+    private final SpeakOnlyRuntimeService runtime;
 
-    public ConsoleDebugInternalController(InternalBearerGuard guard, ConsoleDebugGrantService grants)
+    public ConsoleDebugInternalController(InternalBearerGuard guard, ConsoleDebugGrantService grants, SpeakOnlyRuntimeService runtime)
     {
         this.guard = guard;
         this.grants = grants;
+        this.runtime = runtime;
     }
 
     @PostMapping
@@ -41,7 +44,17 @@ public class ConsoleDebugInternalController
                 body.configVersionId(), body.issuerConsoleRef(), Instant.ofEpochMilli(body.expiresAtEpochMs()), voice));
     }
 
+    @DeleteMapping("/{sessionId}")
+    public void close(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization, @org.springframework.web.bind.annotation.PathVariable long sessionId,
+        @RequestBody CloseBody body)
+    {
+        guard.requireSystem(authorization);
+        runtime.revokeSession(sessionId);
+        grants.close(body.accountId(), sessionId);
+    }
+
     public record CreateBody(long accountId, long applicationId, long configVersionId, String requestId) { }
     public record MintBody(long accountId, long applicationId, long sessionId, long configVersionId, String issuerConsoleRef,
             long expiresAtEpochMs, long voiceVersionId, String providerKind, String providerVoiceRef, String relayVersionRef) { }
+    public record CloseBody(long accountId) { }
 }

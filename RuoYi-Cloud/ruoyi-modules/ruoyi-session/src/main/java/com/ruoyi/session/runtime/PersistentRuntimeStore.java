@@ -68,8 +68,8 @@ public class PersistentRuntimeStore
         }
         jdbcTemplate.update("update s_operation set status = 'SUCCEEDED', result_summary = json_object('mediaId', ?), updated_at = ?, finished_at = ? where id = ? and status in ('QUEUED','RUNNING')",
                 audio.mediaId(), now, now, operationId);
-        jdbcTemplate.update("insert into s_temp_object (id,created_at,updated_at,account_id,session_id,turn_id,operation_id,purpose,storage_provider,bucket,object_key,size_bytes,status,expires_at) values (?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE',?)",
-                nextId(), now, now, principal.accountId(), principal.sessionId(), turnId, operationId, "TTS_AUDIO", audio.storageProvider(),
+        jdbcTemplate.update("insert into s_temp_object (id,media_id,created_at,updated_at,account_id,session_id,turn_id,operation_id,purpose,storage_provider,bucket,object_key,size_bytes,status,expires_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE',?)",
+                nextId(), audio.mediaId(), now, now, principal.accountId(), principal.sessionId(), turnId, operationId, "TTS_AUDIO", audio.storageProvider(),
                 audio.bucket(), audio.objectKey(), bytes, audio.expiresAt());
     }
 
@@ -115,10 +115,52 @@ public class PersistentRuntimeStore
                 Instant.now(), Instant.now(), audio.storageProvider(), audio.bucket(), audio.objectKey());
     }
 
+    @Transactional
+    public long openConnection(RuntimePrincipal principal)
+    {
+        Long oldEpoch = jdbcTemplate.queryForObject("select connection_epoch from s_session where id = ? and account_id = ? and application_id = ? and app_config_id = ? and status = 'ACTIVE' for update",
+            Long.class, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId());
+        if (oldEpoch == null) throw unavailable();
+        long epoch = oldEpoch + 1;
+        jdbcTemplate.update("update s_session set connection_epoch = ?,last_activity_at = ?,updated_at = ?,revision = revision + 1 where id = ?", epoch, Instant.now(), Instant.now(), principal.sessionId());
+        return epoch;
+    }
+
+    public boolean currentConnection(RuntimePrincipal principal, long epoch)
+    {
+        Integer match = jdbcTemplate.queryForObject("select count(1) from s_session where id = ? and account_id = ? and application_id = ? and app_config_id = ? and status = 'ACTIVE' and connection_epoch = ?",
+            Integer.class, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId(), epoch);
+        return match != null && match == 1;
+    }
+
+    public TemporaryAudioReference readableAudio(RuntimePrincipal principal, String mediaId)
+    {
+        TemporaryAudioReference audio = jdbcTemplate.query("select storage_provider,bucket,object_key,expires_at from s_temp_object "
+                + "where session_id = ? and account_id = ? and media_id = ? and purpose = 'TTS_AUDIO' and status = 'ACTIVE' and expires_at > utc_timestamp(3)",
+            rs -> rs.next() ? new TemporaryAudioReference(mediaId, rs.getString(1), rs.getString(2), rs.getString(3), rs.getTimestamp(4).toInstant()) : null,
+            principal.sessionId(), principal.accountId(), mediaId);
+        if (audio == null) throw new RuntimeProblem(HttpStatus.NOT_FOUND, "MEDIA_NOT_FOUND", "Audio is unavailable.");
+        return audio;
+    }
+
     public List<Long> expiredDebugRuntimeSessionIds()
     {
         return jdbcTemplate.queryForList("select s.id from s_session s where s.active_turn_id is not null and exists (select 1 from s_session_grant expired where expired.session_id = s.id and expired.grant_source = 'CONSOLE_DEBUG' and expired.status = 'ACTIVE' and expired.expires_at <= utc_timestamp(3)) and not exists (select 1 from s_session_grant active where active.session_id = s.id and active.grant_source = 'CONSOLE_DEBUG' and active.status = 'ACTIVE' and active.expires_at > utc_timestamp(3))",
                 Long.class);
+    }
+
+    public List<TemporaryAudioReference> cleanupCandidates(int limit)
+    {
+        return jdbcTemplate.query("select media_id,storage_provider,bucket,object_key,expires_at from s_temp_object where "
+                + "(status = 'DELETE_PENDING' and (next_delete_at is null or next_delete_at <= utc_timestamp(3))) "
+                + "or (status = 'ACTIVE' and expires_at <= utc_timestamp(3)) order by updated_at asc limit ?",
+            (rs, row) -> new TemporaryAudioReference(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getTimestamp(5).toInstant()), limit);
+    }
+
+    public void markDeleted(TemporaryAudioReference audio)
+    {
+        jdbcTemplate.update("update s_temp_object set status = 'DELETED',updated_at = ?,next_delete_at = null,last_error_code = null where media_id = ? and storage_provider = ? and bucket = ? and object_key = ? and status in ('ACTIVE','DELETE_PENDING')",
+            Instant.now(), audio.mediaId(), audio.storageProvider(), audio.bucket(), audio.objectKey());
     }
 
     public void verifyConsoleGrant(TrustedConsoleDebugGrantClaims claims)

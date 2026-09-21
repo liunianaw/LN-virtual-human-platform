@@ -28,7 +28,7 @@ service.interceptors.request.use((config: any) => {
   const isRepeatSubmit = (config.headers || {}).repeatSubmit === false
   // 间隔时间(ms)，小于此时间视为重复提交
   const interval = (config.headers || {}).interval || 1000
-  if (getToken() && !isToken) {
+  if (getToken() && !isToken && !(config.headers || {}).Authorization) {
     config.headers['Authorization'] = 'Bearer ' + getToken() // 让每个请求携带自定义token 请根据实际情况自行修改
   }
   // get请求映射params参数
@@ -95,6 +95,8 @@ service.interceptors.response.use((res: any) => {
       })
     }
       return Promise.reject('无效的会话，或者会话已过期，请重新登录。')
+    } else if (code === 'OK' || code === 200) {
+      return Promise.resolve(res.data)
     } else if (code === 500) {
       ElMessage({ message: msg, type: 'error' })
       return Promise.reject(new Error(msg))
@@ -104,8 +106,6 @@ service.interceptors.response.use((res: any) => {
     } else if (code !== 200) {
       ElNotification.error({ title: msg })
       return Promise.reject('error')
-    } else {
-      return  Promise.resolve(res.data)
     }
   },
   (error: any) => {

@@ -3,6 +3,7 @@ package com.ruoyi.system.voice;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,6 +32,13 @@ public class DebugSessionController
     {
         LoginUser login = requireLogin();
         return sessions.mint(login.getUserid(), login, sessionId);
+    }
+
+    @DeleteMapping("/debug-sessions/{sessionId}")
+    public void close(@PathVariable long sessionId)
+    {
+        LoginUser login = requireLogin();
+        sessions.close(login.getUserid(), login, sessionId);
     }
 
     private static LoginUser requireLogin()

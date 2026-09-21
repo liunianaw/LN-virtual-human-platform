@@ -33,7 +33,13 @@ public class SessionDebugClient
         return new IssuedToken(response.path("token").asText(), response.path("expiresAt").asText());
     }
 
+    public void close(long accountId, long sessionId)
+    { request("/internal/v1/console-debug-sessions/" + sessionId, new CloseBody(accountId), "DELETE"); }
+
     private JsonNode request(String path, Object body)
+    { return request(path, body, "POST"); }
+
+    private JsonNode request(String path, Object body, String method)
     {
         String bearer = System.getenv("LN_SYSTEM_TO_SESSION_INTERNAL_BEARER");
         String baseUrl = System.getenv("LN_SYSTEM_TO_SESSION_URL");
@@ -43,10 +49,10 @@ public class SessionDebugClient
         {
             HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path)).timeout(Duration.ofSeconds(8))
                     .header("Authorization", "Bearer " + bearer).header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body))).build();
+                    .method(method, HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body))).build();
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) throw new ServiceException("会话服务拒绝 DEBUG 授权", HttpStatus.BAD_GATEWAY.value());
-            return objectMapper.readTree(response.body());
+            return response.body() == null || response.body().isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(response.body());
         }
         catch (InterruptedException e)
         {
@@ -59,6 +65,7 @@ public class SessionDebugClient
     public record CreateBody(long accountId, long applicationId, long configVersionId, String requestId) { }
     public record MintBody(long accountId, long applicationId, long sessionId, long configVersionId, String issuerConsoleRef,
             long expiresAtEpochMs, long voiceVersionId, String providerKind, String providerVoiceRef, String relayVersionRef) { }
+    public record CloseBody(long accountId) { }
     public record CreatedSession(long sessionId, long applicationId, long configVersionId) { }
     public record IssuedToken(String token, String expiresAt) { }
 }
