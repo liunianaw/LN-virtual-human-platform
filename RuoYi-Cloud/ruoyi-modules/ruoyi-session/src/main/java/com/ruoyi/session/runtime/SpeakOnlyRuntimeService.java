@@ -40,7 +40,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
     {
         principal.requireSpeakScope();
         validateRequest(requestId, text);
-        List<String> chunks = split(text, properties.getMaxCodePointsPerSegment());
+        List<SegmentPlan> chunks = plans(split(text, properties.getMaxCodePointsPerSegment()));
         String priorTurnId = activeTurnBySession.get(principal.sessionId());
         if (priorTurnId != null)
         {
@@ -73,7 +73,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 cleanupQueue.schedule(input.temporaryAudio());
                 return AudioReadyResult.ignored();
             }
-            persistentStore.markAudioReady(Long.parseLong(state.turnId), input.ordinal(), principal, input.temporaryAudio(), input.bytes());
+            persistentStore.markAudioReady(Long.parseLong(state.turnId), input.ordinal(), principal, input.temporaryAudio(), input.bytes(), input.durationMs());
             List<AudioSegmentEvent> ready = state.drainOrderedEvents();
             ready.forEach(event -> events.audioSegment(principal, event));
             return new AudioReadyResult(true, ready, List.of());
@@ -231,6 +231,14 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         return List.copyOf(result);
     }
 
+    private static List<SegmentPlan> plans(List<String> chunks)
+    {
+        List<SegmentPlan> result = new ArrayList<>();
+        for (int ordinal = 0; ordinal < chunks.size(); ordinal++)
+            result.add(new SegmentPlan(UUID.randomUUID().toString(), ordinal, chunks.get(ordinal)));
+        return List.copyOf(result);
+    }
+
     private static int findSentenceEnd(String text, int start, int end)
     {
         for (int index = end; index > start;)
@@ -272,15 +280,15 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         private int nextDelivery;
         private boolean stopped;
 
-        private TurnState(RuntimePrincipal principal, long turnId, List<String> chunks)
+        private TurnState(RuntimePrincipal principal, long turnId, List<SegmentPlan> chunks)
         {
             this.principal = principal;
             this.turnId = Long.toString(turnId);
             this.segments = new ArrayList<>();
             this.byId = new HashMap<>();
-            for (int ordinal = 0; ordinal < chunks.size(); ordinal++)
+            for (SegmentPlan plan : chunks)
             {
-                SegmentState segment = new SegmentState(UUID.randomUUID().toString(), ordinal, chunks.get(ordinal));
+                SegmentState segment = new SegmentState(plan.segmentId(), plan.ordinal(), plan.text());
                 segments.add(segment);
                 byId.put(segment.segmentId, segment);
             }

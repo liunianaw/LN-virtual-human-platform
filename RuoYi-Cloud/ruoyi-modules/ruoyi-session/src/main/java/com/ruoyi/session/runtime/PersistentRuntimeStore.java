@@ -5,6 +5,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpStatus;
@@ -24,7 +25,7 @@ public class PersistentRuntimeStore
     }
 
     @Transactional
-    public long createSpeakTurn(RuntimePrincipal principal, String requestId, List<String> segments)
+    public long createSpeakTurn(RuntimePrincipal principal, String requestId, List<SegmentPlan> segments)
     {
         try
         {
@@ -39,15 +40,16 @@ public class PersistentRuntimeStore
             jdbcTemplate.update("update s_session set next_turn_no = ?, active_turn_id = ?, last_activity_at = ?, updated_at = ?, revision = revision + 1 where id = ?",
                     nextTurnNo + 1, turnId, now, now, principal.sessionId());
             jdbcTemplate.update("insert into s_turn (id,created_at,updated_at,account_id,session_id,turn_no,client_request_id,request_hash,turn_type,status,text_status,audio_status,playback_status,connection_epoch,input_source,include_in_history,last_event_seq,started_at) values (?,?,?,?,?,?,?,?, 'SPEAK','RUNNING','NOT_REQUESTED','RUNNING','WAITING',0,'TEXT',0,0,?)",
-                    turnId, now, now, principal.accountId(), principal.sessionId(), nextTurnNo, requestId, hash(String.join("", segments)), now);
-            for (int ordinal = 0; ordinal < segments.size(); ordinal++)
+                    turnId, now, now, principal.accountId(), principal.sessionId(), nextTurnNo, requestId, hash(segments.stream().map(SegmentPlan::text).reduce("", String::concat)), now);
+            for (SegmentPlan segment : segments)
             {
                 long operationId = nextId();
-                String operationRequestId = turnId + ":tts:" + ordinal;
-                String segment = segments.get(ordinal);
-                jdbcTemplate.update("insert into s_operation (id,created_at,updated_at,account_id,session_id,turn_id,client_request_id,operation_type,ordinal,config_resource_id,status,playback_status,input_char_count,input_hash) values (?,?,?,?,?,?,?,?,?,?,'QUEUED','WAITING',?,?)",
-                        operationId, now, now, principal.accountId(), principal.sessionId(), turnId, operationRequestId, "TTS", ordinal,
-                        principal.voice().voiceVersionId(), (long) segment.codePointCount(0, segment.length()), hash(segment));
+                String operationRequestId = turnId + ":tts:" + segment.ordinal();
+                jdbcTemplate.update("insert into s_operation (id,created_at,updated_at,account_id,session_id,turn_id,client_request_id,operation_type,ordinal,config_resource_id,status,playback_status,input_char_count,input_hash,result_summary) values (?,?,?,?,?,?,?,?,?,?,'QUEUED','WAITING',?,?,json_object('segmentId',?))",
+                        operationId, now, now, principal.accountId(), principal.sessionId(), turnId, operationRequestId, "TTS", segment.ordinal(),
+                        principal.voice().voiceVersionId(), (long) segment.text().codePointCount(0, segment.text().length()), hash(segment.text()), segment.segmentId());
+                callOutbox(principal.accountId(), turnId, segment.segmentId(), operationId, "STARTED",
+                    (long) segment.text().codePointCount(0, segment.text().length()), null, null, null);
             }
             return turnId;
         }
@@ -57,27 +59,33 @@ public class PersistentRuntimeStore
         }
     }
 
-    public void markAudioReady(long turnId, int ordinal, RuntimePrincipal principal, TemporaryAudioReference audio, long bytes)
+    @Transactional
+    public void markAudioReady(long turnId, int ordinal, RuntimePrincipal principal, TemporaryAudioReference audio, long bytes, long durationMs)
     {
         Instant now = Instant.now();
-        Long operationId = jdbcTemplate.queryForObject("select id from s_operation where turn_id = ? and ordinal = ? and operation_type = 'TTS'",
-                Long.class, turnId, ordinal);
-        if (operationId == null)
+        Operation operation = jdbcTemplate.query("select id,input_char_count,json_unquote(json_extract(result_summary,'$.segmentId')) from s_operation where turn_id = ? and ordinal = ? and operation_type = 'TTS'",
+            rs -> rs.next() ? new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)) : null, turnId, ordinal);
+        if (operation == null)
         {
             return;
         }
-        jdbcTemplate.update("update s_operation set status = 'SUCCEEDED', result_summary = json_object('mediaId', ?), updated_at = ?, finished_at = ? where id = ? and status in ('QUEUED','RUNNING')",
-                audio.mediaId(), now, now, operationId);
+        jdbcTemplate.update("update s_operation set status = 'SUCCEEDED', result_summary = json_set(coalesce(result_summary,json_object()),'$.mediaId', ?), updated_at = ?, finished_at = ? where id = ? and status in ('QUEUED','RUNNING')",
+                audio.mediaId(), now, now, operation.id());
         jdbcTemplate.update("insert into s_temp_object (id,media_id,created_at,updated_at,account_id,session_id,turn_id,operation_id,purpose,storage_provider,bucket,object_key,size_bytes,status,expires_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE',?)",
-                nextId(), audio.mediaId(), now, now, principal.accountId(), principal.sessionId(), turnId, operationId, "TTS_AUDIO", audio.storageProvider(),
+                nextId(), audio.mediaId(), now, now, principal.accountId(), principal.sessionId(), turnId, operation.id(), "TTS_AUDIO", audio.storageProvider(),
                 audio.bucket(), audio.objectKey(), bytes, audio.expiresAt());
+        callOutbox(principal.accountId(), turnId, operation.segmentId(), operation.id(), "SUCCEEDED", operation.inputChars(), durationMs, null, null);
     }
 
+    @Transactional
     public void markAudioFailed(long turnId, int ordinal, String failureCode)
     {
         Instant now = Instant.now();
-        jdbcTemplate.update("update s_operation set status = 'FAILED', result_summary = json_object('failureCode', ?), updated_at = ?, finished_at = ? where turn_id = ? and ordinal = ? and operation_type = 'TTS' and status in ('QUEUED','RUNNING')",
+        jdbcTemplate.update("update s_operation set status = 'FAILED', result_summary = json_set(coalesce(result_summary,json_object()),'$.failureCode', ?), updated_at = ?, finished_at = ? where turn_id = ? and ordinal = ? and operation_type = 'TTS' and status in ('QUEUED','RUNNING')",
                 failureCode, now, now, turnId, ordinal);
+        Operation operation = jdbcTemplate.query("select id,input_char_count,json_unquote(json_extract(result_summary,'$.segmentId')) from s_operation where turn_id=? and ordinal=? and operation_type='TTS'",
+            rs -> rs.next() ? new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)) : null, turnId, ordinal);
+        if (operation != null) callOutbox(accountForTurn(turnId), turnId, operation.segmentId(), operation.id(), "FAILED", operation.inputChars(), null, failureCode, null);
     }
 
     public void playback(long turnId, int ordinal, PlaybackState state)
@@ -183,6 +191,26 @@ public class PersistentRuntimeStore
         }
         return id;
     }
+
+    private long accountForTurn(long turnId)
+    {
+        Long account = jdbcTemplate.queryForObject("select account_id from s_turn where id=?", Long.class, turnId);
+        if (account == null) throw new IllegalStateException("TTS operation no longer has an account");
+        return account;
+    }
+
+    private void callOutbox(long accountId, long turnId, String segmentId, long operationId, String status,
+        Long inputChars, Long audioDurationMs, String errorCode, String providerRequestId)
+    {
+        if (segmentId == null || segmentId.isBlank()) return;
+        String eventId = UUID.randomUUID().toString().replace("-", "");
+        jdbcTemplate.update("insert into s_outbox (id,created_at,updated_at,account_id,event_id,event_type,aggregate_type,aggregate_id,schema_version,trace_id,payload,status,attempt_count,next_run_at) values (uuid_short(),utc_timestamp(3),utc_timestamp(3),?,?,?,?,?,1,?,json_object('eventId',?,'operationKey',?,'accountId',?,'capability','TTS','status',?,'turnId',cast(? as char),'usage',json_object('inputChars',?,'audioDurationMs',?,'usageAvailable',?),'costSource','UNKNOWN','errorCode',?,'providerRequestId',?),'PENDING',0,utc_timestamp(3))",
+            accountId, eventId, "CALL_FACT_RECORDED", "TTS_OPERATION", Long.toString(operationId), eventId, eventId,
+            "tts:" + turnId + ":" + segmentId, accountId, status, turnId, inputChars, audioDurationMs,
+            "SUCCEEDED".equals(status), errorCode, providerRequestId);
+    }
+
+    private record Operation(long id, long inputChars, String segmentId) { }
 
     private static byte[] hash(String value)
     {

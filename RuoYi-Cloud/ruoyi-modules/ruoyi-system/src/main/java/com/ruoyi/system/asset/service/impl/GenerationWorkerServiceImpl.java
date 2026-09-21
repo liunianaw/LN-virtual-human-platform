@@ -16,6 +16,7 @@ import com.ruoyi.system.asset.dto.GenerationStoredObject;
 import com.ruoyi.system.asset.mapper.AssetMapper;
 import com.ruoyi.system.asset.mapper.GenerationWorkerMapper;
 import com.ruoyi.system.asset.service.IGenerationWorkerService;
+import com.ruoyi.system.operations.OperationsService;
 import com.ruoyi.system.storage.ObjectStorage;
 
 /** ruoyi-media GenerationPlatform/ObjectWriter ports 的平台侧租约实现。 */
@@ -27,16 +28,18 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
     private final ObjectProvider<ObjectStorage> storageProvider;
     private final TransactionTemplate transactions;
     private final ObjectMapper objectMapper;
+    private final OperationsService callFacts;
 
     public GenerationWorkerServiceImpl(GenerationWorkerMapper workerMapper, AssetMapper assetMapper,
         ObjectProvider<ObjectStorage> storageProvider,
-        TransactionTemplate transactions, ObjectMapper objectMapper)
+        TransactionTemplate transactions, ObjectMapper objectMapper, OperationsService callFacts)
     {
         this.workerMapper = workerMapper;
         this.assetMapper = assetMapper;
         this.storageProvider = storageProvider;
         this.transactions = transactions;
         this.objectMapper = objectMapper;
+        this.callFacts = callFacts;
     }
 
     public Map<String, Object> claim(Long accountId, Long taskId, String workerId)
@@ -93,6 +96,7 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
             String providerRequestKey = UUID.randomUUID().toString().replace("-", "");
             workerMapper.insertAttempt(attemptId, claim, providerRequestKey, java.util.HexFormat.of().parseHex(requestHash));
             workerMapper.upsertLatestAttempt(claim, attemptId);
+            callFacts.generation(attemptId, accountId, "STARTED", null, null);
             return Map.of("attemptId", attemptId, "providerRequestKey", providerRequestKey, "recoveryOnly", false);
         });
     }
@@ -111,6 +115,8 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
                 safeToken(providerRequestId, 128), safeToken(errorCode, 64)) != 1
                 || workerMapper.updateStepProgress(accountId, taskId, stepId, workerId, leaseEpoch, state, safeToken(errorCode, 64)) != 1)
                 throw staleLease();
+            callFacts.generation(attemptId, accountId, "UNKNOWN".equals(state) || "FAILED".equals(state) ? state : "STARTED",
+                providerRequestId, errorCode);
         });
     }
 
@@ -159,6 +165,7 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
                 throw staleLease();
             workerMapper.updateTaskProgress(accountId, taskId);
             workerMapper.markTaskSucceeded(accountId, taskId);
+            callFacts.generation(attemptId, accountId, "SUCCEEDED", null, null);
         });
     }
 
@@ -180,6 +187,7 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
                 throw staleLease();
             workerMapper.updateTaskProgress(accountId, taskId);
             workerMapper.markTaskFailed(accountId, taskId);
+            callFacts.generation(attemptId, accountId, state, null, null);
         });
     }
 
