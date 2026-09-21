@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import com.ruoyi.common.core.constant.TokenConstants;
+import com.ruoyi.common.security.annotation.RequiresPermissions;
 import com.ruoyi.common.security.utils.SecurityUtils;
 import com.ruoyi.system.api.model.LoginUser;
 
@@ -19,6 +20,7 @@ public class DebugSessionController
     private final DebugSessionService sessions;
     public DebugSessionController(DebugSessionService sessions) { this.sessions = sessions; }
 
+    @RequiresPermissions("platform:application:debug")
     @PostMapping("/applications/{applicationId}/debug-sessions")
     public DebugSessionService.DebugSession create(@PathVariable long applicationId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey)
