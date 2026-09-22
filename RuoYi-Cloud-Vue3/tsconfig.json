@@ -6,7 +6,8 @@
     "lib": ["esnext", "dom"],
     "baseUrl": "./",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@ln-avatar/sdk": ["../avatar-sdk/src/index.ts"]
     },
 
     // 严格性和类型检查相关配置

@@ -6,6 +6,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.LinkedHashMap;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -66,6 +68,17 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
         return previewResponse(version, accountId);
     }
 
+    /** The session service obtains only the frozen, signed formal package; it never receives a storage credential. */
+    public Map<String, Object> runtimePackage(Long accountId, Long avatarId, Long versionId)
+    {
+        requireAccount(accountId);
+        AvatarVersionRecord version = publicationMapper.selectAccessiblePublishedVersion(accountId, avatarId, versionId);
+        if (version == null || !"PUBLISHED".equals(version.getVersionStatus()) || !"PUBLISHED".equals(version.getAvatarStatus()))
+            throw forbidden("无权访问此 Avatar 版本");
+        validateCandidate(version);
+        return packageDescriptor(version, accountId);
+    }
+
     public AvatarPreviewResponse publish(Long accountId, Long avatarId, Long versionId, PublishAvatarVersionRequest request)
     {
         requireAccount(accountId);
@@ -112,6 +125,20 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
         return Map.of("items", items, "total", publicationMapper.countPublicAvatars(), "pageNum", page, "pageSize", size);
     }
 
+    public Map<String, Object> listOwned(Long accountId, int pageNum, int pageSize, String status, String keyword)
+    {
+        requireAccount(accountId);
+        int page = Math.max(1, pageNum), size = Math.max(1, Math.min(pageSize, 100));
+        String state = isBlank(status) ? null : status.trim().toUpperCase(java.util.Locale.ROOT);
+        if (state != null && !Set.of("DRAFT", "PUBLISHED", "UNLISTED", "DISABLED", "DELETING").contains(state))
+            throw new ServiceException("角色状态筛选无效", HttpStatus.BAD_REQUEST);
+        String query = isBlank(keyword) ? null : keyword.trim();
+        if (query != null && query.length() > 100) throw new ServiceException("搜索关键词长度无效", HttpStatus.BAD_REQUEST);
+        List<Map<String, Object>> items = publicationMapper.selectOwnedAvatars(accountId, state, query, (page - 1) * size, size);
+        addPreviewUrls(items);
+        return Map.of("items", items, "total", publicationMapper.countOwnedAvatars(accountId, state, query), "pageNum", page, "pageSize", size);
+    }
+
     public Map<String, Object> listAdminPublic(int pageNum, int pageSize, String status)
     {
         requireAdministrator();
@@ -136,6 +163,15 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
         return response;
     }
 
+    public Map<String, Object> references(Long accountId, Long avatarId)
+    {
+        requireAccount(accountId);
+        if (publicationMapper.selectOwnedAvatarForUpdate(accountId, avatarId) == null) throw forbidden("无权访问此 Avatar");
+        Map<String, Object> counts = publicationMapper.selectOwnedAvatarReferenceCounts(accountId, avatarId);
+        return Map.of("counts", counts == null ? Map.of("applications", 0, "sessions", 0, "generations", 0) : counts,
+            "applications", publicationMapper.selectOwnedAvatarApplications(accountId, avatarId));
+    }
+
     public Map<String, Object> unpublish(Long operatorId, Long avatarId, AvatarStatusReasonRequest request)
     {
         requireAdministrator();
@@ -148,22 +184,37 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
         return lifecycle.legacyStatusChange(operatorId, avatarId, request == null ? null : request.reason(), true);
     }
 
-    public void deleteAvatar(Long accountId, Long avatarId)
+    public Map<String, Object> deleteAvatar(Long accountId, Long avatarId, String ifMatch, String idempotencyKey)
     {
         requireAccount(accountId);
-        transactionTemplate.executeWithoutResult(status -> {
+        if (isBlank(idempotencyKey) || !idempotencyKey.matches("[\\x21-\\x7e]{1,64}"))
+            throw new ServiceException("Idempotency-Key 无效", HttpStatus.BAD_REQUEST);
+        return transactionTemplate.execute(status -> {
+            String scope = digest("avatar:delete:" + avatarId);
+            Map<String, Object> previous = publicationMapper.selectAssetIdempotencyForUpdate(accountId, scope, idempotencyKey);
+            if (previous != null)
+            {
+                if (!MessageDigest.isEqual((byte[]) previous.get("requestHash"), digestBytes("delete")))
+                    throw new ServiceException("同一 Idempotency-Key 的参数不同", HttpStatus.CONFLICT);
+                return Map.of("avatarId", avatarId.toString(), "status", "DELETING");
+            }
             AvatarRecord avatar = publicationMapper.selectOwnedAvatarForUpdate(accountId, avatarId);
             if (avatar == null) throw forbidden("无权删除此 Avatar");
-            if ("DELETED".equals(avatar.getStatus()) || "DELETING".equals(avatar.getStatus())) return;
+            if (ifMatch == null || !Long.toString(avatar.getRevision()).equals(ifMatch.replace("\"", "").trim()))
+                throw new ServiceException("角色已变化，请刷新后重试", 412);
+            if ("DELETING".equals(avatar.getStatus())) return Map.of("avatarId", avatarId.toString(), "status", "DELETING");
+            if ("DELETED".equals(avatar.getStatus())) return Map.of("avatarId", avatarId.toString(), "status", "DELETED");
             if (publicationMapper.countActiveReferences(avatarId) > 0
                 || publicationMapper.countApplicationReferences(avatarId) > 0
                 || publicationMapper.countRecoverableSessionReferences(avatarId) > 0
                 || publicationMapper.countActiveGenerationTasks(accountId, avatarId) > 0)
                 throw new ServiceException("Avatar 正被引用或制作中，不能删除", HttpStatus.CONFLICT);
-            if (publicationMapper.markAvatarDeleting(accountId, avatarId) != 1)
+            if (publicationMapper.markAvatarDeleting(accountId, avatarId, avatar.getRevision()) != 1)
                 throw new ServiceException("Avatar 删除状态已变化，请重新查询");
             writeOutbox(accountId, "AVATAR_DELETE_REQUESTED", "AVATAR", avatarId.toString(), Map.of(
                 "avatarId", avatarId, "status", "DELETING"));
+            publicationMapper.insertAssetIdempotency(nextId(), accountId, scope, idempotencyKey, digestBytes("delete"), avatarId);
+            return Map.of("avatarId", avatarId.toString(), "status", "DELETING");
         });
     }
 
@@ -202,7 +253,6 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
         response.setBaseImageUrl(baseUrl);
         response.setPreviewUrl(previewUrl);
         List<AvatarActionPreviewResponse> actions = new ArrayList<>();
-        List<Map<String, Object>> manifestActions = new ArrayList<>();
         for (AvatarActionRecord action : publicationMapper.selectActions(version.getId()))
         {
             AssetFile atlas = requireFile(version.getAccountId(), action.getAtlasFileId());
@@ -217,29 +267,22 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
             if (action.getPreviewFileId() != null) preview.setPreviewUrl(readUrl(storage, version.getAccountId(), action.getPreviewFileId()));
             preview.setExpiresAt(expiresAt);
             actions.add(preview);
-            try
-            {
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("code", action.getActionCode()); item.put("frameCount", action.getFrameCount());
-                item.put("fps", action.getFps()); item.put("loop", action.getLoopEnabled());
-                item.put("atlas", assetDescriptor(atlas, atlasUrl, expiresAt));
-                item.put("frames", objectMapper.readTree(action.getFrameLayout()).get("frames"));
-                manifestActions.add(item);
-            }
-            catch (Exception error) { throw new ServiceException("正式动作布局无法生成访问清单"); }
         }
         response.setActions(actions);
-        response.setManifestUrl(writeAccessManifest(storage, requestingAccountId, version, baseFile, baseUrl,
-            previewFile, previewUrl, expiresAt, manifestActions));
+        response.setManifestUrl(writeAccessManifest(storage, requestingAccountId, version, packageDescriptor(version, requestingAccountId)));
         return response;
     }
 
-    private String writeAccessManifest(ObjectStorage storage, Long requestingAccountId, AvatarVersionRecord version,
-        AssetFile baseFile, String baseUrl, AssetFile previewFile, String previewUrl, String expiresAt,
-        List<Map<String, Object>> actions)
+    private Map<String, Object> packageDescriptor(AvatarVersionRecord version, Long requestingAccountId)
     {
         try
         {
+            ObjectStorage storage = requireStorage();
+            String expiresAt = storage.readUrlExpiresAt().toString();
+            AssetFile baseFile = requireFile(version.getAccountId(), version.getBaseFileId());
+            AssetFile previewFile = requireFile(version.getAccountId(), version.getPreviewFileId());
+            String baseUrl = storage.readUrl(baseFile.getObjectKey());
+            String previewUrl = storage.readUrl(previewFile.getObjectKey());
             int width = version.getFrameWidth();
             int height = version.getFrameHeight();
             int anchorX = version.getAnchorX().multiply(java.math.BigDecimal.valueOf(width)).intValueExact();
@@ -254,7 +297,29 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
             manifest.put("anchor", Map.of("x", anchorX, "y", anchorY));
             manifest.put("preview", assetDescriptor(previewFile, previewUrl, expiresAt));
             manifest.put("baseImage", assetDescriptor(baseFile, baseUrl, expiresAt));
+            List<Map<String, Object>> actions = new ArrayList<>();
+            for (AvatarActionRecord action : publicationMapper.selectActions(version.getId()))
+            {
+                AssetFile atlas = requireFile(version.getAccountId(), action.getAtlasFileId());
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("code", action.getActionCode()); item.put("frameCount", action.getFrameCount());
+                item.put("fps", action.getFps()); item.put("loop", action.getLoopEnabled());
+                item.put("atlas", assetDescriptor(atlas, storage.readUrl(atlas.getObjectKey()), expiresAt));
+                item.put("frames", objectMapper.readTree(action.getFrameLayout()).get("frames"));
+                actions.add(item);
+            }
             manifest.put("actions", actions);
+            return manifest;
+        }
+        catch (ServiceException error) { throw error; }
+        catch (Exception error) { throw new ServiceException("无法生成短期 Avatar 访问清单"); }
+    }
+
+    private String writeAccessManifest(ObjectStorage storage, Long requestingAccountId, AvatarVersionRecord version,
+        Map<String, Object> manifest)
+    {
+        try
+        {
             byte[] bytes = objectMapper.writeValueAsBytes(manifest);
             String key = "avatar-access/" + requestingAccountId + "/" + version.getAvatarId() + "/"
                 + version.getId() + "/manifest.json";
@@ -357,5 +422,16 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
     private static boolean asBoolean(Object value)
     {
         return Boolean.TRUE.equals(value) || (value instanceof Number number && number.intValue() != 0);
+    }
+
+    private static byte[] digestBytes(String value)
+    {
+        try { return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)); }
+        catch (Exception error) { throw new IllegalStateException("SHA-256 不可用", error); }
+    }
+
+    private static String digest(String value)
+    {
+        return java.util.HexFormat.of().formatHex(digestBytes(value));
     }
 }

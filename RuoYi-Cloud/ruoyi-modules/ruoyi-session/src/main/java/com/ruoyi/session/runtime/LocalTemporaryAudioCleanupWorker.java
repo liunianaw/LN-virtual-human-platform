@@ -19,7 +19,7 @@ public class LocalTemporaryAudioCleanupWorker
         for (TemporaryAudioReference audio : store.cleanupCandidates(64))
         {
             try { storage.delete(audio); store.markDeleted(audio); }
-            catch (RuntimeException ignored) { /* retain DELETE_PENDING/expired row for a later retry */ }
+            catch (RuntimeException ignored) { store.markDeleteFailed(audio, "TEMPORARY_AUDIO_DELETE_FAILED"); }
         }
     }
 }

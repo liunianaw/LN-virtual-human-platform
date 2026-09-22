@@ -32,6 +32,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     <resultMap id="AvatarResult" type="com.ruoyi.system.asset.domain.AvatarRecord">
         <id property="id" column="id"/>
         <result property="status" column="status"/>
+        <result property="revision" column="revision"/>
     </resultMap>
 
     <resultMap id="AssetFileResult" type="com.ruoyi.system.asset.domain.AssetFile">
@@ -76,7 +77,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </select>
 
     <select id="selectOwnedAvatarForUpdate" resultMap="AvatarResult">
-        select id, status from p_avatar where account_id = #{accountId} and id = #{avatarId} for update
+        select id, status, revision from p_avatar where account_id = #{accountId} and id = #{avatarId} for update
     </select>
 
     <select id="selectActions" resultMap="AvatarActionResult">
@@ -150,8 +151,9 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </select>
 
     <update id="markAvatarDeleting">
-        update p_avatar set status = 'DELETING', updated_at = utc_timestamp(3), revision = revision + 1
-        where account_id = #{accountId} and id = #{avatarId} and status not in ('DELETING', 'DELETED')
+        update p_avatar set status = 'DELETING', cleanup_status = 'PENDING', next_cleanup_at = utc_timestamp(3),
+            updated_at = utc_timestamp(3), revision = revision + 1
+        where account_id = #{accountId} and id = #{avatarId} and revision = #{revision} and status not in ('DELETING', 'DELETED')
     </update>
 
     <insert id="insertReview">
@@ -171,6 +173,48 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         select count(*) from p_avatar a join p_avatar_version v on v.id = a.current_version_id
         where a.visibility = 'OFFICIAL' and a.status = 'PUBLISHED' and v.status = 'PUBLISHED'
     </select>
+    <select id="selectOwnedAvatars" resultType="map">
+        select cast(a.id as char) avatarId, cast(a.current_version_id as char) currentVersionId, a.name, a.visibility, a.status,
+            cast(a.revision as char) revision, f.object_key previewObjectKey,
+            (select count(*) from p_avatar_version v where v.avatar_id=a.id and v.status not in ('DELETING','DELETED')) versionCount
+        from p_avatar a left join p_avatar_version v on v.id=a.current_version_id and v.avatar_id=a.id
+        left join p_file f on f.id=v.preview_file_id and f.status='AVAILABLE'
+        where a.account_id=#{accountId} and a.visibility='PRIVATE' and a.status&lt;&gt;'DELETED'
+          and (#{status} is null or a.status=#{status})
+          and (#{keyword} is null or a.name like concat('%',#{keyword},'%'))
+        order by a.updated_at desc,a.id desc limit #{limit} offset #{offset}
+    </select>
+    <select id="countOwnedAvatars" resultType="int">
+        select count(*) from p_avatar a where a.account_id=#{accountId} and a.visibility='PRIVATE' and a.status&lt;&gt;'DELETED'
+          and (#{status} is null or a.status=#{status})
+          and (#{keyword} is null or a.name like concat('%',#{keyword},'%'))
+    </select>
+    <select id="selectOwnedAvatarReferenceCounts" resultType="map">
+        select
+          (select count(*) from p_resource_reference r join p_avatar_version v on v.id=r.resource_id
+           where r.account_id=#{accountId} and r.resource_type='AVATAR_VERSION' and v.avatar_id=#{avatarId}
+             and r.holder_type='APP_CURRENT' and r.state in ('RESERVED','CONFIRMED')) applications,
+          (select count(*) from p_resource_reference r join p_avatar_version v on v.id=r.resource_id
+           where r.account_id=#{accountId} and r.resource_type='AVATAR_VERSION' and v.avatar_id=#{avatarId}
+             and r.holder_type='SESSION' and r.state in ('RESERVED','CONFIRMED')) sessions,
+          (select count(*) from p_generation_task t where t.account_id=#{accountId} and t.avatar_id=#{avatarId}
+             and t.status in ('QUEUED','PROCESSING')) generations
+    </select>
+    <select id="selectOwnedAvatarApplications" resultType="map">
+        select distinct cast(a.id as char) applicationId,a.name,a.status
+        from p_resource_reference r join p_avatar_version v on v.id=r.resource_id
+        join p_application a on a.id=r.holder_id and a.account_id=r.account_id
+        where r.account_id=#{accountId} and r.resource_type='AVATAR_VERSION' and v.avatar_id=#{avatarId}
+          and r.holder_type='APP_CURRENT' and r.state in ('RESERVED','CONFIRMED') order by a.name,a.id
+    </select>
+    <select id="selectAssetIdempotencyForUpdate" resultType="map">
+        select request_hash requestHash,resource_id resourceId from p_api_idempotency
+        where account_id=#{accountId} and scope=#{scope} and request_id=#{requestId} for update
+    </select>
+    <insert id="insertAssetIdempotency">
+        insert into p_api_idempotency (id,created_at,updated_at,account_id,scope,request_id,request_hash,resource_type,resource_id,status,expires_at)
+        values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{scope},#{requestId},#{requestHash},'AVATAR',#{avatarId},'SUCCEEDED',date_add(utc_timestamp(3),interval 30 day))
+    </insert>
     <select id="selectAdminPublicAvatars" resultType="map">
         select cast(a.id as char) avatarId, cast(a.current_version_id as char) versionId, a.name, a.visibility, a.status,
             cast(a.account_id as char) creatorAccountId, a.revision,

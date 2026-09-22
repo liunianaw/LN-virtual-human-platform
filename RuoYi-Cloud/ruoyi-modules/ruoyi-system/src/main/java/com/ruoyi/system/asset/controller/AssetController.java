@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 import com.ruoyi.common.core.web.domain.AjaxResult;
 import com.ruoyi.common.log.annotation.Log;
@@ -89,6 +90,16 @@ public class AssetController
         return AjaxResult.success(publicationService.listPublic(pageNum, pageSize));
     }
 
+    /** Personal catalogue: independent from the recent generation-task list. */
+    @RequiresPermissions("system:asset:list")
+    @GetMapping("/avatars")
+    public AjaxResult listOwnedAvatars(@RequestParam(defaultValue = "1") int pageNum,
+        @RequestParam(defaultValue = "20") int pageSize, @RequestParam(required = false) String status,
+        @RequestParam(required = false) String keyword)
+    {
+        return AjaxResult.success(publicationService.listOwned(SecurityUtils.getUserId(), pageNum, pageSize, status, keyword));
+    }
+
     @RequiresPermissions("system:asset:list")
     @GetMapping("/admin/public-avatars")
     public AjaxResult listAdminPublicAvatars(@RequestParam(defaultValue = "1") int pageNum,
@@ -123,6 +134,13 @@ public class AssetController
     public AjaxResult avatarDetail(@PathVariable Long avatarId)
     {
         return AjaxResult.success(publicationService.detail(SecurityUtils.getUserId(), avatarId));
+    }
+
+    @RequiresPermissions("system:asset:list")
+    @GetMapping("/avatars/{avatarId}/references")
+    public AjaxResult avatarReferences(@PathVariable Long avatarId)
+    {
+        return AjaxResult.success(publicationService.references(SecurityUtils.getUserId(), avatarId));
     }
 
     @Log(title = "官方 Avatar 下架", businessType = BusinessType.UPDATE)
@@ -164,9 +182,11 @@ public class AssetController
     @Log(title = "Avatar 删除", businessType = BusinessType.DELETE)
     @RequiresPermissions("system:asset:remove")
     @DeleteMapping("/avatars/{avatarId}")
-    public AjaxResult deleteAvatar(@PathVariable Long avatarId)
+    public ResponseEntity<AjaxResult> deleteAvatar(@PathVariable Long avatarId,
+        @org.springframework.web.bind.annotation.RequestHeader(value = "If-Match", required = false) String ifMatch,
+        @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey)
     {
-        publicationService.deleteAvatar(SecurityUtils.getUserId(), avatarId);
-        return AjaxResult.success();
+        return ResponseEntity.accepted().body(AjaxResult.success(publicationService.deleteAvatar(
+            SecurityUtils.getUserId(), avatarId, ifMatch, idempotencyKey)));
     }
 }

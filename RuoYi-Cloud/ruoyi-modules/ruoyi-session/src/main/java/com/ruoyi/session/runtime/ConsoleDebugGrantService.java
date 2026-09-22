@@ -58,7 +58,7 @@ public class ConsoleDebugGrantService
         if (session == null) throw new RuntimeProblem(org.springframework.http.HttpStatus.CONFLICT, "SESSION_NOT_READY", "The DEBUG Session is not active.");
         String tokenId = UUID.randomUUID().toString().replace("-", "");
         Instant expiresAt = request.expiresAt().isBefore(Instant.now().plus(15, ChronoUnit.MINUTES)) ? request.expiresAt() : Instant.now().plus(15, ChronoUnit.MINUTES);
-        jdbcTemplate.update("insert into s_session_grant (id,created_at,updated_at,account_id,session_id,principal_id,application_id,grant_source,issuer_console_ref,token_id,scopes,account_epoch,application_epoch,principal_epoch,session_epoch,status,expires_at) values (?,?,?,?,?,?,?,'CONSOLE_DEBUG',unhex(?),?,json_array('speak:write'),1,?,?,?,?, 'ACTIVE',?)",
+        jdbcTemplate.update("insert into s_session_grant (id,created_at,updated_at,account_id,session_id,principal_id,application_id,grant_source,issuer_console_ref,token_id,scopes,account_epoch,application_epoch,principal_epoch,session_epoch,status,expires_at) values (?,?,?,?,?,?,?,'CONSOLE_DEBUG',unhex(?),?,json_array('session:read','avatar:read','speak:write'),1,?,?,?,?, 'ACTIVE',?)",
                 nextId(), Instant.now(), Instant.now(), request.accountId(), session.sessionId(), session.principalId(), request.applicationId(),
                 request.issuerConsoleRef(), tokenId, request.configVersionId(), session.principalEpoch(), session.sessionEpoch(), expiresAt);
         RuntimeTokenCodec.Claims claims = new RuntimeTokenCodec.Claims(tokenId, request.accountId(), request.applicationId(),

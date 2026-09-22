@@ -31,4 +31,9 @@ public record RuntimePrincipal(long accountId, long applicationId, long sessionI
             throw new RuntimeProblem(HttpStatus.FORBIDDEN, "SCOPE_DENIED", "The Session Token does not permit speech.");
         }
     }
+
+    public void requireAvatarScope()
+    {
+        if (!scopes.contains("avatar:read")) throw new RuntimeProblem(HttpStatus.FORBIDDEN, "SCOPE_DENIED", "The Session Token does not permit Avatar access.");
+    }
 }

@@ -43,13 +43,22 @@ public interface AvatarPublicationMapper
 
     int countActiveGenerationTasks(@Param("accountId") Long accountId, @Param("avatarId") Long avatarId);
 
-    int markAvatarDeleting(@Param("accountId") Long accountId, @Param("avatarId") Long avatarId);
+    int markAvatarDeleting(@Param("accountId") Long accountId, @Param("avatarId") Long avatarId, @Param("revision") Long revision);
 
     int insertReview(@Param("id") Long id, @Param("accountId") Long accountId, @Param("avatarId") Long avatarId,
         @Param("versionId") Long versionId, @Param("reviewNote") String reviewNote);
 
     List<java.util.Map<String, Object>> selectPublicAvatars(@Param("offset") int offset, @Param("limit") int limit);
     int countPublicAvatars();
+    List<java.util.Map<String, Object>> selectOwnedAvatars(@Param("accountId") Long accountId, @Param("status") String status,
+        @Param("keyword") String keyword, @Param("offset") int offset, @Param("limit") int limit);
+    int countOwnedAvatars(@Param("accountId") Long accountId, @Param("status") String status, @Param("keyword") String keyword);
+    java.util.Map<String, Object> selectOwnedAvatarReferenceCounts(@Param("accountId") Long accountId, @Param("avatarId") Long avatarId);
+    List<java.util.Map<String, Object>> selectOwnedAvatarApplications(@Param("accountId") Long accountId, @Param("avatarId") Long avatarId);
+    java.util.Map<String, Object> selectAssetIdempotencyForUpdate(@Param("accountId") Long accountId, @Param("scope") String scope,
+        @Param("requestId") String requestId);
+    void insertAssetIdempotency(@Param("id") Long id, @Param("accountId") Long accountId, @Param("scope") String scope,
+        @Param("requestId") String requestId, @Param("requestHash") byte[] requestHash, @Param("avatarId") Long avatarId);
     List<java.util.Map<String, Object>> selectAdminPublicAvatars(@Param("status") String status,
         @Param("offset") int offset, @Param("limit") int limit);
     int countAdminPublicAvatars(@Param("status") String status);

@@ -51,7 +51,7 @@ public class RuntimeConnectionTicketService
             Integer.class, row.accountId(), row.applicationId(), row.sessionId(), row.configVersionId());
         if (activeGrant == null || activeGrant < 1) throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TOKEN_REVOKED", "The DEBUG Session Token is no longer valid.");
         RuntimePrincipal principal;
-        try { principal = new RuntimePrincipal(row.accountId(), row.applicationId(), row.sessionId(), row.configVersionId(), java.util.Set.of("speak:write"),
+        try { principal = new RuntimePrincipal(row.accountId(), row.applicationId(), row.sessionId(), row.configVersionId(), java.util.Set.of("session:read", "avatar:read", "speak:write"),
             new VoiceRuntimeBinding(row.voiceVersionId(), TtsProviderKind.valueOf(row.providerKind()), row.providerVoiceRef(), row.relayVersionRef(), row.officialServiceId(), row.officialServiceRevision())); }
         catch (IllegalArgumentException e) { throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TICKET_INVALID", "Connection ticket is invalid."); }
         jdbc.update("update s_runtime_ticket set status = 'CONSUMED',consumed_at = ?,updated_at = ? where ticket_hash = ? and status = 'ACTIVE'",

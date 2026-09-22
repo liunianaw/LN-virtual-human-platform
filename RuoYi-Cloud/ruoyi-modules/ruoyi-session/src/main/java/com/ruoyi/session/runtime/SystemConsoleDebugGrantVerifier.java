@@ -44,7 +44,7 @@ public class SystemConsoleDebugGrantVerifier implements TrustedConsoleDebugGrant
         }
         catch (IOException | IllegalArgumentException e) { throw unavailable(e); }
         RuntimePrincipal principal = new RuntimePrincipal(claims.accountId(), claims.applicationId(), claims.sessionId(),
-                claims.configVersionId(), java.util.Set.of("speak:write"), claims.voice());
+                claims.configVersionId(), java.util.Set.of("session:read", "avatar:read", "speak:write"), claims.voice());
         return new TrustedConsoleDebugGrantClaims(claims.tokenId(), claims.accountId(), claims.applicationId(), claims.sessionId(),
                 claims.configVersionId(), 1L, claims.configVersionId(), 1L, 1L, claims.issuerConsoleRef(), principal);
     }

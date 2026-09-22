@@ -21,10 +21,11 @@ public class RuntimeVoiceController
     private final RuntimeConnectionTicketService tickets;
     private final PersistentRuntimeStore store;
     private final TemporaryWavStorage audioStorage;
+    private final SystemRuntimeClient system;
 
     public RuntimeVoiceController(ConsoleDebugSessionAuthenticator authenticator, TtsRuntimeAdapterRegistry adapters,
             SpeakOnlyRuntimeService runtime, RuntimeConnectionTicketService tickets, PersistentRuntimeStore store,
-            TemporaryWavStorage audioStorage)
+            TemporaryWavStorage audioStorage, SystemRuntimeClient system)
     {
         this.authenticator = authenticator;
         this.adapters = adapters;
@@ -32,6 +33,7 @@ public class RuntimeVoiceController
         this.tickets = tickets;
         this.store = store;
         this.audioStorage = audioStorage;
+        this.system = system;
     }
 
     @PostMapping("/connection-tickets")
@@ -41,6 +43,14 @@ public class RuntimeVoiceController
         RuntimePrincipal principal = authenticator.authenticate(authorization);
         RuntimeConnectionTicketService.IssuedTicket issued = tickets.issue(principal, request == null ? null : request.purpose());
         return RuntimeEnvelope.ok(new TicketResponse(issued.ticket(), issued.expiresAt().toString(), "ln-avatar.v1"));
+    }
+
+    @org.springframework.web.bind.annotation.GetMapping("/avatar-package")
+    public RuntimeEnvelope<java.util.Map<String, Object>> avatarPackage(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization)
+    {
+        RuntimePrincipal principal = authenticator.authenticate(authorization);
+        principal.requireAvatarScope();
+        return RuntimeEnvelope.ok(system.avatarPackage(principal));
     }
 
     @org.springframework.web.bind.annotation.GetMapping(value = "/media/{mediaId}", produces = "audio/wav")

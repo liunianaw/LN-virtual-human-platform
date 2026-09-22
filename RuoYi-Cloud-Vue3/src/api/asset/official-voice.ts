@@ -18,3 +18,4 @@ export const createOfficialVoicePreview = (voiceId: string, versionId: string, a
 export const mintDebugSessionToken = (sessionId: string): Promise<AjaxResult<{ token: string; expiresAt: string }>> => request({ url: `/api/v1/debug-sessions/${sessionId}/tokens`, method: 'post', headers: headers() })
 export const closeDebugSession = (sessionId: string): Promise<AjaxResult> => request({ url: `/api/v1/debug-sessions/${sessionId}`, method: 'delete', headers: headers() })
 export const createRuntimeConnectionTicket = (token: string): Promise<{ data?: { ticket: string; expiresAt: string; protocol: string } }> => request({ url: '/api/v1/runtime/connection-tickets', method: 'post', data: { purpose: 'CONNECT' }, headers: { Authorization: `Bearer ${token}` } })
+export const getRuntimeAvatarPackage = (token: string): Promise<{ data?: Record<string, unknown> }> => request({ url: '/api/v1/runtime/avatar-package', method: 'get', headers: { Authorization: `Bearer ${token}` } })

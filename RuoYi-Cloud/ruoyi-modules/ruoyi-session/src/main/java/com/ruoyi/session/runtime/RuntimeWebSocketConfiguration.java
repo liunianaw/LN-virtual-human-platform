@@ -71,7 +71,11 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
         public void afterConnectionClosed(WebSocketSession session, CloseStatus status)
         {
             Object principal = session.getAttributes().get("runtimePrincipal");
-            if (principal instanceof RuntimePrincipal runtimePrincipal) events.unregister(runtimePrincipal.sessionId(), session);
+            if (principal instanceof RuntimePrincipal runtimePrincipal)
+            {
+                if (store.currentConnection(runtimePrincipal, session.getAttributes().get("connectionEpoch") instanceof Long value ? value : -1)) runtime.disconnect(runtimePrincipal);
+                events.unregister(runtimePrincipal.sessionId(), session);
+            }
         }
 
         private void authenticate(WebSocketSession session, JsonNode node) throws IOException
@@ -79,6 +83,8 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             if (!"connection.auth".equals(node.path("type").asText())) throw new RuntimeProblem(org.springframework.http.HttpStatus.UNAUTHORIZED, "TICKET_REQUIRED", "First frame must authenticate a connection ticket.");
             String ticket = node.path("data").path("ticket").asText();
             RuntimePrincipal principal = tickets.consume(ticket);
+            // A replacement connection cannot receive or revive the previous round's late audio.
+            runtime.revokeSession(principal.sessionId());
             long epoch = store.openConnection(principal);
             session.getAttributes().put("runtimePrincipal", principal);
             session.getAttributes().put("connectionEpoch", epoch);

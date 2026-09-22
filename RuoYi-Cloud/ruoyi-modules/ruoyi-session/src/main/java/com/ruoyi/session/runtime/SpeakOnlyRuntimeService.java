@@ -231,6 +231,13 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         return List.copyOf(result);
     }
 
+    public void disconnect(RuntimePrincipal principal)
+    {
+        String turnId = activeTurnBySession.get(principal.sessionId());
+        TurnState turn = turnId == null ? null : turns.get(turnId);
+        if (turn != null && turn.belongsTo(principal)) synchronized (turn) { finishStopped(turn, "DISCONNECTED"); }
+    }
+
     private static List<SegmentPlan> plans(List<String> chunks)
     {
         List<SegmentPlan> result = new ArrayList<>();

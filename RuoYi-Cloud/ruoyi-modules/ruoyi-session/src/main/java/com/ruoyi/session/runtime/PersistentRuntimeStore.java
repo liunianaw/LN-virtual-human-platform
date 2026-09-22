@@ -102,12 +102,14 @@ public class PersistentRuntimeStore
                 now, now, turnId);
         jdbcTemplate.update("update s_turn set status = 'INTERRUPTED', audio_status = case when audio_status = 'COMPLETED' then 'COMPLETED' else 'INTERRUPTED' end, playback_status = case when playback_status in ('COMPLETED','FAILED') then playback_status else 'STOPPED' end, cancel_reason = ?, ended_at = coalesce(ended_at, ?), updated_at = ? where id = ? and status = 'RUNNING'",
                 reason, now, now, turnId);
+        jdbcTemplate.update("update s_session set active_turn_id=null,updated_at=?,revision=revision+1 where active_turn_id=?", now, turnId);
     }
 
     public void complete(long turnId)
     {
         Instant now = Instant.now();
         jdbcTemplate.update("update s_turn set status = 'COMPLETED', audio_status = 'COMPLETED', playback_status = 'COMPLETED', ended_at = ?, updated_at = ? where id = ? and status = 'RUNNING'", now, now, turnId);
+        jdbcTemplate.update("update s_session set active_turn_id=null,updated_at=?,revision=revision+1 where active_turn_id=?", now, turnId);
     }
 
     public void fail(long turnId)
@@ -115,6 +117,7 @@ public class PersistentRuntimeStore
         Instant now = Instant.now();
         jdbcTemplate.update("update s_turn set status = 'FAILED', audio_status = 'FAILED', playback_status = 'FAILED', ended_at = ?, updated_at = ? where id = ? and status = 'RUNNING'",
                 now, now, turnId);
+        jdbcTemplate.update("update s_session set active_turn_id=null,updated_at=?,revision=revision+1 where active_turn_id=?", now, turnId);
     }
 
     public void scheduleCleanup(TemporaryAudioReference audio)
@@ -143,8 +146,8 @@ public class PersistentRuntimeStore
 
     public TemporaryAudioReference readableAudio(RuntimePrincipal principal, String mediaId)
     {
-        TemporaryAudioReference audio = jdbcTemplate.query("select storage_provider,bucket,object_key,expires_at from s_temp_object "
-                + "where session_id = ? and account_id = ? and media_id = ? and purpose = 'TTS_AUDIO' and status = 'ACTIVE' and expires_at > utc_timestamp(3)",
+        TemporaryAudioReference audio = jdbcTemplate.query("select o.storage_provider,o.bucket,o.object_key,o.expires_at from s_temp_object o join s_session s on s.id=o.session_id "
+                + "where o.session_id = ? and o.account_id = ? and o.media_id = ? and o.purpose = 'TTS_AUDIO' and o.status = 'ACTIVE' and o.expires_at > utc_timestamp(3) and s.status='ACTIVE' and o.turn_id=s.active_turn_id",
             rs -> rs.next() ? new TemporaryAudioReference(mediaId, rs.getString(1), rs.getString(2), rs.getString(3), rs.getTimestamp(4).toInstant()) : null,
             principal.sessionId(), principal.accountId(), mediaId);
         if (audio == null) throw new RuntimeProblem(HttpStatus.NOT_FOUND, "MEDIA_NOT_FOUND", "Audio is unavailable.");
@@ -169,6 +172,12 @@ public class PersistentRuntimeStore
     {
         jdbcTemplate.update("update s_temp_object set status = 'DELETED',updated_at = ?,next_delete_at = null,last_error_code = null where media_id = ? and storage_provider = ? and bucket = ? and object_key = ? and status in ('ACTIVE','DELETE_PENDING')",
             Instant.now(), audio.mediaId(), audio.storageProvider(), audio.bucket(), audio.objectKey());
+    }
+
+    public void markDeleteFailed(TemporaryAudioReference audio, String code)
+    {
+        jdbcTemplate.update("update s_temp_object set status='DELETE_PENDING',delete_attempts=delete_attempts+1,next_delete_at=date_add(utc_timestamp(3),interval least(300,5 * pow(2,least(5,delete_attempts))) second),last_error_code=?,updated_at=utc_timestamp(3) where media_id=? and storage_provider=? and bucket=? and object_key=? and status in ('ACTIVE','DELETE_PENDING')",
+            code, audio.mediaId(), audio.storageProvider(), audio.bucket(), audio.objectKey());
     }
 
     public void verifyConsoleGrant(TrustedConsoleDebugGrantClaims claims)

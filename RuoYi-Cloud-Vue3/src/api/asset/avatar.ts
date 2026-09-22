@@ -128,6 +128,11 @@ export interface AvatarDetail extends AvatarCatalogItem {
   versions: Array<{ versionId: string; versionNo: number; status: string; createdAt?: string; owned: boolean | number }>
 }
 
+export interface AvatarReferences {
+  counts: { applications: number; sessions: number; generations: number }
+  applications: Array<{ applicationId: string; name: string; status: string }>
+}
+
 export function uploadAvatarReference(data: FormData): Promise<AjaxResult<AvatarReferenceFile>> {
   return request({
     url: '/system/asset/files',
@@ -254,6 +259,18 @@ export function listAdminPublicAvatars(pageNum = 1, pageSize = 20, status?: stri
 
 export function getAvatarDetail(avatarId: string): Promise<AjaxResult<AvatarDetail>> {
   return request({ url: `/system/asset/avatars/${avatarId}`, method: 'get' })
+}
+
+export function listOwnedAvatars(pageNum = 1, pageSize = 20, status?: string, keyword?: string): Promise<AjaxResult<{ items: AvatarCatalogItem[]; total: number }>> {
+  return request({ url: '/system/asset/avatars', method: 'get', params: { pageNum, pageSize, status, keyword } })
+}
+
+export function getAvatarReferences(avatarId: string): Promise<AjaxResult<AvatarReferences>> {
+  return request({ url: `/system/asset/avatars/${avatarId}/references`, method: 'get' })
+}
+
+export function deleteOwnedAvatar(avatarId: string, revision: string): Promise<AjaxResult<{ avatarId: string; status: string }>> {
+  return request({ url: `/system/asset/avatars/${avatarId}`, method: 'delete', headers: { 'If-Match': revision, 'Idempotency-Key': crypto.randomUUID() } })
 }
 
 export function unpublishOfficialAvatar(avatarId: string, reason: string): Promise<AjaxResult> {
