@@ -131,7 +131,9 @@ def process_action_board(source: str | Path, target: str | Path, action: str) ->
                 )
             )
         )
-        bounding_box = frame.getchannel("A").getbbox()
+        # Chroma-key antialiasing can leave isolated, low-alpha edge pixels.
+        # Geometry checks should only treat visibly opaque pixels as content.
+        bounding_box = frame.getchannel("A").point(lambda alpha: 255 if alpha >= 128 else 0).getbbox()
         if not bounding_box:
             warnings.append(f"empty_frame_{index:02d}")
         elif (

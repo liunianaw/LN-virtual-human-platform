@@ -15,6 +15,9 @@ platform:
     outbox:
       publisher-id: ${PLATFORM_OUTBOX_PUBLISHER_ID:system-outbox-publisher}
       publisher-delay-ms: ${PLATFORM_OUTBOX_PUBLISHER_DELAY_MS:1000}
+    timeout:
+      scan-delay-ms: ${PLATFORM_GENERATION_TIMEOUT_SCAN_DELAY_MS:30000}
+      unsubmitted-seconds: ${PLATFORM_GENERATION_UNSUBMITTED_TIMEOUT_SECONDS:300}
   storage:
     cos:
       enabled: ${COS_ENABLED:false}

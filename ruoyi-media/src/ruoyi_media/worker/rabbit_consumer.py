@@ -102,8 +102,11 @@ class GenerationRabbitConsumer:
                     await self._retry_or_dead_letter(message, retry_exchange, retry_count)
                     return
             await message.ack()
-        except ValueError:
-            self._emit("rabbit_message_rejected")
+        except ValueError as error:
+            # Do not log the body (it may later carry provider metadata), but
+            # retain the bounded validation reason needed to distinguish a
+            # protocol mismatch from a provider or transport failure.
+            self._emit("rabbit_message_rejected:" + _rejection_reason(error))
             await message.reject(requeue=False)
         except (PreflightClaimFailure, PlatformTransportError, OSError, TimeoutError) as error:
             self._emit("rabbit_retry_" + type(error).__name__.lower())
@@ -155,3 +158,10 @@ def _retry_count(headers: Mapping[str, object] | None) -> int:
     if not 0 <= parsed <= RETRY_LIMIT:
         raise ValueError("RabbitMQ retry header is invalid")
     return parsed
+
+
+def _rejection_reason(error: ValueError) -> str:
+    reason = str(error)
+    if not reason or len(reason) > 120 or any(character.isspace() for character in reason):
+        return "invalid_message"
+    return reason

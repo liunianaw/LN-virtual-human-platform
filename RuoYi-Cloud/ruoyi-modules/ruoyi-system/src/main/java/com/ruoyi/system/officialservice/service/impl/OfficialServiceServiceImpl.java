@@ -92,6 +92,7 @@ public class OfficialServiceServiceImpl implements IOfficialServiceService
         int bindings = "AVATAR_GENERATION".equals(purpose) ? mapper.countGenerationBinding(serviceId, expectedRevision, taskId) : mapper.countVoiceBinding(serviceId, expectedRevision, voiceVersionId);
         if (bindings != 1) throw new ServiceException("官方服务与冻结任务或声音版本不匹配", HttpStatus.CONFLICT.value());
         OfficialService service = mapper.selectResolvable(serviceId, expectedRevision, purpose); if (service == null) throw new ServiceException("官方服务已停用或修订不匹配", HttpStatus.CONFLICT.value());
+        validateStored(service);
         return new ResolvedService(service.getProviderCode(), service.getEndpoint(), service.getModelId(), parameters(service.getParameters()), crypto.decrypt(mapper.selectSecret(service.getSecretId())));
     }
 

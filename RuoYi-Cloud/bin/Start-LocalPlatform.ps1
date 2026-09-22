@@ -15,8 +15,10 @@ Starts the complete Windows development stack without duplicating healthy proces
 .DESCRIPTION
 Starts MySQL, Redis, Nacos, RabbitMQ, system, session, auth, gateway, media API,
 media Worker, the local Relay, and Vue in their dependency order. Existing listeners
-are reused. Runtime secrets are read only from the ignored local configuration files
-and injected into child-process environments; they are never logged or persisted.
+are reused. Provider secrets are read only from ignored local configuration files and
+injected into child-process environments; they are never logged. The local official
+service master key is protected with the current Windows user's DPAPI so encrypted
+official credentials remain readable after a launcher restart.
 
 Use -SkipBuild when one or more Java services are already running, or when their
 current JARs are intentionally the desired build. Use -SkipNacosPublish only when
@@ -207,6 +209,68 @@ function Get-LocalYamlValue {
     return $match.Groups['value'].Value.Trim().Trim("'`"")
 }
 
+function Get-LocalOfficialServiceMasterKey {
+    $keyPath = Join-Path $runtimeLogRoot 'official-service-master-key.dpapi'
+    if (Test-Path -LiteralPath $keyPath) {
+        try {
+            $protected = Get-Content -LiteralPath $keyPath -Raw -Encoding ascii
+            $secure = ConvertTo-SecureString -String $protected
+            $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+            try {
+                $key = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+            }
+            finally {
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+            }
+        }
+        catch {
+            throw "Local official-service master key cannot be read: $keyPath"
+        }
+    }
+    else {
+        $bytes = [byte[]]::new(32)
+        $generator = [Security.Cryptography.RandomNumberGenerator]::Create()
+        try {
+            $generator.GetBytes($bytes)
+        }
+        finally {
+            $generator.Dispose()
+        }
+        $key = [Convert]::ToBase64String($bytes)
+        $secure = ConvertTo-SecureString -String $key -AsPlainText -Force
+        ConvertFrom-SecureString -SecureString $secure | Set-Content -LiteralPath $keyPath -Encoding ascii -NoNewline
+    }
+    try {
+        if ([Convert]::FromBase64String($key).Length -ne 32) { throw 'invalid length' }
+    }
+    catch {
+        throw "Local official-service master key is invalid: $keyPath"
+    }
+    return $key
+}
+
+function Get-LocalServiceToken {
+    param([Parameter(Mandatory)] [string]$FileName)
+
+    $tokenPath = Join-Path $runtimeLogRoot $FileName
+    if (Test-Path -LiteralPath $tokenPath) {
+        try {
+            $secure = ConvertTo-SecureString -String (Get-Content -LiteralPath $tokenPath -Raw -Encoding ascii)
+            $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+            try { $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) }
+            finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
+        }
+        catch { throw "Local service token cannot be read: $tokenPath" }
+    }
+    else {
+        $token = [guid]::NewGuid().ToString('N')
+        ConvertFrom-SecureString (ConvertTo-SecureString -String $token -AsPlainText -Force) |
+            Set-Content -LiteralPath $tokenPath -Encoding ascii -NoNewline
+    }
+    if ($token -notmatch '^[0-9a-f]{32}$') { throw "Local service token is invalid: $tokenPath" }
+    return $token
+}
+
 function Get-NacosAccessToken {
     param(
         [Parameter(Mandatory)] [string]$Username,
@@ -291,10 +355,12 @@ try {
         throw 'Ignored local provider configuration does not contain an API key; no services were started.'
     }
 
+    $officialServiceMasterKey = Get-LocalOfficialServiceMasterKey
+
     $nacosUsername = if ($env:NACOS_USERNAME) { $env:NACOS_USERNAME } else { 'nacos' }
     $nacosPassword = if ($env:NACOS_PASSWORD) { $env:NACOS_PASSWORD } else { 'nacos' }
-    $internalToken = [guid]::NewGuid().ToString('N')
-    $relayToken = [guid]::NewGuid().ToString('N')
+    $internalToken = Get-LocalServiceToken -FileName 'media-internal-token.dpapi'
+    $relayToken = Get-LocalServiceToken -FileName 'relay-access-token.dpapi'
     $commonEnvironment = @{
         NACOS_ADDR = $nacosAddress
         NACOS_USERNAME = $nacosUsername
@@ -363,9 +429,15 @@ try {
     $javaPorts = 9200, 9201, 9202, 8080
     if (-not $SkipBuild -and -not ($javaPorts | Where-Object { Test-TcpPort $_ })) {
         Write-Host '[build] Packaging system, session, auth, and gateway without tests.'
-        & mvn -B -ntp -DskipTests -pl 'ruoyi-modules/ruoyi-system,ruoyi-modules/ruoyi-session,ruoyi-auth,ruoyi-gateway' -am package
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Maven package failed; no Java service was started.'
+        Push-Location -LiteralPath $cloudRoot
+        try {
+            & mvn -B -ntp -DskipTests -pl 'ruoyi-modules/ruoyi-system,ruoyi-modules/ruoyi-session,ruoyi-auth,ruoyi-gateway' -am package
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Maven package failed; no Java service was started.'
+            }
+        }
+        finally {
+            Pop-Location
         }
     }
     elseif (-not $SkipBuild) {
@@ -377,6 +449,8 @@ try {
         PLATFORM_DB_USER = 'root'
         PLATFORM_DB_PASSWORD = '123456'
         RUOYI_MEDIA_INTERNAL_TOKEN = $internalToken
+        LN_OFFICIAL_SERVICE_MASTER_KEY = $officialServiceMasterKey
+        LN_OFFICIAL_SERVICE_MASTER_KEY_VERSION = 'local-dpapi-v1'
     }
     $sessionEnvironment = @{} + $commonEnvironment + @{
         SESSION_DB_URL = 'jdbc:mysql://127.0.0.1:3306/session_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai'
@@ -428,7 +502,7 @@ try {
         throw
     }
 
-    $mediaEnvironment = @{} + $cosEnvironment + @{
+    $mediaEnvironment = @{} + $commonEnvironment + $cosEnvironment + @{
         PYTHONPATH = (Join-Path $mediaRoot 'src')
         RUOYI_MEDIA_INTERNAL_PLATFORM_URL = 'http://127.0.0.1:9201'
         RUOYI_MEDIA_INTERNAL_TOKEN = $internalToken

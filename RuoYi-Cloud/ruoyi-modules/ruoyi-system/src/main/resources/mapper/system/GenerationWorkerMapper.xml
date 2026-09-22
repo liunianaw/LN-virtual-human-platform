@@ -10,6 +10,7 @@
         <result property="modelId" column="model_id"/><result property="parameters" column="parameters"/>
         <result property="officialServiceId" column="official_service_id"/><result property="serviceRevision" column="service_revision"/>
         <result property="stepStatus" column="step_status"/><result property="existingAttemptId" column="existing_attempt_id"/>
+        <result property="existingRequestHash" column="existing_request_hash"/>
         <result property="reservedAttemptId" column="reserved_attempt_id"/>
         <result property="providerRequestKey" column="provider_request_key"/><result property="receiptJson" column="receipt_json"/>
     </resultMap>
@@ -18,7 +19,8 @@
         s.action_code, s.attempt_no, s.lease_epoch, json_unquote(json_extract(t.service_snapshot, '$.modelId')) as model_id,
         json_unquote(json_extract(t.service_snapshot, '$.parameters')) as parameters, t.official_service_id,
         cast(json_unquote(json_extract(t.service_snapshot, '$.revision')) as unsigned) as service_revision,
-        s.status as step_status, a.id as existing_attempt_id, s.reserved_attempt_id, a.provider_request_key,
+        s.status as step_status, a.id as existing_attempt_id, hex(a.request_hash) as existing_request_hash,
+        s.reserved_attempt_id, a.provider_request_key,
         json_extract(s.result_metadata, '$.providerReceipt') as receipt_json
     </sql>
     <select id="selectReadyActionForUpdate" resultMap="ClaimResult">
@@ -30,6 +32,8 @@
           and (s.status = 'READY' or (s.status = 'POLLING' and (s.next_run_at is null or s.next_run_at &lt;= utc_timestamp(3)))
                or (s.status = 'RUNNING' and s.lease_expires_at &lt;= utc_timestamp(3)))
           and s.step_type = 'GENERATE_ACTION' and t.status in ('QUEUED', 'PROCESSING')
+          and not exists (select 1 from p_generation_attempt previous_attempt
+              where previous_attempt.step_id = s.id and previous_attempt.attempt_no &lt; s.attempt_no)
           and exists (select 1 from p_official_service svc join p_secret secret on secret.id = svc.secret_id
               where svc.id = t.official_service_id and svc.status = 'ACTIVE'
                 and svc.capability = 'AVATAR_GENERATION' and secret.status = 'ACTIVE')
@@ -125,7 +129,7 @@
         where account_id = #{accountId} and task_id = #{taskId} and id = #{stepId} and lease_owner = #{workerId}
           and lease_epoch = #{leaseEpoch} and lease_expires_at > utc_timestamp(3) and status = 'RUNNING'
           and not exists (select 1 from p_generation_attempt a where a.step_id = p_generation_step.id
-              and a.attempt_no = p_generation_step.attempt_no and a.lease_epoch = p_generation_step.lease_epoch)
+              and a.attempt_no = p_generation_step.attempt_no)
     </update>
     <update id="releaseExpiredUnpreparedClaims">
         update p_generation_step s set status = 'READY', stage_started_at = utc_timestamp(3), error_code = #{errorCode}, lease_owner = null, lease_expires_at = null,
@@ -133,7 +137,33 @@
         where s.account_id = #{accountId} and s.task_id = #{taskId} and s.status = 'RUNNING'
           and s.lease_expires_at &lt;= utc_timestamp(3)
           and not exists (select 1 from p_generation_attempt a where a.step_id = s.id
-              and a.attempt_no = s.attempt_no and a.lease_epoch = s.lease_epoch)
+              and a.attempt_no = s.attempt_no)
+    </update>
+    <update id="expireStalledUnsubmittedSteps">
+        update p_generation_step s
+        join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
+        set s.status = 'FAILED', s.stage_started_at = utc_timestamp(3),
+            s.error_code = coalesce(s.error_code, 'GENERATION_START_TIMEOUT'),
+            s.lease_owner = null, s.lease_expires_at = null, s.next_run_at = null,
+            s.heartbeat_at = utc_timestamp(3), s.updated_at = utc_timestamp(3)
+        where t.status in ('QUEUED','PROCESSING')
+          and t.updated_at &lt;= date_sub(utc_timestamp(3), interval #{timeoutSeconds} second)
+          and s.step_type = 'GENERATE_ACTION' and s.status in ('READY','RUNNING')
+          and (s.lease_expires_at is null or s.lease_expires_at &lt;= utc_timestamp(3))
+          and not exists (select 1 from p_generation_attempt a where a.step_id = s.id
+              and a.attempt_no = s.attempt_no)
+    </update>
+    <update id="markTimedOutTasksFailed">
+        update p_generation_task t set t.status = 'FAILED', t.internal_state = 'FINISHED', t.progress = 100,
+            t.error_code = 'GENERATION_START_TIMEOUT',
+            t.error_message = '制作任务在厂商请求提交前超过等待上限，已自动停止',
+            t.finished_at = utc_timestamp(3), t.updated_at = utc_timestamp(3)
+        where t.status in ('QUEUED','PROCESSING')
+          and not exists (select 1 from p_generation_step active_step where active_step.task_id = t.id
+              and active_step.account_id = t.account_id and active_step.step_type = 'GENERATE_ACTION'
+              and active_step.status in ('READY','RUNNING','POLLING'))
+          and exists (select 1 from p_generation_step timed_out_step where timed_out_step.task_id = t.id
+              and timed_out_step.account_id = t.account_id and timed_out_step.error_code = 'GENERATION_START_TIMEOUT')
     </update>
     <update id="markTaskFailed">
         update p_generation_task set status = 'FAILED', internal_state = 'FINISHED',

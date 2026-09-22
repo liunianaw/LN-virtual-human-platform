@@ -49,6 +49,10 @@ public interface GenerationWorkerMapper
 
     int releaseExpiredUnpreparedClaims(@Param("accountId") Long accountId, @Param("taskId") Long taskId, @Param("errorCode") String errorCode);
 
+    int expireStalledUnsubmittedSteps(@Param("timeoutSeconds") int timeoutSeconds);
+
+    int markTimedOutTasksFailed();
+
     int markTaskFailed(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
 
     int updateTaskProgress(@Param("accountId") Long accountId, @Param("taskId") Long taskId);

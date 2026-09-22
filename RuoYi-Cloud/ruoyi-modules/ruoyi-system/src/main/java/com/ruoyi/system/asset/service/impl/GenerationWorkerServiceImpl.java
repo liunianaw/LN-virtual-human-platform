@@ -53,7 +53,6 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
             workerMapper.startTask(accountId, taskId);
             long epoch = step.getLeaseEpoch() + 1;
             int attempt = step.getAttemptNo() + ("READY".equals(step.getStepStatus()) ? 1 : 0);
-            ObjectStorage storage = requireStorage();
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("accountId", accountId);
             response.put("taskId", taskId);
@@ -66,7 +65,13 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
             response.put("parametersJson", step.getParameters() == null ? "{}" : step.getParameters());
             response.put("officialServiceId", step.getOfficialServiceId());
             response.put("serviceRevision", step.getServiceRevision());
-            response.put("referenceUrl", storage.readUrl(step.getSourceObjectKey()));
+            if (step.getExistingAttemptId() == null)
+                response.put("referenceUrl", requireStorage().readUrl(step.getSourceObjectKey()));
+            else
+            {
+                response.put("recoveryOnly", true);
+                response.put("requestHash", step.getExistingRequestHash());
+            }
             response.put("outputPrefix", "avatar-generation/" + accountId + "/" + taskId + "/" + step.getStepId() + "/" + epoch);
             return response;
         });

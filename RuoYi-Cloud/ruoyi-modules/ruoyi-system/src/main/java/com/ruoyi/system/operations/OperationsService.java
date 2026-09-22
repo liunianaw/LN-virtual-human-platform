@@ -64,9 +64,11 @@ public class OperationsService
         String where = " where 1=1" + query.where();
         String unknown = "UNKNOWN".equals(status) ? " and exists (select 1 from p_generation_attempt a where a.task_id=t.id and a.account_id=t.account_id and a.status='UNKNOWN')" : "";
         Long total = jdbc.queryForObject("select count(*) from p_generation_task t" + where + unknown, Long.class, query.args().toArray());
-        List<Map<String, Object>> rows = jdbc.queryForList("select t.id,t.account_id,t.status,t.internal_state,t.progress,t.error_code,t.created_at,t.updated_at,"
+        List<Map<String, Object>> rows = jdbc.query("select t.id,t.account_id,t.status,t.internal_state,t.progress,t.error_code,t.created_at,t.updated_at,"
             + "(select count(*) from p_generation_attempt a where a.task_id=t.id and a.account_id=t.account_id and a.status='UNKNOWN') unknown_attempts "
-            + "from p_generation_task t" + where + unknown + " order by t.created_at desc,t.id desc limit ? offset ?", append(query.args(), query.size(), query.offset()).toArray());
+            + "from p_generation_task t" + where + unknown + " order by t.created_at desc,t.id desc limit ? offset ?",
+            (rs, n) -> row(rs, "id", "accountId", "status", "internalState", "progress", "errorCode", "createdAt", "updatedAt", "unknownAttempts"),
+            append(query.args(), query.size(), query.offset()).toArray());
         return page(rows.stream().map(this::taskSummary).toList(), total == null ? 0 : total, query);
     }
 
@@ -130,8 +132,10 @@ public class OperationsService
         if (taskId != null && !taskId.isBlank()) query = query.add(" and c.operation_key in (select concat('generation:',a.id) from p_generation_attempt a where a.task_id=?)", positive(taskId));
         String where = " where 1=1" + query.where();
         Long total = jdbc.queryForObject("select count(*) from p_call_record c" + where, Long.class, query.args().toArray());
-        List<Map<String,Object>> rows = jdbc.queryForList("select c.id,c.account_id,c.operation_key,c.capability,c.status,c.provider_code,c.model_id,c.provider_request_id,c.input_chars,c.image_count,c.audio_duration_ms,c.usage_available,c.cost_amount,c.currency,c.cost_source,c.error_code,c.created_at,c.updated_at,c.session_id,c.turn_id "
-            + "from p_call_record c" + where + " order by c.created_at desc,c.id desc limit ? offset ?", append(query.args(), query.size(), query.offset()).toArray());
+        List<Map<String,Object>> rows = jdbc.query("select c.id,c.account_id,c.operation_key,c.capability,c.status,c.provider_code,c.model_id,c.provider_request_id,c.input_chars,c.image_count,c.audio_duration_ms,c.usage_available,c.cost_amount,c.currency,c.cost_source,c.error_code,c.created_at,c.updated_at,c.session_id,c.turn_id "
+            + "from p_call_record c" + where + " order by c.created_at desc,c.id desc limit ? offset ?",
+            (rs, n) -> row(rs,"id","accountId","operationKey","capability","status","providerCode","modelId","providerRequestId","inputChars","imageCount","audioDurationMs","usageAvailable","costAmount","currency","costSource","errorCode","createdAt","updatedAt","sessionId","turnId"),
+            append(query.args(), query.size(), query.offset()).toArray());
         return page(rows.stream().map(this::callSummary).toList(), total == null ? 0 : total, query);
     }
 

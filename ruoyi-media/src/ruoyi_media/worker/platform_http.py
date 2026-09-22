@@ -164,17 +164,26 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             parameters={},
             output_prefix="",
         )
+        reference_png, layout_guide_png = b"", None
         try:
             model = _safe_token(_required_string(data.get("model"), "model"), "model")
             parameters = _parameters(data.get("parametersJson"))
             output_prefix = _output_prefix(_required_string(data.get("outputPrefix"), "outputPrefix"))
-            reference_png = self._read_reference(_required_string(data.get("referenceUrl"), "referenceUrl"))
-            reference_png, layout_guide_png = _generation_references(reference_png)
+            recovery_only = data.get("recoveryOnly") is True
+            request_hash = data.get("requestHash") if recovery_only else None
+            if recovery_only:
+                if not isinstance(request_hash, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", request_hash):
+                    raise PlatformTransportError("platform recovery request hash is invalid")
+            else:
+                reference_png = self._read_reference(_required_string(data.get("referenceUrl"), "referenceUrl"))
+                reference_png, layout_guide_png = _generation_references(reference_png)
         except PlatformTransportError as error:
             # The platform lease is already RUNNING at this point, but no
             # provider request or attempt exists.  Return it to READY so an
             # operator can repair the preflight condition and resume the
             # user-requested task without replaying a paid provider request.
+            if data.get("recoveryOnly") is True:
+                raise
             self.release_preflight_claim(claim, _preflight_error_code(error))
             raise PreflightClaimFailure(_preflight_error_code(error)) from error
         return ClaimedActionStep(
@@ -193,6 +202,7 @@ class SystemGenerationPlatform(GenerationPlatformPort):
             output_prefix=output_prefix,
             official_service_id=str(_positive_int(data.get("officialServiceId"), "officialServiceId")),
             service_revision=_positive_int(data.get("serviceRevision"), "serviceRevision"),
+            request_hash=request_hash,
         )
 
     def resolve_generation_service(self, claim: ClaimedActionStep) -> QwenImageSettings:

@@ -59,6 +59,23 @@ class AssetProcessorTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "atlas hash mismatch"):
                 validate_action_package(output)
 
+    def test_geometry_ignores_low_alpha_edge_noise_but_rejects_opaque_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            source = temporary_path / "idle-board.png"
+            output = temporary_path / "idle"
+            self._write_action_board(source)
+            with Image.open(source) as opened:
+                board = opened.convert("RGB")
+            board.putpixel((0, 0), (200, 0, 255))
+            board.putpixel((512, 0), (45, 80, 110))
+            board.save(source)
+
+            manifest = process_action_board(source, output, "idle")
+
+            self.assertEqual(manifest["warnings"], ["touches_border_01"])
+            self.assertFalse(manifest["geometryOk"])
+
 
 if __name__ == "__main__":
     unittest.main()

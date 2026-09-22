@@ -180,7 +180,7 @@
                 :url="actionPreviews[action.actionCode].atlasUrl"
                 :frames="actionPreviews[action.actionCode].frameLayout?.frames || []"
                 :fps="actionPreviews[action.actionCode].fps"
-                :loop="actionPreviews[action.actionCode].loopEnabled"
+                :loop="Boolean(actionPreviews[action.actionCode].loopEnabled)"
               />
               <el-empty v-else description="动作尚未预览" :image-size="56" />
               <div class="action-meta">
@@ -248,7 +248,7 @@
                 :url="action.atlasUrl"
                 :frames="finalActionFrames(action.frameLayout)"
                 :fps="action.fps"
-                :loop="action.loopEnabled"
+                :loop="Boolean(action.loopEnabled)"
               />
               <span v-else>动作预览文件不可用</span>
             </div>

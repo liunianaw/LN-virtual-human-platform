@@ -16,6 +16,7 @@ public class ClaimedGenerationStep
     private String parameters;
     private String stepStatus;
     private Long existingAttemptId;
+    private String existingRequestHash;
     private Long reservedAttemptId;
     private String providerRequestKey;
     private String receiptJson;
@@ -26,6 +27,8 @@ public class ClaimedGenerationStep
     public void setStepStatus(String value) { stepStatus = value; }
     public Long getExistingAttemptId() { return existingAttemptId; }
     public void setExistingAttemptId(Long value) { existingAttemptId = value; }
+    public String getExistingRequestHash() { return existingRequestHash; }
+    public void setExistingRequestHash(String value) { existingRequestHash = value; }
     public Long getReservedAttemptId() { return reservedAttemptId; }
     public void setReservedAttemptId(Long value) { reservedAttemptId = value; }
     public String getProviderRequestKey() { return providerRequestKey; }

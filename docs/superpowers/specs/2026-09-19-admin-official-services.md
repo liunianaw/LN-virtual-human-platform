@@ -109,3 +109,15 @@ ServiceInput：name必填1～100；capability必填AVATAR_GENERATION/TTS；provi
 - [x] S-C：停用后的新制作领取/提交和新 TTS 提交均失败关闭；已冻结任务/Voice 只匹配原服务修订，不会静默换模型或回退任意全局 Key。新增菜单迁移和 session ticket 服务修订迁移已落库文件，未执行。
 - [x] 静态检查：`mvn -B -ntp -pl ruoyi-modules/ruoyi-system -am compile -DskipTests`、`mvn -B -ntp -pl ruoyi-modules/ruoyi-session -am compile -DskipTests`、Vue `npm run typecheck`、`PYTHONPATH=src python -m pytest -q tests/test_worker_lease.py`（2 passed）、`python -m compileall -q src`、相关 Mapper XML 解析及 `git diff --check` 均通过。
 - [ ] 用户终点验收：按第9节验证管理员保存/检查/启停、普通用户 403、停用阻断新调用及一次已授权真实 TTS；本轮未启动任何服务、数据库或浏览器，不将静态检查记为终点验收。
+
+## 12. 2026-09-22 本地角色制作接入修复
+
+- 用户创建的任务 `102089642576183338` 已入 Outbox 并由 Worker 领取，但没有生成 `p_generation_attempt`；其图像官方服务 `930010002` 当时为 `AVATAR_GENERATION` + `DASHSCOPE_BEIJING`，Worker 在真实厂商调用前拒绝该 TTS 适配器。旧任务已耗尽本地重试并进入死信，不自动重放、不切换冻结修订。
+- 管理页面现展示适配器并支持编辑现有服务；编辑保留原地址、模型、参数和凭证引用，只对错误适配器按能力修正。服务解析再次校验存储配置，制作服务列表和提交查询不再把错误图像适配器当作可用服务。
+- 经现有管理员接口将本地服务 `930010002` 修正为 `DASHSCOPE_IMAGE`，修订从 3 升为 4，仍为 ACTIVE，原凭证引用不变。新后端重启后页面“检查”通过（只验证本地配置/凭证可解析，不调用厂商）；Avatar 制作页可选该服务。Vue typecheck、system Maven compile/package、Python compileall、启动健康检查和媒体 Worker 心跳均通过；媒体虚拟环境未装 pytest，未运行其定向测试。
+- 随后用户创建任务 `102089642576183351`；Worker 日志及厂商回执显示实际 HTTP 200、异步任务成功，用户的千问监控也显示请求。首次核对时已有 7 个动作候选，“挥手”步骤显示 `REFERENCE_UNAVAILABLE`；该中间状态及后续恢复见下方记录。
+- 本地验收中候选“预览”出现空白：已生成 COS 图集经只读签名 GET 返回 200、PNG 首帧有内容，但 COS 未返回 `Access-Control-Allow-Origin`；前端 `ActionPreview` 原先强制 `crossOrigin=anonymous` 导致画布不绘制。去除该不必要限制、增加加载失败提示，并规范化 `loop` 数值布尔入参；Vue typecheck 通过，现有候选在本地页面重新点击“预览”已显示画面。此处只验证预览，不等于整套制作/发布验收。
+- 同任务“挥手”已提交千问并保存厂商任务 ID 后，Worker 的每次领取仍重复读取 COS 参考图；一次短暂读取失败被错误当成提交前故障，旧 SQL 仅按当前 lease epoch 排除已有 attempt，将 `attempt_no` 错进到 2，导致已付费任务与步骤脱钩。修复后恢复领取复用数据库原 `request_hash`，不读取参考图、不再提交新生成；preflight 释放与过期释放按整个 attempt_no 排除已有 attempt，并阻断同一步骤的旧 attempt 被误跳过后再次付费。Python 定向 4 个 unittest、system Maven compile/package、Mapper XML 解析通过。
+- 用户明确授权后，仅将任务 `102089642576183351` 的“挥手”步骤在严格状态校验下重新关联原 attempt 1 并唤醒原事件；Worker 使用原千问任务 ID 查询/下载、加工、上传 COS 并回写，日志无新增生成提交。数据库核对任务为 `SUCCEEDED / REVIEW_REQUIRED`、八个步骤均 `SUCCEEDED`，“挥手”图集 `AVAILABLE`。页面八动作预览、确认采用、组装与发布仍由用户验收；旧任务未恢复。
+- 八动作首次“确认采用”均被几何门禁拒绝。数据库与 COS 回读表明，八个 `touches_border_*` 均由单个角点的低 Alpha 抠图残留触发，人物主体未碰边；几何边界检测已改为仅统计 Alpha ≥ 128 的有效像素。Python 处理器聚焦测试 3 项通过；版本 `102089642576183351` 的八个图集按新规则复验均通过，QA 行集在严格守卫下修正为通过并保留原告警为 advisory，未调用厂商或重新生成。逐动作确认、组装和发布仍待用户页面验收。
+- 官方 TTS 新建表单原先直接要求管理员手填 `p_secret` 内部 ID，用户无法从已脱敏的页面获知该值。页面已改为按服务名称选择“已保存凭证”，去重复用现有安全存储，唯一凭证时自动选中；不回显密钥，也不再暴露数据库标识的输入要求。Vue `npm run typecheck` 通过。

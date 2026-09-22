@@ -23,6 +23,6 @@ INSERT INTO sys_menu
     (menu_id,menu_name,parent_id,order_num,path,component,`query`,route_name,is_frame,is_cache,menu_type,visible,status,perms,icon,create_by,create_time,update_by,update_time,remark)
 VALUES
     (1115,'公共资产生命周期',1,7,'public-assets','asset/public/index','','PublicAssets',1,0,'C','0','0','platform:asset:read','component','bootstrap',NOW(),'',NULL,'公共角色和声音的引用查看、下架、停用与删除'),
-    (1116,'公共资产管理',1115,1,'','','',1,0,'F','0','0','platform:asset:manage','#','bootstrap',NOW(),'',NULL,'下架、紧急停用和受保护删除')
+    (1116,'公共资产管理',1115,1,'','','','',1,0,'F','0','0','platform:asset:manage','#','bootstrap',NOW(),'',NULL,'下架、紧急停用和受保护删除')
 ON DUPLICATE KEY UPDATE menu_id=menu_id;
 INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,1115),(1,1116) ON DUPLICATE KEY UPDATE role_id=role_id;
