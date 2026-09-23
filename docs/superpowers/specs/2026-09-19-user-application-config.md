@@ -106,3 +106,5 @@ ConfigInput精确字段：
 ## 10. 跨模块交接与项目贯通
 
 [个人资产](2026-09-19-user-asset-library.md)/[官方声音](2026-09-19-admin-official-voices.md)供版本；本计划写固定配置和APP_CURRENT；[播报](2026-09-19-user-console-speech.md)写SESSION引用并消费；[生命周期](2026-09-19-admin-public-asset-lifecycle.md)用同锁保护删除。没有平台内实际播报之前，只能说配置能力完成，不能说应用使用闭环完成。
+
+2026-09-22：本地发布验收发现 `operation_id` 原为 64 字符，而应用发布会写入 `application:{应用ID}:{Idempotency-Key}`；合法的 64 字符幂等键可使该值达到约 96 字符。新增 `V15__expand_resource_reference_operation_id.sql` 将共享引用表字段扩至 128，覆盖发布与 DEBUG 会话的同一追踪字段，不截断幂等键。

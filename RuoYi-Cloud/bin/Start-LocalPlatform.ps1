@@ -361,6 +361,9 @@ try {
     $nacosPassword = if ($env:NACOS_PASSWORD) { $env:NACOS_PASSWORD } else { 'nacos' }
     $internalToken = Get-LocalServiceToken -FileName 'media-internal-token.dpapi'
     $relayToken = Get-LocalServiceToken -FileName 'relay-access-token.dpapi'
+    $systemToSessionBearer = Get-LocalServiceToken -FileName 'system-to-session-bearer.dpapi'
+    $sessionToSystemBearer = Get-LocalServiceToken -FileName 'session-to-system-bearer.dpapi'
+    $runtimeTokenSecret = Get-LocalServiceToken -FileName 'session-runtime-token-secret.dpapi'
     $commonEnvironment = @{
         NACOS_ADDR = $nacosAddress
         NACOS_USERNAME = $nacosUsername
@@ -451,6 +454,9 @@ try {
         RUOYI_MEDIA_INTERNAL_TOKEN = $internalToken
         LN_OFFICIAL_SERVICE_MASTER_KEY = $officialServiceMasterKey
         LN_OFFICIAL_SERVICE_MASTER_KEY_VERSION = 'local-dpapi-v1'
+        LN_SYSTEM_TO_SESSION_URL = 'http://127.0.0.1:9202'
+        LN_SYSTEM_TO_SESSION_INTERNAL_BEARER = $systemToSessionBearer
+        LN_SESSION_TO_SYSTEM_INTERNAL_BEARER = $sessionToSystemBearer
     }
     $sessionEnvironment = @{} + $commonEnvironment + @{
         SESSION_DB_URL = 'jdbc:mysql://127.0.0.1:3306/session_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai'
@@ -459,6 +465,10 @@ try {
         LN_SESSION_TTS_RELAY_ENABLED = 'true'
         LN_SESSION_TTS_RELAY_ENDPOINT = 'http://127.0.0.1:8024/ln-relay/v1'
         LN_SESSION_TTS_RELAY_ACCESS_TOKEN = $relayToken
+        LN_SESSION_TO_SYSTEM_URL = 'http://127.0.0.1:9201'
+        LN_SESSION_TO_SYSTEM_INTERNAL_BEARER = $sessionToSystemBearer
+        LN_SYSTEM_TO_SESSION_INTERNAL_BEARER = $systemToSessionBearer
+        LN_SESSION_RUNTIME_TOKEN_SECRET = $runtimeTokenSecret
     }
 
     $javaServices = @(

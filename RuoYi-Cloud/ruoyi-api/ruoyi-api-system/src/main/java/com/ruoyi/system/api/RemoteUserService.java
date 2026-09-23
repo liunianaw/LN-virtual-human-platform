@@ -11,6 +11,8 @@ import com.ruoyi.common.core.constant.SecurityConstants;
 import com.ruoyi.common.core.constant.ServiceNameConstants;
 import com.ruoyi.common.core.domain.R;
 import com.ruoyi.system.api.domain.SysUser;
+import com.ruoyi.system.api.domain.RegisterCodeRequest;
+import com.ruoyi.system.api.domain.RegisterRequest;
 import com.ruoyi.system.api.factory.RemoteUserFallbackFactory;
 import com.ruoyi.system.api.model.LoginUser;
 
@@ -40,7 +42,10 @@ public interface RemoteUserService
      * @return 结果
      */
     @PostMapping("/user/register")
-    public R<Boolean> registerUserInfo(@RequestBody SysUser sysUser, @RequestHeader(SecurityConstants.FROM_SOURCE) String source);
+    public R<Boolean> registerUserInfo(@RequestBody RegisterRequest request, @RequestHeader(SecurityConstants.FROM_SOURCE) String source);
+
+    @PostMapping("/user/register/code")
+    public R<Boolean> sendRegisterCode(@RequestBody RegisterCodeRequest request, @RequestHeader(SecurityConstants.FROM_SOURCE) String source);
 
     /**
      * 记录用户登录IP地址和登录时间

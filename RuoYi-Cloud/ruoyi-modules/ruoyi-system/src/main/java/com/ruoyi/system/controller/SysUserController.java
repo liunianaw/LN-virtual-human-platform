@@ -36,11 +36,14 @@ import com.ruoyi.common.security.service.TokenService;
 import com.ruoyi.common.security.utils.SecurityUtils;
 import com.ruoyi.system.api.domain.SysRole;
 import com.ruoyi.system.api.domain.SysUser;
+import com.ruoyi.system.api.domain.RegisterCodeRequest;
+import com.ruoyi.system.api.domain.RegisterRequest;
 import com.ruoyi.system.api.model.LoginUser;
 import com.ruoyi.system.service.ISysConfigService;
 import com.ruoyi.system.service.ISysPermissionService;
 import com.ruoyi.system.service.ISysRoleService;
 import com.ruoyi.system.service.ISysUserService;
+import com.ruoyi.system.service.AccountRegistrationService;
 
 /**
  * 用户信息
@@ -70,6 +73,9 @@ public class SysUserController extends BaseController
 
     @Autowired
     private TokenService tokenService;
+
+    @Autowired
+    private AccountRegistrationService registrationService;
 
     /**
      * 获取用户列表
@@ -142,18 +148,23 @@ public class SysUserController extends BaseController
      */
     @InnerAuth
     @PostMapping("/register")
-    public R<Boolean> register(@RequestBody SysUser sysUser)
+    public R<Boolean> register(@RequestBody RegisterRequest request)
     {
-        String username = sysUser.getUserName();
         if (!("true".equals(configService.selectConfigByKey("sys.account.registerUser"))))
         {
             return R.fail("当前系统没有开启注册功能！");
         }
-        if (!userService.checkUserNameUnique(sysUser))
-        {
-            return R.fail("保存用户'" + username + "'失败，注册账号已存在");
-        }
-        return R.ok(userService.registerUser(sysUser));
+        registrationService.register(request);
+        return R.ok(true);
+    }
+
+    @InnerAuth
+    @PostMapping("/register/code")
+    public R<Boolean> sendRegisterCode(@RequestBody RegisterCodeRequest request)
+    {
+        if (!("true".equals(configService.selectConfigByKey("sys.account.registerUser")))) return R.fail("当前系统没有开启注册功能！");
+        registrationService.sendCode(request);
+        return R.ok(true);
     }
 
     /**

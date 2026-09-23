@@ -62,8 +62,12 @@ export interface SysUser extends BaseEntity {
 export interface SysRegister {
   /** 用户账号 */
   userName?: string;
+  /** 注册邮箱 */
+  email?: string;
   /** 密码 */
   password?: string;
+  /** 邮箱验证码 */
+  emailCode?: string;
   /** 验证码 */
   code?: string;
   /** 唯一标识 */

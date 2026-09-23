@@ -13,6 +13,17 @@
           <template #prefix><svg-icon icon-class="user" class="el-input__icon input-icon" /></template>
         </el-input>
       </el-form-item>
+      <el-form-item prop="email">
+        <el-input
+          v-model="registerForm.email"
+          type="email"
+          size="large"
+          auto-complete="email"
+          placeholder="邮箱"
+        >
+          <template #prefix><svg-icon icon-class="email" class="el-input__icon input-icon" /></template>
+        </el-input>
+      </el-form-item>
       <el-form-item prop="password" :rules="registerPwdValidator">
         <el-input
           v-model="registerForm.password"
@@ -36,6 +47,12 @@
         >
           <template #prefix><svg-icon icon-class="password" class="el-input__icon input-icon" /></template>
         </el-input>
+      </el-form-item>
+      <el-form-item prop="emailCode">
+        <el-input v-model="registerForm.emailCode" size="large" auto-complete="one-time-code" placeholder="邮箱验证码" style="width: 63%" @keyup.enter="handleRegister">
+          <template #prefix><svg-icon icon-class="validCode" class="el-input__icon input-icon" /></template>
+        </el-input>
+        <el-button class="email-code-button" :disabled="sendingCode || countdown > 0" @click="handleSendCode">{{ countdown > 0 ? `${countdown}s 后重发` : '获取验证码' }}</el-button>
       </el-form-item>
       <el-form-item prop="code" v-if="captchaEnabled">
         <el-input
@@ -77,7 +94,7 @@
 
 <script setup lang="ts">
 import { ElMessageBox } from "element-plus"
-import { getCodeImg, register } from "@/api/login"
+import { getCodeImg, register, sendRegisterCode } from "@/api/login"
 import defaultSettings from '@/settings'
 import { usePasswordRule } from "@/utils/passwordRule"
 import type { RegisterForm } from '@/types/api/login'
@@ -90,8 +107,10 @@ const { registerPwdValidator } = usePasswordRule()
 
 const registerForm = ref<RegisterForm>({
   username: "",
+  email: "",
   password: "",
   confirmPassword: "",
+  emailCode: "",
   code: "",
   uuid: ""
 })
@@ -109,22 +128,27 @@ const registerRules = {
     { required: true, trigger: "blur", message: "请输入您的账号" },
     { min: 2, max: 20, message: "用户账号长度必须介于 2 和 20 之间", trigger: "blur" }
   ],
+  email: [{ required: true, trigger: "blur", message: "请输入邮箱" }, { type: "email", trigger: ["blur", "change"], message: "请输入正确的邮箱地址" }],
   confirmPassword: [
     { required: true, trigger: "blur", message: "请再次输入您的密码" },
     { required: true, validator: equalToPassword, trigger: "blur" }
   ],
+  emailCode: [{ required: true, trigger: "blur", message: "请输入邮箱验证码" }],
   code: [{ required: true, trigger: "change", message: "请输入验证码" }]
 }
 
 const codeUrl = ref<string>("")
 const loading = ref<boolean>(false)
 const captchaEnabled = ref<boolean>(true)
+const sendingCode = ref(false)
+const countdown = ref(0)
+let countdownTimer: number | undefined
 
 function handleRegister(): void {
   proxy.$refs.registerRef.validate((valid: boolean) => {
     if (valid) {
       loading.value = true
-      register(registerForm.value).then(() => {
+      register({ userName: registerForm.value.username, email: registerForm.value.email, password: registerForm.value.password, emailCode: registerForm.value.emailCode, code: registerForm.value.code, uuid: registerForm.value.uuid }).then(() => {
         const username = registerForm.value.username
         ElMessageBox.alert("<font color='red'>恭喜你，您的账号 " + username + " 注册成功！</font>", "系统提示", {
           dangerouslyUseHTMLString: true,
@@ -134,11 +158,29 @@ function handleRegister(): void {
         }).catch(() => {})
       }).catch(() => {
         loading.value = false
-        if (captchaEnabled) {
+        if (captchaEnabled.value) {
           getCode()
         }
       })
     }
+  })
+}
+
+function handleSendCode(): void {
+  proxy.$refs.registerRef.validateField(['username', 'email', 'code'], (valid: boolean) => {
+    if (!valid || sendingCode.value) return
+    sendingCode.value = true
+    sendRegisterCode({ userName: registerForm.value.username, email: registerForm.value.email, code: registerForm.value.code, uuid: registerForm.value.uuid }).then(() => {
+      countdown.value = 60
+      countdownTimer = window.setInterval(() => {
+        countdown.value -= 1
+        if (countdown.value <= 0 && countdownTimer !== undefined) window.clearInterval(countdownTimer)
+      }, 1000)
+    }).catch(() => {
+      if (captchaEnabled.value) getCode()
+    }).finally(() => {
+      sendingCode.value = false
+    })
   })
 }
 
@@ -153,6 +195,10 @@ function getCode(): void {
 }
 
 getCode()
+
+onBeforeUnmount(() => {
+  if (countdownTimer !== undefined) window.clearInterval(countdownTimer)
+})
 </script>
 
 <style lang='scss' scoped>
@@ -201,6 +247,7 @@ getCode()
     vertical-align: middle;
   }
 }
+.email-code-button { float: right; width: 33%; height: 40px; margin-left: 0; }
 .el-register-footer {
   height: 40px;
   line-height: 40px;

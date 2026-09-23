@@ -18,6 +18,8 @@ import com.ruoyi.common.redis.service.RedisService;
 import com.ruoyi.common.security.utils.SecurityUtils;
 import com.ruoyi.system.api.RemoteUserService;
 import com.ruoyi.system.api.domain.SysUser;
+import com.ruoyi.system.api.domain.RegisterCodeRequest;
+import com.ruoyi.system.api.domain.RegisterRequest;
 import com.ruoyi.system.api.model.LoginUser;
 
 /**
@@ -165,12 +167,12 @@ public class SysLoginService
     /**
      * 注册
      */
-    public void register(String username, String password)
+    public void register(String username, String email, String password, String emailCode)
     {
         // 用户名或密码为空 错误
-        if (StringUtils.isAnyBlank(username, password))
+        if (StringUtils.isAnyBlank(username, email, password, emailCode))
         {
-            throw new ServiceException("用户/密码必须填写");
+            throw new ServiceException("账号、邮箱、密码和邮箱验证码必须填写");
         }
         if (username.length() < UserConstants.USERNAME_MIN_LENGTH
                 || username.length() > UserConstants.USERNAME_MAX_LENGTH)
@@ -183,18 +185,37 @@ public class SysLoginService
             throw new ServiceException("密码长度必须在5到20个字符之间");
         }
 
-        // 注册用户信息
-        SysUser sysUser = new SysUser();
-        sysUser.setUserName(username);
-        sysUser.setNickName(username);
-        sysUser.setPwdUpdateDate(DateUtils.getNowDate());
-        sysUser.setPassword(SecurityUtils.encryptPassword(password));
-        R<?> registerResult = remoteUserService.registerUserInfo(sysUser, SecurityConstants.INNER);
+        SysUser emailUser = new SysUser();
+        emailUser.setEmail(email);
+        if (!validator.validateProperty(emailUser, "email").isEmpty()) throw new ServiceException("邮箱格式不正确");
+        RegisterRequest request = new RegisterRequest();
+        request.setUsername(username.trim());
+        request.setEmail(email.trim());
+        request.setPassword(SecurityUtils.encryptPassword(password));
+        request.setEmailCode(emailCode.trim());
+        R<?> registerResult = remoteUserService.registerUserInfo(request, SecurityConstants.INNER);
 
         if (R.FAIL == registerResult.getCode())
         {
             throw new ServiceException(registerResult.getMsg());
         }
         recordLogService.recordLogininfor(username, Constants.REGISTER, "注册成功");
+    }
+
+    public void sendRegisterCode(String username, String email)
+    {
+        if (StringUtils.isAnyBlank(username, email)) throw new ServiceException("账号和邮箱必须填写");
+        if (username.length() < UserConstants.USERNAME_MIN_LENGTH || username.length() > UserConstants.USERNAME_MAX_LENGTH)
+        {
+            throw new ServiceException("账户长度必须在2到20个字符之间");
+        }
+        SysUser emailUser = new SysUser();
+        emailUser.setEmail(email);
+        if (!validator.validateProperty(emailUser, "email").isEmpty()) throw new ServiceException("邮箱格式不正确");
+        RegisterCodeRequest request = new RegisterCodeRequest();
+        request.setUsername(username.trim());
+        request.setEmail(email.trim());
+        R<?> result = remoteUserService.sendRegisterCode(request, SecurityConstants.INNER);
+        if (R.FAIL == result.getCode()) throw new ServiceException(result.getMsg());
     }
 }

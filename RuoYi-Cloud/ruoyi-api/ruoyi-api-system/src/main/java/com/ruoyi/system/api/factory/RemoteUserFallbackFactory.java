@@ -7,6 +7,8 @@ import org.springframework.stereotype.Component;
 import com.ruoyi.common.core.domain.R;
 import com.ruoyi.system.api.RemoteUserService;
 import com.ruoyi.system.api.domain.SysUser;
+import com.ruoyi.system.api.domain.RegisterCodeRequest;
+import com.ruoyi.system.api.domain.RegisterRequest;
 import com.ruoyi.system.api.model.LoginUser;
 
 /**
@@ -32,9 +34,15 @@ public class RemoteUserFallbackFactory implements FallbackFactory<RemoteUserServ
             }
 
             @Override
-            public R<Boolean> registerUserInfo(SysUser sysUser, String source)
+            public R<Boolean> registerUserInfo(RegisterRequest request, String source)
             {
                 return R.fail("注册用户失败:" + throwable.getMessage());
+            }
+
+            @Override
+            public R<Boolean> sendRegisterCode(RegisterCodeRequest request, String source)
+            {
+                return R.fail("发送注册验证码失败:" + throwable.getMessage());
             }
 
             @Override

@@ -25,7 +25,7 @@ router.beforeEach(async (to, from) => {
     const isLock = useLockStore().isLock
     if (to.path === '/login') {
       NProgress.done()
-      return { path: '/' }
+      return { path: '/index' }
     }
     if (isWhiteList(to.path)) {
       return true
@@ -51,6 +51,9 @@ router.beforeEach(async (to, from) => {
             router.addRoute(route)
           }
         })
+        if (!router.resolve(to.fullPath).matched.some(route => route.path !== '/:pathMatch(.*)*')) {
+          return { path: '/index', replace: true }
+        }
         // 重新导航到目标路由，确保动态路由已注册
         return { ...to, replace: true }
       } catch (err) {

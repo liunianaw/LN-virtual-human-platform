@@ -96,3 +96,9 @@ C3是唯一共享引用/删除事务定义。目标新管理接口下列均A+pla
 ## 10. 跨模块交接与项目贯通
 
 [个人资产库](2026-09-19-user-asset-library.md)复用引用检查和删除执行但不授管理员权限；[应用](2026-09-19-user-application-config.md)/[播报](2026-09-19-user-console-speech.md)负责引用建立和释放；[任务管理](2026-09-19-admin-task-operations.md)展示清理异常。生产删除事件不等于删除完成，必须保留消费端缺口到真正实现并体验通过。
+
+## 11. 2026-09-23 页面边界与验收修复
+
+制作页不再嵌入公共角色表格或状态按钮；管理员通过单独的“虚拟角色与声音资产”菜单进入 `asset/public/index`，该页面只读取 `p_avatar`/`p_voice` 对应的虚拟资产，不读取或修改 `sys_role`、`sys_user_role`。系统“角色管理”仍是平台用户权限管理，两者在菜单、首页说明和页面标题中明确区分。
+
+本地日志复现的公共角色下架、紧急停用失败根因是 `PublicAssetLifecycleService.record` 的 `p_api_idempotency` SQL 仅有五个参数占位却传入六个字段值；已补齐 `resource_id` 占位符。该共享写入路径同时覆盖新管理 API 和旧兼容路由的下架、停用、删除重试操作。Vue `npm run typecheck` 与 `ruoyi-system` Maven `compile` 通过；尚未重启服务、执行 V16 菜单迁移或进行页面终点验收。

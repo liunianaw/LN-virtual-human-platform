@@ -156,7 +156,7 @@ public class SysUser extends BaseEntity
     }
 
     @Email(message = "邮箱格式不正确")
-    @Size(min = 0, max = 50, message = "邮箱长度不能超过50个字符")
+    @Size(min = 0, max = 254, message = "邮箱长度不能超过254个字符")
     public String getEmail()
     {
         return email;

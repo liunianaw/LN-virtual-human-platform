@@ -54,6 +54,7 @@ security:
     - /auth/logout
     - /auth/login
     - /auth/register
+    - /auth/register/code
     - /*/v2/api-docs
     - /*/v3/api-docs
     - /csrf

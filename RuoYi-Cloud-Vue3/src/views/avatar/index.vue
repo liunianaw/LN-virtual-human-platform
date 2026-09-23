@@ -67,13 +67,13 @@
                 class="mt8"
               />
             </el-form-item>
-            <el-form-item label="角色归属" required>
+            <el-form-item v-if="!isAdmin" label="角色归属" required>
               <el-radio-group v-model="taskForm.visibility">
                 <el-radio value="PRIVATE">本人私有</el-radio>
-                <el-radio v-if="isAdmin" value="OFFICIAL">官方公共</el-radio>
               </el-radio-group>
-              <div class="form-tip">官方公共角色发布后供所有平台用户选择；私有角色仅本人可用。</div>
+              <div class="form-tip">私有角色仅本人可用。</div>
             </el-form-item>
+            <el-alert v-else title="管理员制作的角色将作为官方公共角色，发布后供所有平台用户选择。" type="info" :closable="false" class="mb16" />
             <el-form-item>
               <el-button type="primary" :loading="creating" :disabled="!reference || !taskForm.officialServiceId" @click="createTask">开始制作</el-button>
             </el-form-item>
@@ -125,37 +125,6 @@
         </el-card>
       </el-col>
     </el-row>
-
-    <el-row :gutter="16" class="mt16">
-      <el-col :xs="24" :lg="12">
-        <el-card header="公共角色库" shadow="never">
-          <el-table :data="publicAvatars" border size="small">
-            <el-table-column prop="name" label="角色" min-width="120" />
-            <el-table-column prop="status" label="状态" width="90" />
-            <el-table-column label="预览" width="90">
-              <template #default="scope">
-                <el-button v-if="scope.row.versionId" link type="primary" @click="openCatalogPreview(scope.row)">查看</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-      <el-col v-if="isAdmin" :xs="24" :lg="12">
-        <el-card header="官方角色管理" shadow="never">
-          <el-table :data="adminPublicAvatars" border size="small">
-            <el-table-column prop="name" label="角色" min-width="110" />
-            <el-table-column prop="status" label="状态" width="90" />
-            <el-table-column label="操作" width="150">
-              <template #default="scope">
-                <el-button v-if="scope.row.status === 'PUBLISHED'" link type="warning" @click="changeOfficialStatus(scope.row, 'unpublish')">下架</el-button>
-                <el-button v-if="scope.row.status !== 'DISABLED'" link type="danger" @click="changeOfficialStatus(scope.row, 'disable')">停用</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
-
     <el-dialog v-model="productionOpen" title="八动作制作详情" width="1080px" append-to-body @closed="stopProductionPolling">
       <el-skeleton v-if="productionLoading && !production" :rows="8" animated />
       <template v-else-if="production">
@@ -289,7 +258,6 @@ import {
   createAvatarVersion,
   createOfficialAvatarGenerationTask,
   discardAvatarActionAttempt,
-  disableOfficialAvatar,
   getAvatarActionResultPreview,
   getAvatarDetail,
   getAvatarGenerationTask,
@@ -297,20 +265,16 @@ import {
   getAvatarVersionPreview,
   listAvatarGenerationServices,
   listAvatarGenerationTasks,
-  listAdminPublicAvatars,
-  listPublicAvatars,
   publishAvatarVersion,
   recoverAvatarActionAttempt,
   regenerateAvatarAction,
   selectAvatarActionResult,
-  unpublishOfficialAvatar,
   uploadAvatarReference,
   type AvatarGenerationTask,
   type AvatarGenerationService,
   type AvatarProductionAction,
   type AvatarProductionSnapshot,
   type AvatarActionResultPreview,
-  type AvatarCatalogItem,
   type AvatarReferenceFile,
   type AvatarVersionPreview
 } from '@/api/asset/avatar'
@@ -333,8 +297,6 @@ const assembling = ref(false)
 const taskIdToQuery = ref('')
 const tasks = ref<AvatarGenerationTask[]>([])
 const generationServices = ref<AvatarGenerationService[]>([])
-const publicAvatars = ref<AvatarCatalogItem[]>([])
-const adminPublicAvatars = ref<AvatarCatalogItem[]>([])
 const previewOpen = ref(false)
 const previewLoading = ref(false)
 const preview = ref<AvatarVersionPreview>()
@@ -456,16 +418,6 @@ function loadGenerationServices() {
   })
 }
 
-function loadCatalogs() {
-  listPublicAvatars().then(response => { publicAvatars.value = response.data?.items || [] })
-  if (isAdmin.value) listAdminPublicAvatars().then(response => { adminPublicAvatars.value = response.data?.items || [] })
-}
-
-function openCatalogPreview(item: AvatarCatalogItem) {
-  if (!item.versionId) return
-  openPreview({ avatarId: item.avatarId, avatarVersionId: item.versionId } as AvatarGenerationTask, true)
-}
-
 function createInheritedVersion(task: AvatarGenerationTask) {
   getAvatarDetail(task.avatarId).then(response => {
     const detail = response.data
@@ -478,15 +430,6 @@ function createInheritedVersion(task: AvatarGenerationTask) {
     proxy?.$modal.msgSuccess('已创建同一角色的新候选版本，旧发布版本保持不变。')
     openProduction({ avatarId: response.data.avatarId, avatarVersionId: response.data.versionId } as AvatarGenerationTask)
   })
-}
-
-async function changeOfficialStatus(item: AvatarCatalogItem, operation: 'unpublish' | 'disable') {
-  const label = operation === 'unpublish' ? '下架' : '紧急停用'
-  const reason = window.prompt(`请输入${label}原因（最多 500 字）：`)?.trim()
-  if (!reason) return
-  await (operation === 'unpublish' ? unpublishOfficialAvatar(item.avatarId, reason) : disableOfficialAvatar(item.avatarId, reason))
-  proxy?.$modal.msgSuccess(`官方角色已${label}。`)
-  loadCatalogs()
 }
 
 function upsertTask(task: AvatarGenerationTask) {
@@ -711,9 +654,9 @@ function handleVisibilityChange() {
 
 onMounted(() => {
   document.addEventListener('visibilitychange', handleVisibilityChange)
+  if (isAdmin.value) taskForm.visibility = 'OFFICIAL'
   loadTasks()
   loadGenerationServices()
-  loadCatalogs()
 })
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)

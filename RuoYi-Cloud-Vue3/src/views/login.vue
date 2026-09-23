@@ -99,7 +99,7 @@ const loading = ref(false)
 // 验证码开关
 const captchaEnabled = ref(true)
 // 注册开关
-const register = ref(false)
+const register = ref(true)
 const redirect = ref<string | undefined>(undefined)
 
 watch(route, (newRoute: any) => {
@@ -130,7 +130,8 @@ function handleLogin(): void {
           }
           return acc
         }, {})
-        router.push({ path: redirect.value || "/", query: otherQueryParams })
+        const target = redirect.value && !['/admin', '/workspace', '/index'].includes(redirect.value) ? redirect.value : '/index'
+        router.push({ path: target, query: otherQueryParams })
       }).catch(() => {
         loading.value = false
         // 重新获取验证码

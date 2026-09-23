@@ -22,7 +22,7 @@ export function register(data: SysRegister): Promise<AjaxResult> {
       isToken: false
     },
     method: 'post',
-    data: data
+    data: { username: data.userName, email: data.email, password: data.password, emailCode: data.emailCode, code: data.code, uuid: data.uuid }
   })
 }
 
@@ -68,5 +68,14 @@ export function getCodeImg(): Promise<CaptchaInfoResult> {
     },
     method: 'get',
     timeout: 20000
+  })
+}
+
+export function sendRegisterCode(data: Pick<SysRegister, 'userName' | 'email' | 'code' | 'uuid'>): Promise<AjaxResult> {
+  return request({
+    url: '/auth/register/code',
+    headers: { isToken: false, repeatSubmit: false },
+    method: 'post',
+    data: { username: data.userName, email: data.email, code: data.code, uuid: data.uuid }
   })
 }

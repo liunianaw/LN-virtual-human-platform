@@ -101,7 +101,7 @@ public class DebugSessionService
     }
     private void insertSessionReference(long accountId, long sessionId, String operationId, String type, long resourceId, Instant now)
     {
-        jdbc.update("insert ignore into p_resource_reference (id,created_at,updated_at,account_id,holder_type,holder_id,operation_id,resource_type,resource_id,state,confirmed_at) values (uuid_short(),?,?,?,'SESSION',?,?,?,'CONFIRMED',?)",
+        jdbc.update("insert ignore into p_resource_reference (id,created_at,updated_at,account_id,holder_type,holder_id,operation_id,resource_type,resource_id,state,confirmed_at) values (uuid_short(),?,?,?,'SESSION',?,?,?,?,'CONFIRMED',?)",
             now, now, accountId, sessionId, "debug:" + operationId, type, resourceId, now);
     }
     private record Registration(long accountId, long applicationId, Binding binding, String issuerConsoleRef) { }

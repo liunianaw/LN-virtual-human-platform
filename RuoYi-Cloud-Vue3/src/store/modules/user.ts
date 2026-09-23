@@ -29,6 +29,9 @@ const useUserStore = defineStore(
       roles: [],
       permissions: []
     }),
+    getters: {
+      isAdmin: (state) => state.roles.includes('admin')
+    },
     actions: {
       // 登录
       login(userInfo: { username: string; password: string; code: string; uuid: string }) {

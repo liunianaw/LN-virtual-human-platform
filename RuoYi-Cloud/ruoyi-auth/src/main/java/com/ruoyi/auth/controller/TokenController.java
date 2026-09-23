@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import com.ruoyi.auth.form.LoginBody;
 import com.ruoyi.auth.form.RegisterBody;
+import com.ruoyi.auth.form.RegisterCodeBody;
 import com.ruoyi.auth.form.UnLockBody;
 import com.ruoyi.auth.service.SysLoginService;
 import com.ruoyi.common.core.domain.R;
@@ -73,7 +74,14 @@ public class TokenController
     public R<?> register(@RequestBody RegisterBody registerBody)
     {
         // 用户注册
-        sysLoginService.register(registerBody.getUsername(), registerBody.getPassword());
+        sysLoginService.register(registerBody.getUsername(), registerBody.getEmail(), registerBody.getPassword(), registerBody.getEmailCode());
+        return R.ok();
+    }
+
+    @PostMapping("register/code")
+    public R<?> sendRegisterCode(@RequestBody RegisterCodeBody body)
+    {
+        sysLoginService.sendRegisterCode(body.getUsername(), body.getEmail());
         return R.ok();
     }
 

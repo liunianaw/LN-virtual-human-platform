@@ -37,8 +37,10 @@ export interface CaptchaInfoResult extends AjaxResult {
 /** 注册提交信息 */
 export interface RegisterForm {
   username: string
+  email: string
   password: string
   confirmPassword: string
+  emailCode: string
   code: string
   uuid: string
 }

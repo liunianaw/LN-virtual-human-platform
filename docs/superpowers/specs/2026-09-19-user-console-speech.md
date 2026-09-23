@@ -104,3 +104,7 @@ system/session路径前缀同服务管理计划；本轮实际文件可在[运�
 2026-09-22：完成 D-A～D-C 静态实现。浏览器先用当前 C 登录取得 S，再以 S 读取固定应用配置的正式 Avatar package、换取一次性连接票据并以首帧认证 WSS；页面直接复用 `avatar-sdk`，由实际 `playing/pause/waiting/ended` 驱动动作和回执。音频读取限制为本 S、当前 Session 和当前轮；替换连接、停止、关闭、授权失效均使迟到音频不可播放。临时文件保留持久登记，删除失败进入 `DELETE_PENDING` 退避重试。
 
 静态证据：`npm run typecheck`（RuoYi-Cloud-Vue3）通过；`mvn -B -ntp -pl ruoyi-modules/ruoyi-system,ruoyi-modules/ruoyi-session -am test -DskipTests` 通过；`git diff --check` 通过。未启动服务、打开浏览器、调用 TTS/COS 或执行迁移；真实音画、WSS 和外部调用验收仍由用户执行。
+
+2026-09-22：本地调试发现启动器未向 system/session 注入双向内部身份与地址，system 因此返回“会话内部身份未配置”。启动器现从 Git 忽略的本地 DPAPI 文件读取或首次生成三枚独立令牌，分别用于 system→session、session→system 和运行时票据签名；服务重启后生效，令牌不写入仓库。
+
+同次实际请求还发现 `DebugSessionService` 写入 SESSION 资源引用时漏传 `resource_id` 的 SQL 占位符，导致 8 个参数写入 7 个占位符。已补齐该占位符、重新打包并重启 system；system/session 健康检查均为 200。

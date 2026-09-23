@@ -58,12 +58,26 @@ export const constantRoutes = [
     hidden: true
   },
   {
-    path: '',
-    component: Layout,
+    path: '/',
     redirect: '/index',
+    hidden: true
+  },
+  {
+    path: '/admin',
+    redirect: '/index',
+    hidden: true
+  },
+  {
+    path: '/workspace',
+    redirect: '/index',
+    hidden: true
+  },
+  {
+    path: '/index',
+    component: Layout,
     children: [
       {
-        path: '/index',
+        path: '',
         component: () => import('@/views/index.vue'),
         name: 'Index',
         meta: { title: '首页', icon: 'dashboard', affix: true }
