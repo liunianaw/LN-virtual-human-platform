@@ -1,0 +1,101 @@
+# 开发者接入接口与授权过程协议（待确认草案）
+
+日期：2026-09-24。状态：关键产品规则及运行 Token 格式已明确，逐接口 Schema 仍待定稿；本文只约定开发者接入模块的接口和跨服务行为，完整计划确认前不作为编码授权。
+
+依据：[开发者接入执行计划](2026-09-23-developer-integration-modules.md)、[项目需求](../../../项目需求说明书.md)、[数据库设计](../../../数据库设计说明书.md)、[项目架构](../../../项目架构说明书.md)、[平台内共享契约](platform-console-shared-contract.md)、[接口设计说明书01](../../../接口设计说明书01.md)。
+
+## 1. 使用边界与待确认点
+
+- 《接口设计说明书01》保留为早期设计资料，其中 LLM/ASR Relay 能力握手、WSS 信封、Webhook 签名和不冲突的默认限值可作为细化依据；其开发者自有 TTS/私有 Voice、`/api/v1/**` 开放管理/业务 Session 路由、`businessUserId` 字段、`/internal/v1/session-references/**` 路由，以及旧 Session 恢复/历史查询/Session Context 契约不用于本计划。
+- 一个开发者账号可以发布多个 Application；**每个 Application 分别对应自己的一个有效密钥**，例如应用 A 和 B 各有一把，绝非一个账号共用一把。开发者可分别重置各应用密钥；平台禁止 A 后拒绝 A 新发起的业务动作并禁止重置 A，不因此停用 B。本文将这把人工管理的应用密钥称为 Application Secret，绑定 `application_id` 而非每次发布的配置版本；浏览器另用 SDK 自动处理的短期 Session 授权。
+- Application Secret 只保存在开发者后端；浏览器要直接访问平台 WSS、当前运行状态和音频时，仍须有绑定具体 Session/业务用户的短期授权，不能持有全应用共用 Secret。平台管理员的应用级禁用不能由开发者轮换 Secret 解除。
+- 平台不保存聊天正文，不提供旧 Session 恢复、聊天历史查询或跨轮 Session Context；多轮记忆由开发者 Relay 负责。一次 turn 在创建时写一条脱敏运行摘要，记录 `turnId`、所属 Session/Application、开始结束时间、状态、耗时和错误码；每次 LLM/ASR/Tool/官方 TTS 等外部调用提交前在所属服务库写独立计额/补偿事实及可靠转发事件，跨库 `p_call_record` 可最终一致，结果到达后修正状态，不等 Session 结束。脱敏轮次、操作、调用记录、日汇总、Avatar 任务/步骤/厂商尝试、Webhook 投递/尝试记录长期保留，不按终态 30 天清理。日志不记录输入输出文本、Tool 参数/结果、DOM 或截图内容；用量汇总从逐次调用事实计算，不在轮次表中伪造精确值。V1 的 `ck_s_turn_history` 与新 CHAT 轮次的 `include_in_history=0` 冲突，DEV-08 须用增量迁移解除。
+- 每个新 Application（CHAT 与 SPEAK_ONLY）必须绑定已发布、当前有效的官方 Voice；发布和运行都拒绝 RELAY Voice、私有 TTS 和无 Voice。LLM/ASR 可使用开发者 Relay；官方 TTS 走平台额度预占、结算与逐段调用记录。存量 Voice/Relay 表和代码的 TTS 字段不代表新 Application 可使用该分支。
+- 产品范围以需求说明书为准；表和跨库事实以数据库设计为准；平台内 DEBUG 和资源引用接口沿用平台内共享契约。本文只覆盖两套接入面交界的新增约定。若这些来源有冲突，应先更新相应权威文档和本草案，再编码。
+
+## 2. 路由、身份和字段
+
+| 接入面 | 路由 | 凭证 | 处理服务 | 不变量 |
+|---|---|---|---|---|
+| 统一后台 | `/api/v1/developer/**`、既有 `/api/v1/applications/**` 等 | 若依登录；管理员功能另查按钮和角色 | system，DEBUG 经受保护内部接口调用 session | 不接受浏览器伪造的账号/内部身份头 |
+| 开放管理 | `/openapi/v1/management/**` | Management Key | system | 只管理 Key 所属账号的资源，不获得管理员或业务用户身份 |
+| 业务会话 | `/openapi/v1/sessions/**` | Application Secret | session，经 system 内部授权接口核对 | 仅操作 Secret 所属应用及已核对的业务用户 |
+| 浏览器运行时 | `/api/v1/runtime/**`、`/api/v1/realtime` | Session Token，WSS 使用一次性票据 | session | 只访问 Token 绑定的 Session、配置版本、用户及 Scope |
+| 服务内部 | `/internal/v1/**` | 固定服务身份及操作权限 | system/session | 网关不向公网转发；不能信任外部传入的身份头 |
+
+上述 system 是现有 `ruoyi-system` 部署进程，不代表新增服务。`/api/v1/developer/**` 与 `/openapi/v1/management/**` 的 Controller 分别处理后台登录和 Management Key，但调用相同的 Application、资产、Voice、Relay、Skill、用量或 Webhook 领域 Service；开放 Controller 不直接写其他领域表。Session 与浏览器运行接口仍由现有 `ruoyi-session` 处理，通过受保护内部接口读取 system 授权/配置事实；不得把运行状态复制到 system。
+
+当前 Gateway 只显式转发已有 `/api/v1/**` 路径，`AuthFilter` 默认把非白名单请求按后台登录 JWT 检查。DEV-01 须新增上述开放路径的明确转发和按路由分流鉴权，清除外来账号/内部身份头，并让目标服务按 Management Key 或 Application Secret 独立核验；不能把整段 `/openapi/v1/**` 或 `/api/v1/**` 加进匿名白名单。DEV-06/07 再完成浏览器运行授权路径和 WSS 负向校验。
+
+统一使用 `externalUserId` 作为公开请求字段，与 `s_principal.external_user_id` 对应；旧接口01中的 `businessUserId` 仅作历史术语，不同时接受两个别名。`accountId` 从凭证推导；Application Secret 绑定的 `applicationId` 不由请求覆盖。ID、revision 和 epoch 对外用十进制字符串。管理接口延续平台内共享契约 C2 的响应、ETag、幂等、分页和错误外壳；SDK/WSS、SSE、二进制按各自协议。
+
+Management Key 的资源 Scope 见下表；Application Secret 只允许 `sessions:create/read/grant/end/revoke`，不再有 `sessions:context`。浏览器短期授权只允许当前 Session 所需的 `session:read`、`avatar:read`、`chat:write`、`speak:write`、`asr:write`、`context:capture`、`guidance:receive`，不再有 `history:read`。Scope 由凭证类型、固定配置和当前授权共同约束，不能从请求体自行扩大。
+
+### 2.1 开放管理 API 的模块归属
+
+以下路径表示本计划必须覆盖的资源族。每个模块实施前在本协议下固定该族的方法、DTO、Scope、错误与后台对应 Service；不得只完成后台页面而宣称开放 API 已完成。
+
+| 模块 | Management Key 资源族 | 写入边界 |
+|---|---|---|
+| DEV-01 | `/management/access-keys`、`/management/applications/{id}/secrets` | 创建/轮换/停用仅本账号凭证；Application Secret 只属于指定应用；一个应用同时只允许一个有效 Secret；不能解除平台禁用 |
+| DEV-02 | `/management/avatars`、`/management/avatar-generation-tasks`、`/management/voices` 的官方 Voice 只读目录 | 调用既有资产、任务、引用和额度 Service；不提供私有 Voice 写入 |
+| DEV-03 | `/management/relay-services` 的 LLM/ASR 配置 | 版本、授权、连接探测和引用保护完整交付；不发布 TTS Relay 或私有 Voice |
+| DEV-04 | `/management/skills` | 官方 Skill 只读/选择；私有 Skill 创建、版本和停用 |
+| DEV-05 | `/management/applications`、`/management/applications/{id}/config-versions` | 发布锁定依赖并保持旧版本；CHAT/SPEAK_ONLY 均必选官方 Voice，拒绝私有 TTS；运行时调试能力随 DEV-08～10 接入 |
+| DEV-11 | `/management/usage`、`/management/call-records`、`/management/webhook-endpoints` | 脱敏查询、签名秘密一次展示、投递状态 |
+
+管理 Key 的权限按资源族分为 `assets:read/write`、`generation:read/write`、`config:read/write`、`keys:write`、`usage:read`、`webhooks:write`；具体操作不得因为拥有同账号身份就绕过 Scope。官方发布、账号额度授予和平台级封禁只允许管理员后台身份。每个开放 Controller 调用与后台入口相同的领域 Service，不复制业务状态机。
+
+### 2.2 BUSINESS Session API
+
+| 方法与路径 | 凭证及来源 | 结果与失败边界 |
+|---|---|---|
+| `POST /openapi/v1/sessions` | Application Secret；`externalUserId`、`Idempotency-Key` | 创建当前运行 Session 前经 system 预留配置依赖；未 ACTIVE 不签发运行 Token；旧 Session 不恢复 |
+| `GET /openapi/v1/sessions/{sessionId}` | 同一应用 Secret 和经后端声明的同一 `externalUserId` | 仅查询当前运行状态、固定配置版本及到期，不含聊天正文；仅知道 Session ID 不足以查询 |
+| `DELETE /openapi/v1/sessions/{sessionId}` | 同上，幂等键或 If-Match | 先不可恢复、撤销、停止，再可靠清理与释放引用 |
+| `POST /openapi/v1/sessions/{sessionId}/tokens` | 同上，`sessions:grant`、`Idempotency-Key` | 签发 15 分钟浏览器授权；临近到期续签时旧 grant 保持到原到期时间，WSS 连接仍单活 |
+| `POST /openapi/v1/sessions/{sessionId}/revocations` | 同上，`Idempotency-Key` | 撤销 Session；用户退出全部会话时按 `(applicationId,externalUserId)` 撤销，不能跨应用 |
+
+上述表是待确认的最小跨模块契约；没有历史查询、已结束 Session 恢复或持久 Session Context 接口。DEV-01/06/07 实施前必须分别补足路由、JSON Schema、状态码、Scope、响应和 WSS 事件实例，并将其作为静态退出证据。浏览器不能直接调用这些 Application Secret 接口。
+
+浏览器运行接口沿用已有 `/api/v1/runtime/session`、`connection-tickets`、`avatar-package`、`media/{mediaId}`、`asr`、`context-captures` 和 `stop`，每次从短期授权推导 Session。`GET /api/v1/runtime/session` 只返回当前状态、固定配置版本、有效权限和正在运行的 turn 摘要；不返回聊天正文。删除接口01的 `/api/v1/runtime/messages`。WSS 的 `text.delta` 以 `turnId`、requestId 和序号关联，不再包含指向持久 `s_message` 的 `messageId`；SDK 显示当前连接收到的文本，页面刷新后若需旧内容，由开发者自己的后端提供。
+
+运行 Session 是平台处理当前连接、固定配置、停止、单活、幂等和额度的状态边界；它不是聊天记忆，也不因日志长期留存而永久可运行。浏览器授权是持有者可执行该 Session 操作的凭证，二者不应混称为“短期 Session”。BUSINESS Session 自最后一次成功业务活动起闲置 2 小时结束，创建满 24 小时强制结束，先到者为准；心跳不续期。浏览器授权 15 分钟，到期前由 SDK 经开发者后端续签，旧 grant 不因正常续签提前失效，最多保留到原到期时刻。Session 元数据墓碑及脱敏业务日志长期保留，与运行期限独立。
+
+## 3. 一个应用配置凭证、会话授权与重置
+
+1. 开发者在后台为每个 Application 分别配置一个有效 Application Secret，保存在自己的可信后端；同一账号的多个 Application 不共用 Secret。重新发布某应用的配置版本不自动换该应用的 Secret；平台在每次后端接入时检查目标应用当前可用状态。开发者后端验证业务用户后，以目标应用的 Secret 创建当前运行 Session 并取得浏览器短期授权。短期授权在有效期内可用于该 Session 的多次请求，不按每次 chat/speak 重新签发。`Idempotency-Key` 是写操作去重标识，WSS ticket 仅用于一次连接认证，二者不是开发者要管理的应用 Token。
+2. 开发者主动重置 Application Secret 时，system 在事务中使旧 Secret 失效、递增旧 Key 的 `auth_epoch` 并登记新 Secret；同一应用仅一个有效 Secret。现有 `p_access_key` 只有 `public_id` 唯一键，实施时锁应用行串行化创建/重置，并以增量生成列 `active_application_id` 的唯一键防止并发留下两把 ACTIVE Secret。旧 Secret 从事务提交起不能创建 Session 或签发新授权；已有 grant 不因旧 Key 状态/epoch 变化而撤销，既有 WSS 连接不强断，grant 只保留到自己原到期时刻。Secret 重置不递增 Application/Session 的运行授权 epoch。新 Secret 只显示一次；重置由已登录后台或有 `keys:write` 的 Management Key 发起，不能由旧 Secret 自行重置。
+3. 平台管理员禁止某个 Application 时，增量迁移中的 `p_application.admin_disabled` 独立于开发者可编辑的 `status`：管理员入口先持久化禁用并递增应用 `auth_epoch`，随后禁止该应用的新 Session、Secret 重置、浏览器授权签发和禁用后新发起的 chat/speak/ASR/Tool/Context 等业务动作及新外部副作用；不强制断开既有 WSS，也不打断已交付的音频。正在执行的外部请求不宣称撤回，后续副作用不得继续发起。开发者不能通过发布配置、重新启用普通状态或新建 Secret 绕过；仅管理员入口可解除禁用，解除时再次递增 epoch，旧授权不复活。账号停用仍是覆盖所有应用的总开关。
+4. Application Secret 创建/重置响应若丢失，旧 Secret 已失效而新明文无法从摘要恢复。后台应展示新 Key 的脱敏状态，允许已登录开发者再次重置未知 Secret；同一幂等键只返回原操作元数据，不把新 Secret 存入幂等缓存。管理员禁用期间该恢复操作也被拒绝。
+5. 浏览器短期 Session Token 响应若丢失，同一幂等键只复用原有效 grant：用持久化的 JTI、Scope、到期时间和签名密钥版本重建同一授权的 Token，不新增 grant、不延长期限、不保存 Token 明文。原 grant 已过期/撤销时，只有当前运行 Session 才可由可信后端重新验证用户后用新键签发；已结束 Session 必须新建。开发者如需使某业务用户退出，用用户或 Session 级撤销；不能让该用户自己拿应用 Secret 重置全部人的凭证。
+6. 第一版不提供单独的“重置浏览器授权”按钮；用户退出或后端显式撤销按 Session/业务用户撤销接口处理。普通续签由 SDK 调用开发者后端，后端重新验证其业务登录并以当前 Application Secret 取得新 15 分钟 grant；只在临近到期时续签，同一 Session 的新旧 grant 可短暂并存，旧 grant 的到期时间不变，单活 WSS 连接通过 REAUTHORIZE 使用新授权。新 grant 签发、响应丢失或重连均不能把旧 grant 延期，也不能提前停掉正在播放的内容；到期后的旧 grant 不能用于新命令、连接认证、票据或媒体读取，未断开的 WSS 须先完成有效授权的 REAUTHORIZE 才可继续发起动作。
+
+一个**浏览器也共用的**应用级 Token 无法区分业务用户和 Session；本协议确定浏览器使用单独的短期授权，Application Secret 只留在可信后端。
+
+运行 Session 与浏览器凭证是两件事：即使不保存聊天历史，当前 WSS、单活、停止、额度、临时音频仍需要可定位的运行状态；2 小时闲置/24 小时最长限制仅约束当前运行，不表示历史可恢复。浏览器直连平台用绑定用户、Session 和 Scope 的 15 分钟授权；Secret 重置不追溯撤销它，显式退出/撤销、Session 到期及管理员禁用新动作仍分别生效。
+
+运行 Token 统一采用现有 `RuntimeTokenCodec` 的 HMAC-SHA256 机制升级版 `v2`，并保留持久 JTI/grant 校验；不另引入与现有 DEBUG 并行的 JWT 签发器。`v2` 格式为 `ln2.<kid>.<payloadB64>.<macB64>`；payload 是字段顺序固定、无多余空白的 UTF-8 JSON，整数 ID 用十进制字符串，`iat/exp` 用 UTC epoch 毫秒，签名输入是前三段的原始 ASCII 字节。payload 仅含 `jti`、账号/应用/Session/配置内部 ID、授权来源、签发/到期时间，不放业务用户明文、Voice 绑定、Scope 或秘密。Scope、固定 Voice 与当前状态从持久 grant/Session/配置读取，不能信任客户端声明。`s_session_grant` 增量保存独立的 `signing_key_version`，与 Application Secret 的 `issuer_key_epoch` 不混用；同幂等键可用 JTI、持久时间和保留的签名密钥版本重建原 Token。验签先限制大小、版本、`kid` 和算法，再以常量时间比较签名，并将签名后的所有 ID、来源、时间及 `kid` 与持久 grant 对照；签名密钥来自部署秘密配置，旧版本至少保留到对应有效 grant 全部到期。旧 `v1` 仅供已签发 DEBUG Token 在其原有效期内兼容读取；新 BUSINESS/DEBUG 均签发 `v2`，待最长 15 分钟旧 Token 到期后撤去 `v1` 读取。旧接口01的 JWT+JTI 是历史设计，不再作为新运行凭证格式。
+
+## 4. 新动作的授权检查点
+
+授权检查针对**新发起的业务动作和新的外部副作用**，不对流里的每个字节查询数据库，也不因开发者正常重置 Secret 强制断开既有连接。三种情况须分开：
+
+| 事件 | 后端使用旧 Secret | 已签发浏览器 grant | 已建立连接/已交付音频 |
+|---|---|---|---|
+| 开发者重置 Secret | 提交后新请求立即拒绝 | 不追溯撤销，到各自原到期时刻失效；只能用新 Secret 续签 | 不强断、不停止既有播放；仍受 Session、用户及应用当前状态约束 |
+| 普通浏览器授权续签 | 使用当前有效 Secret | 新旧短暂并存，旧授权不延期 | REAUTHORIZE 或重连使用新授权；一个 Session 仍只允许一个活跃 WSS |
+| 管理员禁用 Application | 禁止新 Session、续签和 Secret 重置 | 无法用于禁用后新发起的业务动作，解除禁用不复活旧授权 | 不强断连接或已交付音频；禁止新命令和后续外部副作用 |
+
+- 每次 Application Secret 后端请求核对当前 Key；每次新业务 HTTP 请求、WSS 首帧认证/重连、新 turn、Tool/页面采集与每段新付费调用前核对 grant、Session/用户和应用当前状态。Secret 的签发 Key ID/epoch保留审计用途，但运行检查不因该 Key 后来正常重置而拒绝此前合法签发的 grant。账号停用、业务用户退出/显式撤销、Session 到期或结束仍按各自撤销规则生效。
+- 管理员禁用从持久状态提交后阻止新业务动作；已开始的外部请求和已交付的音频不强行撤回，当前长流的下一次 Tool/TTS 等新副作用必须重新检查应用状态。单纯保持 WSS 传输连接不授予发起新命令的权利。
+- 缓存只提高性能，不是授权事实来源。无法确认当前应用/Session 状态时拒绝新动作；Outbox 通知可辅助更新连接状态，但不承担强制断连语义。
+- DEV-01 完成旧 Secret 新请求拒绝与管理员禁用事实，DEV-05 完成应用/资源收紧，DEV-06 完成 grant 与跨库核对，DEV-07～10 在各自命令和副作用入口接入校验，不在最后另补一套过滤器。
+
+## 5. 网络、计额及模块交接
+
+- LLM/ASR Relay 沿用接口01第 12 节中不冲突的 `LN_RELAY/1` 固定相对路径及 `GET /capabilities` 无计费握手；TTS 路径不用于开发者 Application。LLM 请求不包含平台历史消息。每轮由平台发送固定 System Prompt、已启用 Prompt Skills、当前用户输入和本轮 Context；同一轮 Tool 后续调用可附本轮临时 Tool 消息。平台从已验证的 BUSINESS principal 向所属开发者 Relay 传递 `externalUserId`，并带 `applicationId/sessionId/turnId`，使开发者能跨新的 Session 关联自己维护的多轮记忆；浏览器和模型不得覆盖此身份。每次模型操作仍使用稳定 requestId 防止重复计费。平台不保证开发者 Relay 的保存与删除。WSS 信封、Webhook 签名沿用接口01第 9、13.2 节中不冲突的字段，`messageId` 和历史回放字段除外；音频由官方 TTS 固定路径提供。实现时将所消费的请求/响应 Schema 固定在本协议或机器可校验的同源文件，不再引用旧路由或历史查询。
+- Relay、Tool 和 Webhook 的开发者配置 URL 均只允许 HTTPS；拒绝本机、环回、私网、链路本地、元数据及平台内部目标。每次实际连接重新解析并验证，连接必须使用已验证目标；禁止重定向，防止校验后 DNS 改变或跳转进入内网。连接探测不调用付费模型。
+- DEV-02/06/08/09/10 在产生任务、Session、turn、外部调用或临时对象时同步执行对应的并发、额度或存储准入与释放；每次调用提交前在所属服务库写独立事实/Outbox，结果到达后更新，长期保留。`p_call_record` 经可靠事件最终一致，不把跨库延迟解释成 Session 结束才记日志。DEV-11 负责统一查询、汇总、补偿和 Webhook 投递，不能等它完成才开始阻止超限请求。留存迁移需清空旧调用到期值、调整日汇总非空到期列、Avatar 任务及 Webhook delivery 的到期字段与清理任务，并保证业务记录与其必要父记录不被删除；临时素材/音频仍按原生命周期清理。
+- DEV-05 交付配置编辑、发布、版本、引用与授权；CHAT、ASR、Skill、Context 的真实调试操作分别随 DEV-08～10 实现并验收。DEV-02 仅交付官方 Voice 目录；DEV-03 不再交付私有 Voice。
+- 每个跨服务边界至少保留一个聚焦的可运行契约检查：Key 类型隔离与撤销、Session 重置/丢响应同键重试、跨库引用恢复、WSS 旧连接与迟到事件、Relay 能力探测和错误、Webhook 目标与签名。静态检查、迁移/服务、接口联通和用户终点仍分别记录，不互相代替。
