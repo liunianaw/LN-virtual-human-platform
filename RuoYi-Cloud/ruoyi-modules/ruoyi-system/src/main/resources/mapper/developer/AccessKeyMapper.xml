@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.developer.access.mapper.AccessKeyMapper">
+  <select id="nextId" resultType="long">select uuid_short()</select>
+  <select id="accountForUpdate" resultType="map">select user_id accountId,status,del_flag delFlag from sys_user where user_id=#{accountId} for update</select>
+  <select id="account" resultType="map">select user_id accountId,status,del_flag delFlag from sys_user where user_id=#{accountId}</select>
+  <select id="applicationForUpdate" resultType="map">select id applicationId,account_id accountId,status,admin_disabled adminDisabled,auth_epoch authEpoch from p_application where id=#{applicationId} and account_id=#{accountId} and purpose='USER' for update</select>
+  <select id="application" resultType="map">select id applicationId,account_id accountId,status,admin_disabled adminDisabled,auth_epoch authEpoch from p_application where id=#{applicationId} and account_id=#{accountId} and purpose='USER'</select>
+  <select id="list" resultType="map">
+    select cast(id as char) keyId,name,key_type keyType,cast(application_id as char) applicationId,public_id publicId,
+      display_suffix displaySuffix,scopes,status,created_at createdAt,last_used_at lastUsedAt,revoked_at revokedAt
+    from p_access_key where account_id=#{accountId} and key_type=#{type}
+    <if test="applicationId != null">and application_id=#{applicationId}</if>
+    order by created_at desc,id desc
+  </select>
+  <select id="byIdForUpdate" resultType="map">select id,account_id accountId,application_id applicationId,key_type keyType,name,scopes,status from p_access_key where id=#{id} and account_id=#{accountId} for update</select>
+  <select id="summary" resultType="map">select cast(id as char) keyId,name,key_type keyType,cast(application_id as char) applicationId,public_id publicId,display_suffix displaySuffix,scopes,status,created_at createdAt,last_used_at lastUsedAt from p_access_key where id=#{id} and account_id=#{accountId}</select>
+  <select id="byPublicId" resultType="map">
+    select k.id,k.account_id accountId,k.application_id applicationId,k.key_type keyType,k.secret_hash secretHash,
+      k.hash_key_version hashKeyVersion,k.scopes,k.status,k.expires_at expiresAt,k.auth_epoch authEpoch,
+      u.status accountStatus,u.del_flag accountDeleted,a.status applicationStatus,a.admin_disabled adminDisabled
+    from p_access_key k join sys_user u on u.user_id=k.account_id
+    left join p_application a on a.id=k.application_id and a.account_id=k.account_id
+    where k.public_id=#{publicId}
+  </select>
+  <select id="activeApplication" resultType="map">select id,name from p_access_key where application_id=#{applicationId} and key_type='APPLICATION' and status='ACTIVE' for update</select>
+  <insert id="insert">insert into p_access_key
+    (id,created_at,updated_at,account_id,application_id,key_type,name,public_id,secret_hash,hash_key_version,display_suffix,scopes,status,auth_epoch)
+    values (#{id},#{now},#{now},#{accountId},#{applicationId},#{type},#{name},#{publicId},#{hash},'hmac-sha256-v1',#{suffix},cast(#{scopes} as json),'ACTIVE',1)</insert>
+  <update id="changeStatus">update p_access_key set status=#{status},revoked_at=utc_timestamp(3),updated_at=utc_timestamp(3),auth_epoch=auth_epoch+1 where id=#{id} and status!='DELETED'</update>
+  <update id="touch">update p_access_key set last_used_at=utc_timestamp(3) where id=#{id} and (last_used_at is null or last_used_at &lt; utc_timestamp(3)-interval 1 minute)</update>
+  <select id="idempotency" resultType="map">select request_hash requestHash,resource_id resourceId from p_api_idempotency where account_id=#{accountId} and scope=#{scope} and request_id=#{requestId} for update</select>
+  <insert id="insertIdempotency">insert into p_api_idempotency
+    (id,created_at,updated_at,account_id,scope,request_id,request_hash,resource_type,resource_id,status,expires_at)
+    values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{scope},#{requestId},#{hash},'ACCESS_KEY',#{resourceId},'SUCCEEDED',#{expiresAt})</insert>
+  <insert id="outbox">insert into p_outbox
+    (id,created_at,updated_at,account_id,event_id,event_type,aggregate_type,aggregate_id,schema_version,trace_id,payload,status,next_run_at)
+    values (#{id},#{now},#{now},#{accountId},#{eventId},'ACCESS_KEY_CHANGED','ACCESS_KEY',#{aggregateId},1,#{eventId},cast(#{payload} as json),'PENDING',#{now})</insert>
+  <insert id="audit">insert into p_access_key_audit (id,created_at,account_id,key_id,actor_type,actor_key_id,action)
+    values (#{id},utc_timestamp(3),#{accountId},#{keyId},#{actorType},#{actorKeyId},#{action})</insert>
+</mapper>

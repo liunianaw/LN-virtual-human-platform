@@ -92,7 +92,7 @@ public class ApplicationServiceImpl implements IApplicationService
         long existing = existing(accountId, scope("application:publish:" + applicationId), key, hash);
         if (existing > 0) return publishResponse(accountId, applicationId, existing);
         Map<String, Object> app = required(mapper.selectApplicationForUpdate(accountId, applicationId));
-        if (!"ACTIVE".equals(app.get("status"))) throw conflict("停用应用不能发布配置");
+        if (!"ACTIVE".equals(app.get("status")) || asLong(app.get("adminDisabled")) != 0) throw conflict("应用当前不能发布配置");
         requireRevision(ifMatch, asLong(app.get("revision")));
         // App first, then dependencies in fixed Avatar→Voice order; both checks lock their authoritative version rows.
         if (mapper.countAvailableAvatarVersion(accountId, input.avatarVersionId()) != 1) throw unavailable("Avatar 版本不可用于新绑定");
@@ -124,6 +124,7 @@ public class ApplicationServiceImpl implements IApplicationService
         if (existing > 0) return statusResponse(required(mapper.selectApplication(accountId, applicationId)));
         Map<String, Object> app = required(mapper.selectApplicationForUpdate(accountId, applicationId));
         requireRevision(ifMatch, asLong(app.get("revision")));
+        if ("ACTIVE".equals(status) && asLong(app.get("adminDisabled")) != 0) throw forbidden("管理员已禁用应用");
         if (status.equals(app.get("status")))
         {
             Instant now = Instant.now();
@@ -140,6 +141,24 @@ public class ApplicationServiceImpl implements IApplicationService
         mapper.insertIdempotency(mapper.nextId(), accountId, scope("application:status:" + applicationId), key, hash,
             "APPLICATION", applicationId, now.plus(24, ChronoUnit.HOURS));
         return statusResponse(required(mapper.selectApplication(accountId, applicationId)));
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> changeAdminDisabled(long administratorId, long applicationId, boolean disabled, String reason)
+    {
+        if (administratorId <= 0 || blank(reason) || reason.trim().length() > 500) throw badRequest("管理员操作原因无效");
+        Map<String, Object> app = required(mapper.selectAdminApplicationForUpdate(applicationId));
+        if ((asLong(app.get("adminDisabled")) != 0) != disabled)
+        {
+            mapper.updateAdminDisabled(applicationId, disabled);
+            String eventId = UUID.randomUUID().toString().replace("-", "");
+            Instant now = Instant.now();
+            mapper.insertAdminOutbox(mapper.nextId(), asLong(app.get("accountId")), eventId, Long.toString(applicationId),
+                text(Map.of("applicationId", Long.toString(applicationId), "adminDisabled", disabled,
+                    "administratorId", Long.toString(administratorId), "reason", reason.trim())), now);
+        }
+        return Map.of("applicationId", Long.toString(applicationId), "adminDisabled", disabled);
     }
 
     private Config config(ApplicationConfigRequest request)
@@ -177,7 +196,7 @@ public class ApplicationServiceImpl implements IApplicationService
     private static Map<String, Object> required(Map<String, Object> value) { if (value == null) throw forbidden("应用或配置不存在，或无权访问"); return value; }
     private static void requireAccount(long id) { if (id <= 0) throw forbidden("当前后台登录无效"); }
     private static long id(String value) { try { long id = Long.parseLong(value); if (id > 0) return id; } catch (RuntimeException ignored) { } throw badRequest("资源版本标识无效"); }
-    private static long asLong(Object value) { return value instanceof Number n ? n.longValue() : Long.parseLong(value.toString()); }
+    private static long asLong(Object value) { return value instanceof Boolean b ? (b ? 1 : 0) : value instanceof Number n ? n.longValue() : Long.parseLong(value.toString()); }
     private static void requireKey(String key) { if (key == null || !key.matches("[\\x21-\\x7e]{1,64}")) throw badRequest("Idempotency-Key 无效"); }
     private static void requireRevision(String value, long revision) { if (blank(value)) throw new ServiceException("缺少 If-Match", HttpStatus.PRECONDITION_REQUIRED.value()); if (!Long.toString(revision).equals(value.replace("\"", "").trim())) throw new ServiceException("应用已变化，请刷新后重试", HttpStatus.PRECONDITION_FAILED.value()); }
     private String text(Map<String, ?> value) { try { return json.writeValueAsString(value); } catch (JsonProcessingException error) { throw new IllegalStateException("配置序列化失败", error); } }

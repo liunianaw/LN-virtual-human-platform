@@ -2,7 +2,7 @@
 
 前置说明书：[编写与执行规范](../../../执行计划书编写与执行规范.md) · [项目整体说明书](../../../项目整体说明书.md) · [需求](../../../项目需求说明书.md) · [数据库](../../../数据库设计说明书.md) · [架构](../../../项目架构说明书.md) · [平台内共享契约](platform-console-shared-contract.md) · [开发者接入接口草案](developer-integration-interface-contract.md)
 
-日期：2026-09-23。版本：0.3。确认状态：关键产品规则已确认，逐接口 Schema 及完整计划仍待用户确认；确认前不实施本计划代码。
+日期：2026-09-23。版本：0.4。确认状态：用户于 2026-09-25 明确授权实施 DEV-01；其余 DEV 模块仍须按各自接口契约与计划确认后实施。
 
 ## 1. 当前状态
 
@@ -12,10 +12,10 @@
 | Application | 当前 `ApplicationServiceImpl` 只接受关闭 Context 的 `SPEAK_ONLY` 配置和已发布官方 Voice；LLM、ASR、Skills、Context 仍被明确拒绝。 |
 | Session | `session_db` 已有 BUSINESS/DEBUG、BUSINESS_KEY/CONSOLE_DEBUG、JTI、epoch、消息、Context、operation、幂等和清理等基础表；当前 Java 运行链主要实现 CONSOLE_DEBUG。 |
 | SDK | `avatar-sdk` 当前提供 manifest 解析、Canvas 角色播放、动作、音频与 speaking 状态；尚无正式的业务 Session 客户端、聊天、录音、Context 和高亮模块。 |
-| Relay、Skills、凭证、Webhook、用量 | V1 数据库已有对应基础表；除局部 Relay TTS 适配、制作额度和运维汇总外，尚无完整的开发者管理服务、页面和外部 API。 |
+| Relay、Skills、凭证、Webhook、用量 | V1 数据库已有对应基础表；DEV-01 的接入凭证、后台页面和管理 Key 开放入口已静态实现，尚未迁移或接口验收。Relay、Skills、Webhook 和完整用量仍属后续模块。 |
 | 外部示例 | `examples/integration-demo` 无可运行内容；按用户最新决定，本计划不建设示例。 |
-| 工作树 | 编写本计划前曾仅有未跟踪 `logs/`；当前已有本计划及关联说明书的未提交文档改动。实施时重新检查工作树，只纳入本任务路径，不纳入日志。 |
-| 下一步 | 用户确认本计划后，按第 7 节功能模块实施；每个模块单独记录静态证据和用户验收，不以其他模块完成替代。 |
+| 工作树 | 本轮开始时 `main` 比 `origin/main` 已领先一个既有本地提交，另有未跟踪 `logs/`。DEV-01 代码与文档纳入本轮本地提交，不包含日志。 |
+| 下一步 | DEV-01 已按本轮授权实施并通过静态验证；迁移、服务、真实凭证和用户终点仍待目标环境验收。其余模块不因 DEV-01 静态完成而自动进入实施。 |
 
 ## 2. 目标与边界
 
@@ -411,3 +411,4 @@
 | 2026-09-23 | 计划编写 | 待确认 | 已读取需求、架构、数据库、计划规范及现有 Application/Session/SDK/网关实现；按功能模块形成 DEV-01～DEV-11。未编码、未启动服务、未执行迁移或外部调用。 | 用户确认后从 DEV-01 开始；在线文档和原生 TypeScript 前后端示例另立最终任务。 |
 | 2026-09-23 | 需求变更与复审修订 | 待确认 | CHAT/SPEAK_ONLY 均改为必选官方 Voice/TTS；脱敏轮次、逐次调用和日汇总改为调用发生时记录并长期保留，任务/Webhook 仍终态 30 天；补 Gateway 分流、单活 Secret 约束、管理员禁用、跨库记录、清理墓碑及联动验收边界。仅修改文档，未实施代码或迁移。 | 与用户讨论运行 Session 时限及浏览器授权方式后，定稿 DEV-06/07 契约；模块接口 Schema 逐项补足。 |
 | 2026-09-24 | 产品规则确认及文档修订 | 待确认完整计划 | 用户确认每个 Application 一把 Secret、15 分钟浏览器授权、Session 闲置 2 小时/最长 24 小时、普通续签新旧授权短暂并存；开发者重置仅立即阻止旧 Secret 的新后端请求，不强断现有连接；管理员禁用拒绝新业务动作，不强断连接/已交付音频；Avatar 任务与 Webhook 投递/尝试记录长期保留。技术上选用现有 HMAC 运行 Token 的 `v2` 结构化升级，保留持久 JTI。仅修改文档，未实施代码或迁移。 | 补齐模块接口 DTO/事件 Schema；完整计划经用户确认后编码。 |
+| 2026-09-25 | DEV-01 接入凭证与开放 API 鉴权 | 静态实现；迁移/接口/用户终点待验收 | 本轮用户明确授权 DEV-01。新增 Gateway `/openapi/v1/management/**` 与 `/sessions/**` 路由、按 `lnm_`/`lna_` 分流并清除外来身份头，通用后台 JWT 拦截器不解析开放 Key；system 实现同一 AccessKey Service、MyBatis/XML、后台与 Management Key 开放 Controller、内部 Application Secret 校验入口、一次性明文与 HMAC 摘要、账号/应用/Scope/状态/epoch 检查、应用行锁加生成列唯一约束、管理 Key 与应用 Secret 的创建/轮换/停用/删除、管理员独立禁用与审计事件、后台页面。V17 清空长期业务记录的到期值，OperationsService 停止为调用/日汇总设置到期时间。`ruoyi-system` 与 Gateway Maven 编译、Vue `npm run typecheck` 及 `AccessKeyServiceTest` 单项回归均通过；未启动服务、执行迁移或访问真实凭证。 | 用户在目标环境执行 V17，配置至少 32 字节 `LN_ACCESS_KEY_PEPPER`，用真实后台和管理 Key 核对创建、脱敏、一次展示、跨账号/错误类型/旧 Key 拒绝及并发重置；DEV-06/07 再复验浏览器 grant 自然到期和管理员禁用后的新业务动作。 |

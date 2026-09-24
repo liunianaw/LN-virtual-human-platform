@@ -33,6 +33,15 @@ Management Key 的资源 Scope 见下表；Application Secret 只允许 `session
 
 ### 2.1 开放管理 API 的模块归属
 
+#### DEV-01 已固定接口与凭证格式（2026-09-25）
+
+- 管理 Key 使用 `Authorization: Bearer lnm_<32位小写十六进制publicId>_<43位base64url随机值>`；Application Secret 使用 `lna_` 前缀和相同的随机格式。前缀仅用于网关路径类型拒绝，system 仍逐次查询 `p_access_key` 并以部署变量 `LN_ACCESS_KEY_PEPPER`（至少 32 字节）做 HMAC-SHA256 常量时间摘要核对，同时检查账号、Key 状态/到期、应用状态/管理员禁用和 Scope。明文只在首次创建/轮换响应的 `data.secret` 出现，不写数据库、幂等结果或日志。
+- 后台登录：`GET/POST /api/v1/developer/access-keys`（POST `{name,scopes}`）；`POST /api/v1/developer/access-keys/{keyId}/rotations|disable|delete`；`GET /api/v1/applications/{applicationId}/secret`、`POST .../secret/reset`（`{name}`）、`POST .../secret/{keyId}/disable|delete`。管理员独立入口：`POST /api/v1/admin/applications/{applicationId}/restriction`，请求 `{disabled:boolean,reason:string}`，须管理员身份及 `platform:application:admin-disable` 权限。
+- 管理 Key 开放入口：`GET/POST /openapi/v1/management/access-keys`、`POST .../access-keys/{keyId}/rotations|disable|delete`、`GET /openapi/v1/management/applications/{applicationId}/secrets`、`POST .../secrets/reset`（`{name}`）、`POST .../secrets/{keyId}/disable|delete`。这些接口均要求 `keys:write`，创建管理 Key 的 Scope 不得超过调用 Key 已有 Scope。所有写接口要求 `Idempotency-Key`（1～64 个可见 ASCII 字符）；同键重试仅返回脱敏元数据，不能恢复 `secret`。列表含名称、公开标识、末尾 8 位、Scope、状态和时间，不含摘要或明文。
+- `ruoyi-session` 将在 DEV-06 通过受保护的 `POST /internal/developer/access-keys/application-principal` 读取 Application Secret 当前 account/application/key/epoch 身份；该接口须内部来源头，且每次调用重新验证 Secret 与 `sessions:grant`。`/openapi/v1/sessions/**` 已由网关限定 `lna_` 类型并路由到 session；业务 Session 方法、DTO 和授权仍由 DEV-06 实施，DEV-01 不宣称这些业务接口已可用。
+- 缺失/错误凭证返回 401，类型不匹配返回 401，有效 Key 但 Scope 或归属不足返回 403，同键不同参数及状态冲突返回 409；开放接口错误体含稳定 `code/message/retryable/requestId`。账号或应用不可用时拒绝新请求。Application Secret 重置只使旧 Secret 的后端请求失效，不撤销此前签发的浏览器 grant；管理员禁用写独立事实并限制后续业务动作，运行侧在 DEV-06/07 接入实时核对。
+- 每次 Key 创建、停用或删除同步写不含秘密的 `p_access_key_audit` 和 Outbox；后台 JWT 拦截器跳过开放 API 与内部 Secret 校验路径，避免将 Key 当 JWT 解析并写入异常日志。
+
 以下路径表示本计划必须覆盖的资源族。每个模块实施前在本协议下固定该族的方法、DTO、Scope、错误与后台对应 Service；不得只完成后台页面而宣称开放 API 已完成。
 
 | 模块 | Management Key 资源族 | 写入边界 |

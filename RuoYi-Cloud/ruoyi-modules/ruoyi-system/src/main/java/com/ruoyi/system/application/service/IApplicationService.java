@@ -7,6 +7,7 @@ import com.ruoyi.system.application.dto.CreateApplicationRequest;
 
 public interface IApplicationService
 {
+    Map<String, Object> changeAdminDisabled(long administratorId, long applicationId, boolean disabled, String reason);
     Map<String, Object> list(long accountId, Integer pageNum, Integer pageSize, String status);
     Map<String, Object> detail(long accountId, long applicationId);
     Map<String, Object> config(long accountId, long applicationId, long configVersionId);

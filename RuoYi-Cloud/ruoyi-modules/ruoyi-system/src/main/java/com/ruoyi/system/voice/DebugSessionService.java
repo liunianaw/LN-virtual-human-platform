@@ -58,6 +58,9 @@ public class DebugSessionService
         String currentRef = logins.register(login);
         if (!currentRef.equals(registration.issuerConsoleRef())) throw new ServiceException("当前登录与 DEBUG Session 不一致", HttpStatus.FORBIDDEN.value());
         Instant expiresAt = logins.expiry(registration.issuerConsoleRef());
+        Integer allowed = jdbc.queryForObject("select count(1) from p_application where id=? and account_id=? and status='ACTIVE' and admin_disabled=0", Integer.class,
+            registration.applicationId(), accountId);
+        if (allowed == null || allowed != 1) throw new ServiceException("应用当前不可签发新授权", HttpStatus.FORBIDDEN.value());
         Binding binding = registration.binding();
         return sessionClient.mint(new SessionDebugClient.MintBody(accountId, registration.applicationId(), sessionId, binding.configVersionId(),
                 registration.issuerConsoleRef(), expiresAt.toEpochMilli(), binding.voiceVersionId(), binding.providerKind(),
@@ -81,7 +84,7 @@ public class DebugSessionService
 
     private Binding binding(long accountId, long applicationId, boolean allowVoicePreview)
     {
-        Binding binding = jdbc.query("select c.id,c.voice_version_id,v.service_type,v.voice_code,v.relay_version_id,c.avatar_version_id,official.id,official.revision from p_application a join p_app_config c on c.id = a.current_config_id join p_voice_version v on v.id = c.voice_version_id join p_voice voice on voice.id = v.voice_id left join p_official_service official on official.id = v.official_service_id where a.id = ? and a.account_id = ? and a.status = 'ACTIVE' and c.mode = 'SPEAK_ONLY' and ((a.purpose = 'USER' and voice.status = 'PUBLISHED' and (voice.account_id = a.account_id or voice.visibility = 'OFFICIAL')) or (? = 1 and a.purpose = 'VOICE_PREVIEW' and a.preview_voice_version_id = v.id and voice.visibility = 'OFFICIAL')) and (v.service_type = 'RELAY' or (official.capability = 'TTS' and official.status = 'ACTIVE'))",
+        Binding binding = jdbc.query("select c.id,c.voice_version_id,v.service_type,v.voice_code,v.relay_version_id,c.avatar_version_id,official.id,official.revision from p_application a join p_app_config c on c.id = a.current_config_id join p_voice_version v on v.id = c.voice_version_id join p_voice voice on voice.id = v.voice_id left join p_official_service official on official.id = v.official_service_id where a.id = ? and a.account_id = ? and a.status = 'ACTIVE' and (a.purpose != 'USER' or a.admin_disabled = 0) and c.mode = 'SPEAK_ONLY' and ((a.purpose = 'USER' and voice.status = 'PUBLISHED' and (voice.account_id = a.account_id or voice.visibility = 'OFFICIAL')) or (? = 1 and a.purpose = 'VOICE_PREVIEW' and a.preview_voice_version_id = v.id and voice.visibility = 'OFFICIAL')) and (v.service_type = 'RELAY' or (official.capability = 'TTS' and official.status = 'ACTIVE'))",
             rs -> rs.next() ? new Binding(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getObject(5) == null ? null : rs.getString(5), rs.getLong(6), rs.getObject(7) == null ? null : rs.getLong(7), rs.getObject(8) == null ? null : rs.getLong(8)) : null,
                 applicationId, accountId, allowVoicePreview ? 1 : 0);
         if (binding == null) throw new ServiceException("应用没有可用的 SPEAK_ONLY 已发布 Voice 配置", HttpStatus.CONFLICT.value());

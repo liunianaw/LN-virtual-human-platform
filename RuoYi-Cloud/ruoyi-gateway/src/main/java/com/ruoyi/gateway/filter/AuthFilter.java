@@ -46,10 +46,31 @@ public class AuthFilter implements GlobalFilter, Ordered
         ServerHttpRequest.Builder mutate = request.mutate();
 
         String url = request.getURI().getPath();
+        // Never trust identity or internal-call headers supplied by a public client.
+        removeHeader(mutate, SecurityConstants.USER_KEY);
+        removeHeader(mutate, SecurityConstants.DETAILS_USER_ID);
+        removeHeader(mutate, SecurityConstants.DETAILS_USERNAME);
+        removeHeader(mutate, SecurityConstants.FROM_SOURCE);
+        removeHeader(mutate, "X-LN-Account-Id");
+        removeHeader(mutate, "X-LN-Application-Id");
+        removeHeader(mutate, "X-LN-Key-Id");
+        if (url.startsWith("/openapi/v1/"))
+        {
+            if (!url.startsWith("/openapi/v1/management/") && !url.equals("/openapi/v1/management")
+                && !url.startsWith("/openapi/v1/sessions/") && !url.equals("/openapi/v1/sessions"))
+                return unauthorizedResponse(exchange, "开放接口路径无效");
+            String credential = request.getHeaders().getFirst(SecurityConstants.AUTHORIZATION_HEADER);
+            boolean management = url.startsWith("/openapi/v1/management");
+            String expectedPrefix = management ? "lnm_" : "lna_";
+            if (credential == null || !credential.matches("Bearer " + expectedPrefix + "[0-9a-f]{32}_[A-Za-z0-9_-]{43}"))
+                return unauthorizedResponse(exchange, "接入凭证无效");
+            // The destination validates the hash, type, account, scope and current state on every request.
+            return chain.filter(exchange.mutate().request(mutate.build()).build());
+        }
         // 跳过不需要验证的路径
         if (StringUtils.matches(url, ignoreWhite.getWhites()))
         {
-            return chain.filter(exchange);
+            return chain.filter(exchange.mutate().request(mutate.build()).build());
         }
         String token = getToken(request);
         if (StringUtils.isEmpty(token))
@@ -78,8 +99,6 @@ public class AuthFilter implements GlobalFilter, Ordered
         addHeader(mutate, SecurityConstants.USER_KEY, userkey);
         addHeader(mutate, SecurityConstants.DETAILS_USER_ID, userid);
         addHeader(mutate, SecurityConstants.DETAILS_USERNAME, username);
-        // 内部请求来源参数清除
-        removeHeader(mutate, SecurityConstants.FROM_SOURCE);
         return chain.filter(exchange.mutate().request(mutate.build()).build());
     }
 

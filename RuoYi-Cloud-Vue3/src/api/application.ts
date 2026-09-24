@@ -1,7 +1,7 @@
 import request from '@/utils/request'
 import type { AjaxResult } from '@/types'
 
-export interface ApplicationSummary { applicationId: string; name: string; description?: string; status: 'ACTIVE' | 'DISABLED'; configStatus: 'UNCONFIGURED' | 'CONFIGURED'; currentConfigVersionId?: string; revision: string }
+export interface ApplicationSummary { applicationId: string; name: string; description?: string; status: 'ACTIVE' | 'DISABLED'; adminDisabled: number; configStatus: 'UNCONFIGURED' | 'CONFIGURED'; currentConfigVersionId?: string; revision: string }
 export interface ApplicationConfig { configVersionId: string; versionNo: number; mode: string; avatarVersionId: string; voiceVersionId: string; configHash: string; contextPolicy?: Record<string, unknown>; runtimeLimits?: Record<string, number> }
 export interface ApplicationDetail extends ApplicationSummary { versions: ApplicationConfig[]; currentConfig?: ApplicationConfig }
 export interface ApplicationChoices { avatars: Array<{ versionId: string; avatarId: string; name: string; versionNo: number; visibility: string }>; voices: Array<{ versionId: string; voiceId: string; name: string; versionNo: number; voiceAlias: string }> }

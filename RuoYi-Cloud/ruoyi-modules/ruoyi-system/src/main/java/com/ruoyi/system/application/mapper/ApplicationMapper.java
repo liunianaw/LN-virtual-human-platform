@@ -13,6 +13,10 @@ public interface ApplicationMapper
     int countApplications(@Param("accountId") long accountId, @Param("status") String status);
     Map<String, Object> selectApplication(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
     Map<String, Object> selectApplicationForUpdate(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
+    Map<String, Object> selectAdminApplicationForUpdate(@Param("applicationId") long applicationId);
+    int updateAdminDisabled(@Param("applicationId") long applicationId, @Param("disabled") boolean disabled);
+    void insertAdminOutbox(@Param("id") long id, @Param("accountId") long accountId, @Param("eventId") String eventId,
+        @Param("aggregateId") String aggregateId, @Param("payload") String payload, @Param("now") Instant now);
     List<Map<String, Object>> selectConfigVersions(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
     Map<String, Object> selectConfig(@Param("accountId") long accountId, @Param("applicationId") long applicationId, @Param("configVersionId") long configVersionId);
     Map<String, Object> selectIdempotencyForUpdate(@Param("accountId") long accountId, @Param("scope") String scope, @Param("requestId") String requestId);

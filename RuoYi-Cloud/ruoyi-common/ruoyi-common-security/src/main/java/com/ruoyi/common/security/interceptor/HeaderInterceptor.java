@@ -28,6 +28,13 @@ public class HeaderInterceptor implements AsyncHandlerInterceptor
             return true;
         }
 
+        // External API credentials are not console JWTs. Do not parse or log their values.
+        if (request.getRequestURI().startsWith("/openapi/v1/")
+            || request.getRequestURI().startsWith("/internal/developer/access-keys/"))
+        {
+            return true;
+        }
+
         SecurityContextHolder.setUserId(ServletUtils.getHeader(request, SecurityConstants.DETAILS_USER_ID));
         SecurityContextHolder.setUserName(ServletUtils.getHeader(request, SecurityConstants.DETAILS_USERNAME));
         SecurityContextHolder.setUserKey(ServletUtils.getHeader(request, SecurityConstants.USER_KEY));

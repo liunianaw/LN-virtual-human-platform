@@ -3,7 +3,7 @@
 <mapper namespace="com.ruoyi.system.application.mapper.ApplicationMapper">
   <select id="nextId" resultType="long">select uuid_short()</select>
   <select id="selectApplications" resultType="map">
-    select cast(a.id as char) applicationId,a.name,a.description,a.status,cast(a.current_config_id as char) currentConfigVersionId,
+    select cast(a.id as char) applicationId,a.name,a.description,a.status,a.admin_disabled adminDisabled,cast(a.current_config_id as char) currentConfigVersionId,
       cast(a.revision as char) revision,a.created_at createdAt,a.updated_at updatedAt,
       case when a.current_config_id is null then 'UNCONFIGURED' else 'CONFIGURED' end configStatus
     from p_application a where a.account_id=#{accountId} and a.purpose='USER'
@@ -11,15 +11,18 @@
   </select>
   <select id="countApplications" resultType="int">select count(*) from p_application where account_id=#{accountId} and purpose='USER' and (#{status} is null or status=#{status})</select>
   <select id="selectApplication" resultType="map">
-    select cast(a.id as char) applicationId,a.name,a.description,a.status,cast(a.current_config_id as char) currentConfigVersionId,
+    select cast(a.id as char) applicationId,a.name,a.description,a.status,a.admin_disabled adminDisabled,cast(a.current_config_id as char) currentConfigVersionId,
       cast(a.revision as char) revision,cast(a.auth_epoch as char) authEpoch,a.created_at createdAt,a.updated_at updatedAt,
       case when a.current_config_id is null then 'UNCONFIGURED' else 'CONFIGURED' end configStatus
     from p_application a where a.id=#{applicationId} and a.account_id=#{accountId} and a.purpose='USER'
   </select>
   <select id="selectApplicationForUpdate" resultType="map">
-    select id,account_id accountId,status,current_config_id currentConfigVersionId,revision,auth_epoch authEpoch
+    select id,account_id accountId,status,admin_disabled adminDisabled,current_config_id currentConfigVersionId,revision,auth_epoch authEpoch
     from p_application where id=#{applicationId} and account_id=#{accountId} and purpose='USER' for update
   </select>
+  <select id="selectAdminApplicationForUpdate" resultType="map">select id,account_id accountId,status,admin_disabled adminDisabled,auth_epoch authEpoch,revision from p_application where id=#{applicationId} and purpose='USER' for update</select>
+  <update id="updateAdminDisabled">update p_application set admin_disabled=#{disabled},auth_epoch=auth_epoch+1,revision=revision+1,updated_at=utc_timestamp(3) where id=#{applicationId}</update>
+  <insert id="insertAdminOutbox">insert into p_outbox (id,created_at,updated_at,account_id,event_id,event_type,aggregate_type,aggregate_id,schema_version,trace_id,payload,status,next_run_at) values (#{id},#{now},#{now},#{accountId},#{eventId},'APPLICATION_ADMIN_RESTRICTION_CHANGED','APPLICATION',#{aggregateId},1,#{eventId},cast(#{payload} as json),'PENDING',#{now})</insert>
   <select id="selectConfigVersions" resultType="map">
     select cast(c.id as char) configVersionId,c.version_no versionNo,c.mode,cast(c.avatar_version_id as char) avatarVersionId,
       cast(c.voice_version_id as char) voiceVersionId,lower(hex(c.config_hash)) configHash,c.published_at publishedAt
