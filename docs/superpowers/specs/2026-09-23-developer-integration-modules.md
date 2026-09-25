@@ -2,7 +2,7 @@
 
 前置说明书：[编写与执行规范](../../../执行计划书编写与执行规范.md) · [项目整体说明书](../../../项目整体说明书.md) · [需求](../../../项目需求说明书.md) · [数据库](../../../数据库设计说明书.md) · [架构](../../../项目架构说明书.md) · [平台内共享契约](platform-console-shared-contract.md) · [开发者接入接口草案](developer-integration-interface-contract.md)
 
-日期：2026-09-23。版本：0.6。确认状态：用户于 2026-09-25 分别授权实施 DEV-01、DEV-02；其余 DEV 模块仍须按各自接口契约与计划确认后实施。
+日期：2026-09-23。版本：0.7。确认状态：用户于 2026-09-25 分别授权实施 DEV-01、DEV-02、DEV-03；其余 DEV 模块仍须按各自接口契约与计划确认后实施。
 
 ## 1. 当前状态
 
@@ -12,10 +12,10 @@
 | Application | 当前 `ApplicationServiceImpl` 只接受关闭 Context 的 `SPEAK_ONLY` 配置和已发布官方 Voice；LLM、ASR、Skills、Context 仍被明确拒绝。 |
 | Session | `session_db` 已有 BUSINESS/DEBUG、BUSINESS_KEY/CONSOLE_DEBUG、JTI、epoch、消息、Context、operation、幂等和清理等基础表；当前 Java 运行链主要实现 CONSOLE_DEBUG。 |
 | SDK | `avatar-sdk` 当前提供 manifest 解析、Canvas 角色播放、动作、音频与 speaking 状态；尚无正式的业务 Session 客户端、聊天、录音、Context 和高亮模块。 |
-| Relay、Skills、凭证、Webhook、用量 | V1 数据库已有对应基础表；DEV-01 的接入凭证、后台页面和管理 Key 开放入口已静态实现，尚未迁移或接口验收。Relay、Skills、Webhook 和完整用量仍属后续模块。 |
+| Relay、Skills、凭证、Webhook、用量 | V1 数据库已有对应基础表；DEV-01 凭证和 DEV-03 LLM/ASR Relay 已静态实现，本机 `platform_db` 已执行 Flyway V16～V19，真实接口仍待验收。Skills、Webhook 和完整用量仍属后续模块。 |
 | 外部示例 | `examples/integration-demo` 无可运行内容；按用户最新决定，本计划不建设示例。 |
 | 工作树 | 本轮开始时 `main` 比 `origin/main` 已领先一个既有本地提交，另有未跟踪 `logs/`。DEV-01 代码与文档纳入本轮本地提交，不包含日志。 |
-| 下一步 | DEV-01、DEV-02 已通过静态验证；用户于 2026-09-25 废弃视频制作虚拟人需求，DEV-02 仅保留图片输入。DEV-02 的目标库迁移、服务、真实管理 Key、COS/生成和用户终点仍待目标环境验收。DEV-03～11 不因前两模块实施而自动进入实施。 |
+| 下一步 | DEV-01～03 已通过静态验证；用户于 2026-09-25 废弃视频制作虚拟人需求，DEV-02 仅保留图片输入。本机 `platform_db` 的 V16～V19 已迁移并核对结构；服务重启、真实后台与管理 Key、Relay 网络/TLS/协议、COS/生成和用户终点仍待验收。DEV-04～11 不因前三模块实施而自动进入实施。 |
 
 ## 2. 目标与边界
 
@@ -229,6 +229,7 @@
 
 - 实现 LLM/ASR Relay 列表/详情/创建、不可变版本、能力与相对端点、ALL_ACCOUNT_APPS/EXPLICIT_APPS 授权、连接测试、轮换 Token、停用和引用保护删除；不允许新建 TTS Relay 用于 Application。
 - Relay Token 使用 `p_secret(RELAY_ACCESS)` 加密保存；页面仅输入平台访问 Relay 的 Token，不出现厂商 Key 字段。
+- 现有 `p_secret` AES-GCM 实现要求目标环境设置 `LN_OFFICIAL_SERVICE_MASTER_KEY`（Base64 解码后 32 字节）及按需设置 `LN_OFFICIAL_SERVICE_MASTER_KEY_VERSION`；同一系统实例组必须使用相同值，不能把主密钥写入源码、数据库或页面。
 - 固定 LN Relay/1 的 LLM 流式文本/工具事件与 ASR multipart 完整录音、尽力取消、统一错误和可获取用量；TTS 不走开发者 Relay。
 - 从已鉴权 BUSINESS principal 向所属开发者 Relay 传递稳定 `externalUserId` 和 `applicationId/sessionId/turnId`，使其能自行关联跨 Session 的多轮记忆；浏览器或模型内容不能伪造这些身份字段。
 - 连接测试分别验证网络目标、TLS、鉴权、版本和所选能力；无测试专用端点时只做无计费能力探测，不能用真实 LLM/ASR 请求冒充连接测试。
@@ -411,5 +412,7 @@
 | 2026-09-23 | 计划编写 | 待确认 | 已读取需求、架构、数据库、计划规范及现有 Application/Session/SDK/网关实现；按功能模块形成 DEV-01～DEV-11。未编码、未启动服务、未执行迁移或外部调用。 | 用户确认后从 DEV-01 开始；在线文档和原生 TypeScript 前后端示例另立最终任务。 |
 | 2026-09-23 | 需求变更与复审修订 | 待确认 | CHAT/SPEAK_ONLY 均改为必选官方 Voice/TTS；脱敏轮次、逐次调用和日汇总改为调用发生时记录并长期保留，任务/Webhook 仍终态 30 天；补 Gateway 分流、单活 Secret 约束、管理员禁用、跨库记录、清理墓碑及联动验收边界。仅修改文档，未实施代码或迁移。 | 与用户讨论运行 Session 时限及浏览器授权方式后，定稿 DEV-06/07 契约；模块接口 Schema 逐项补足。 |
 | 2026-09-24 | 产品规则确认及文档修订 | 待确认完整计划 | 用户确认每个 Application 一把 Secret、15 分钟浏览器授权、Session 闲置 2 小时/最长 24 小时、普通续签新旧授权短暂并存；开发者重置仅立即阻止旧 Secret 的新后端请求，不强断现有连接；管理员禁用拒绝新业务动作，不强断连接/已交付音频；Avatar 任务与 Webhook 投递/尝试记录长期保留。技术上选用现有 HMAC 运行 Token 的 `v2` 结构化升级，保留持久 JTI。仅修改文档，未实施代码或迁移。 | 补齐模块接口 DTO/事件 Schema；完整计划经用户确认后编码。 |
-| 2026-09-25 | DEV-01 接入凭证与开放 API 鉴权 | 静态实现；迁移/接口/用户终点待验收 | 本轮用户明确授权 DEV-01。新增 Gateway `/openapi/v1/management/**` 与 `/sessions/**` 路由、按 `lnm_`/`lna_` 分流并清除外来身份头，通用后台 JWT 拦截器不解析开放 Key；system 实现同一 AccessKey Service、MyBatis/XML、后台与 Management Key 开放 Controller、内部 Application Secret 校验入口、一次性明文与 HMAC 摘要、账号/应用/Scope/状态/epoch 检查、应用行锁加生成列唯一约束、管理 Key 与应用 Secret 的创建/轮换/停用/删除、管理员独立禁用与审计事件、后台页面。V17 清空长期业务记录的到期值，OperationsService 停止为调用/日汇总设置到期时间。`ruoyi-system` 与 Gateway Maven 编译、Vue `npm run typecheck` 及 `AccessKeyServiceTest` 单项回归均通过；未启动服务、执行迁移或访问真实凭证。 | 用户在目标环境执行 V17，配置至少 32 字节 `LN_ACCESS_KEY_PEPPER`，用真实后台和管理 Key 核对创建、脱敏、一次展示、跨账号/错误类型/旧 Key 拒绝及并发重置；DEV-06/07 再复验浏览器 grant 自然到期和管理员禁用后的新业务动作。 |
-| 2026-09-25 | DEV-02 资产与任务开放 API | 静态实现；迁移/接口/用户终点待验收 | Management Key 入口按 `assets:read/write`、`generation:read/write`、`config:read` 分流；开放参考图上传、官方生成服务、任务分页/详情/步骤、版本制作与动作结果、私有/官方 Avatar 目录、版本采用、引用保护删除及仅官方有效 Voice 目录。开放 Controller 复用原资产、制作、发布、Voice Service，公开结果使用字段白名单。补齐原生成账本零单位占位：任务及恢复按账号并发上限预占 1 次 `AVATAR_COUNT`，成功结算、明确失败释放、UNKNOWN 保留待核对；上传和生成文件按账号单文件/`STORAGE_BYTE` 限额预占与结算，上传中断清理先删对象再释放，资产物理清理后归还容量。新增任务分页/步骤查询、V18 长期任务约束；V17 清空存量到期值，删除不级联任务事实。用户于同日废弃视频制作虚拟人需求，图片输入是本模块唯一制作入口。system Maven 编译与 9 项聚焦测试通过；未启动服务、执行迁移或调用真实 COS/厂商。 | 管理员在目标环境配置 `p_account_limit` 及账号 `AVATAR_COUNT`、`STORAGE_BYTE` 授予余额，未配置时入口拒绝新任务/上传。依序执行 V17/V18 后，用真实管理 Key 验证 Scope、短期 URL、同键重试、任务状态、版本发布和跨账号/引用删除；真实生成费用须单独明确预算。DEV-11 再联动验收用量查询与 Avatar 终态 Webhook。 |
+| 2026-09-25 | DEV-01 接入凭证与开放 API 鉴权 | 静态实现、V17 已迁移；接口/用户终点待验收 | 本轮用户明确授权 DEV-01。新增 Gateway `/openapi/v1/management/**` 与 `/sessions/**` 路由、按 `lnm_`/`lna_` 分流并清除外来身份头，通用后台 JWT 拦截器不解析开放 Key；system 实现同一 AccessKey Service、MyBatis/XML、后台与 Management Key 开放 Controller、内部 Application Secret 校验入口、一次性明文与 HMAC 摘要、账号/应用/Scope/状态/epoch 检查、应用行锁加生成列唯一约束、管理 Key 与应用 Secret 的创建/轮换/停用/删除、管理员独立禁用与审计事件、后台页面。V17 清空长期业务记录的到期值，OperationsService 停止为调用/日汇总设置到期时间。`ruoyi-system` 与 Gateway Maven 编译、Vue `npm run typecheck` 及 `AccessKeyServiceTest` 单项回归均通过；静态交付时未启动服务、执行迁移或访问真实凭证。 | 本机 V17 已执行；运行环境仍需配置至少 32 字节 `LN_ACCESS_KEY_PEPPER`，用真实后台和管理 Key 核对创建、脱敏、一次展示、跨账号/错误类型/旧 Key 拒绝及并发重置；DEV-06/07 再复验浏览器 grant 自然到期和管理员禁用后的新业务动作。 |
+| 2026-09-25 | DEV-02 资产与任务开放 API | 静态实现、V18 已迁移；接口/用户终点待验收 | Management Key 入口按 `assets:read/write`、`generation:read/write`、`config:read` 分流；开放参考图上传、官方生成服务、任务分页/详情/步骤、版本制作与动作结果、私有/官方 Avatar 目录、版本采用、引用保护删除及仅官方有效 Voice 目录。开放 Controller 复用原资产、制作、发布、Voice Service，公开结果使用字段白名单。补齐原生成账本零单位占位：任务及恢复按账号并发上限预占 1 次 `AVATAR_COUNT`，成功结算、明确失败释放、UNKNOWN 保留待核对；上传和生成文件按账号单文件/`STORAGE_BYTE` 限额预占与结算，上传中断清理先删对象再释放，资产物理清理后归还容量。新增任务分页/步骤查询、V18 长期任务约束；V17 清空存量到期值，删除不级联任务事实。用户于同日废弃视频制作虚拟人需求，图片输入是本模块唯一制作入口。system Maven 编译与 9 项聚焦测试通过；静态交付时未启动服务、执行迁移或调用真实 COS/厂商。 | 管理员在运行环境配置 `p_account_limit` 及账号 `AVATAR_COUNT`、`STORAGE_BYTE` 授予余额，未配置时入口拒绝新任务/上传。本机 V17/V18 已执行；待服务就绪后用真实管理 Key 验证 Scope、短期 URL、同键重试、任务状态、版本发布和跨账号/引用删除；真实生成费用须单独明确预算。DEV-11 再联动验收用量查询与 Avatar 终态 Webhook。 |
+| 2026-09-25 | DEV-03 LLM/ASR Relay | 静态实现、V19 已迁移；真实连接/用户终点待验收 | 以既有 `p_relay_service/version/grant` 与 `p_secret(RELAY_ACCESS)` 为单一事实源，新增后台与 Management Key 同一 Service 的列表/详情/创建、不可变版本、显式应用授权、Token 密文轮换、状态及引用保护删除；管理写入在账号行锁下以 `p_api_idempotency` 防同键重复。内部 Session resolver 每次核对账号、应用、确认引用、能力、授权和当前停用/管理员限制。V19 增加管理员限制和测试版本字段及页面菜单。固定 LN_RELAY/1 的 LLM/ASR/取消相对路径；连接测试仅 GET `/capabilities`，连接前重新解析并固定公网 IP、验证 TLS 原主机且拒绝跳转，按 TARGET/NETWORK/TLS/AUTH/PROTOCOL/CAPABILITY 等安全错误码记录。未添加 TTS Relay 或私有 Voice 入口。system 编译、Vue 类型检查与 8 项聚焦测试通过；静态交付时未启动服务、执行迁移或连接真实开发者后端。 | 本机 V17～V19 已执行；运行环境仍需配置现有 `p_secret` AES-GCM 主密钥；用真实后台和管理 Key 检查 Scope、跨账号、版本、Token 不回显、授权、禁用、删除引用及连接测试错误分类。DEV-05 在 Application 发布时消费 Relay grant/版本；DEV-06 建立 BUSINESS Session 引用，DEV-08/09 接入实际 LLM/ASR 调用与逐次事实。 |
+| 2026-09-25 | DEV-01～03 本机数据库迁移 | V16～V19 已执行；运行接口待验收 | 用户授权执行相关迁移。本机 MySQL 8.0 `platform_db` 原 Flyway 最高 V15，依序执行 V16～V19；Flyway 11.7.2 报告执行 4 个版本并在执行后通过校验，`flyway_schema_history` 四行均成功、无失败行。查库确认单活 Secret 唯一键、管理员限制和 Relay 测试版本字段、任务长期保留约束、审计表、权限菜单及角色授权均存在；原有 1 条日汇总和 8 条调用记录的 `expires_at` 已清空，任务与 Webhook 的非空到期记录也为 0。受影响的 system 凭证、额度、开放接口及 Relay 聚焦测试 14 项通过。 | 服务重启日志、真实后台/Management Key 写链路、Relay 连接、COS/厂商及用户终点尚未验收；管理员仍需配置账号额度，运行时秘密只在目标环境配置。 |

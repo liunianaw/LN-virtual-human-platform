@@ -1,6 +1,6 @@
 # 开发者接入接口与授权过程协议（待确认草案）
 
-日期：2026-09-24。状态：关键产品规则及运行 Token 格式已明确，逐接口 Schema 仍待定稿；本文只约定开发者接入模块的接口和跨服务行为，完整计划确认前不作为编码授权。
+日期：2026-09-25。状态：DEV-01～03 接口族已随各模块实施固定；DEV-04～11 的逐接口 Schema 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
 
 依据：[开发者接入执行计划](2026-09-23-developer-integration-modules.md)、[项目需求](../../../项目需求说明书.md)、[数据库设计](../../../数据库设计说明书.md)、[项目架构](../../../项目架构说明书.md)、[平台内共享契约](platform-console-shared-contract.md)、[接口设计说明书01](../../../接口设计说明书01.md)。
 
@@ -61,6 +61,28 @@ Management Key 的资源 Scope 见下表；Application Secret 只允许 `session
 | `GET /voices?pageNum=&pageSize=` | `config:read` | 仅列出当前已发布且官方 TTS 服务有效的 Voice/版本及公开配置；无私有 Voice 写入或管理员发布入口。 |
 
 任务、步骤和厂商尝试是长期业务事实。V17 已清空历史 `p_generation_task.expires_at`；V18 再清空过渡期写入并加 `expires_at IS NULL` 约束。现有制作代码不设置任务到期时间，资产删除保留任务/步骤/尝试记录及外键限制；临时素材仍按原生命周期清理。DEV-02 不启动真实生成、不投递 Webhook；任务终态 Webhook 由 DEV-11 完成。
+
+#### DEV-03 LLM/ASR Relay 接口固定契约
+
+后台登录路径为 `/api/v1/developer/relay-services`，分别要求 `platform:relay:read/write`；Management Key 对应 `/openapi/v1/management/relay-services`，读需 `config:read`、写需 `config:write`。两个入口调用同一 Relay Service，账号只从凭证取得，请求不得携带可覆盖身份的 `accountId`。所有 POST/PUT/DELETE 必须带 1～64 位可见 ASCII `Idempotency-Key`，同键异参 409；版本、授权、Token、状态、删除还须 `If-Match=authEpoch`，缺失 428、过期 412。无计费连接探测在网络请求外使用独立数据库事务，按测试时的版本和 epoch 条件写回。响应仅包含显示字段、Token 末尾、版本和授权，不包含 Token、密文或内部 `secretId`。
+
+| 方法与相对路径 | 请求/结果 | 边界 |
+|---|---|---|
+| `GET /`、`GET /{relayId}` | 分页列表；详情含不可变 `versions` 和 `grants` | 跨账号返回 404；列表不包含已删除项。 |
+| `POST /` | `name,description?,accessToken,grantMode,version`；返回停用的 Relay 详情 | Token 为平台访问开发者后端的至少 32 字节可打印 ASCII Bearer，不是厂商 Key；创建首版但不调用付费端点。 |
+| `POST /{relayId}/versions` | `VersionInput`；返回详情 | `If-Match=authEpoch`；追加版本，保留旧版，切换 current 并清除旧测试结果。 |
+| `PUT /{relayId}/grants` | `grantMode,grants[{applicationId,scopes:[LLM,ASR]}]` | `If-Match`；`ALL_ACCOUNT_APPS` 不带明细；`EXPLICIT_APPS` 仅允许本账号应用和已声明能力，变更递增 `authEpoch`。 |
+| `POST /{relayId}/token` | `accessToken` | `If-Match`；覆盖同一 `p_secret(RELAY_ACCESS)` 的密文，递增 epoch 并清除连接测试；不回显明文。 |
+| `POST /{relayId}/connection-test` | 无请求体；返回 `success,errorCode?` | 仅 GET 固定 `/capabilities`，不提交 LLM/ASR 工作；结果为 TARGET/NETWORK/TLS/AUTH/REDIRECT/HTTP/PROTOCOL/CAPABILITY。 |
+| `POST /{relayId}/status`、`DELETE /{relayId}` | 状态需 `status=ACTIVE/DISABLED,reason`；删除无体 | `If-Match`；启用须当前版本测试成功，停用立即拒绝新操作；存在应用配置、声音版本或活跃引用时拒绝删除。 |
+
+`VersionInput={baseUrl,protocolVersion:"1",capabilities:{llm,asr,image?,tool?,cancel?},endpoints?,timeoutMs,maxResponseBytes}`；至少一个 LLM/ASR 为 true，image/tool 只能附属于 LLM，绝不允许 TTS。端点若提供，必须与固定 `GET /capabilities`、`POST /chat/completions`、`POST /audio/transcriptions`、`POST /requests/{requestId}/cancel` 一致；未提供时服务端保存固定相对路径。baseUrl 仅 HTTPS 主机及可选安全路径，不允许账号密码、查询、片段或非 443 端口。连接时重新解析 DNS，拒绝所有非公网目标，连接固定到已验证 IP，验证原主机 TLS 证书且不跟随重定向。
+
+LN_RELAY/1 调用头固定为 `Authorization: Bearer {Relay Token}`、`X-LN-Protocol-Version: 1`、`X-Request-Id: {稳定操作号}`；开发者后端在此身份下自行注入厂商 Key。LLM 的 `POST /chat/completions` JSON 为 `{requestId,applicationId,sessionId,turnId,externalUserId,model,messages,tools,parameters,stream:true}`，`externalUserId` 仅来自已鉴权 BUSINESS principal；响应为 SSE `text.delta`、`tool_call.delta`、`response.completed` 或 `error`。前两个事件只含本次请求的顺序片段，平台仅在终态 `response.completed` 的完整 Tool 参数经授权、Schema 检查后执行；终态可带 `usage:{inputTokens?,outputTokens?},providerRequestId?`，未知值为 null，不猜测为零。流提前断开时本次操作为失败或不确定，已生成文字不自动重放。
+
+ASR 的 `POST /audio/transcriptions` 为完整录音 multipart，字段 `audio,requestId,applicationId,sessionId,externalUserId,language?`；返回 `{text,language?,durationMs?,usage?,providerRequestId?}`，不会隐式继续发起 LLM。尽力取消为 `POST /requests/{requestId}/cancel`，返回 `state=CANCELLED/ALREADY_FINISHED/NOT_SUPPORTED/UNKNOWN`；取消不能承诺上游免费。错误 JSON 仅安全 `code,message,retryable,requestId`，不得透出厂商响应正文或 Key。此协议供 DEV-08/09 的实际流式 LLM 与录音 ASR 编排使用；DEV-03 的连接测试只做无计费握手。
+
+后台管理员独立使用 `POST /api/v1/admin/relay-services/{relayId}/restriction`，提交 `disabled,reason`，要求管理员身份和 `platform:relay:admin-disable`；此限制递增 epoch。内部 `POST /internal/v1/relay-services/resolve` 只允许 Session 服务身份，输入 `accountId,applicationId,sessionId,relayVersionId,capability,externalUserId,turnId?`；服务端核对当前 Relay 状态、管理员限制、授权和已确认的 Session 配置引用，重新验证 DNS 后才返回 Token、固定版本配置及 `pinnedAddress`。运行方须每次新外部操作前重新解析，以 `pinnedAddress` 建立连接并按原主机验证 TLS，不缓存授权为永久许可。DEV-06 建立 BUSINESS principal 与引用，DEV-08/09 分别消费 LLM/ASR 协议并记录逐次调用事实。
 
 以下路径表示本计划必须覆盖的资源族。每个模块实施前在本协议下固定该族的方法、DTO、Scope、错误与后台对应 Service；不得只完成后台页面而宣称开放 API 已完成。
 
