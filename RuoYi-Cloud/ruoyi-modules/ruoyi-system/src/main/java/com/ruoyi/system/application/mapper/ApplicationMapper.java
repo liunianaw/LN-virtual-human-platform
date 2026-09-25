@@ -27,14 +27,27 @@ public interface ApplicationMapper
         @Param("description") String description, @Param("now") Instant now);
     int countAvailableAvatarVersion(@Param("accountId") long accountId, @Param("versionId") long versionId);
     int countAvailableOfficialVoiceVersion(@Param("versionId") long versionId);
+    Map<String, Object> selectRelayBindingForUpdate(@Param("accountId") long accountId, @Param("applicationId") long applicationId,
+        @Param("versionId") long versionId, @Param("capability") String capability);
+    Map<String, Object> selectSkillBindingForUpdate(@Param("accountId") long accountId, @Param("versionId") long versionId);
+    List<Map<String, Object>> selectRelayChoices(@Param("accountId") long accountId);
+    List<Map<String, Object>> selectSkillChoices(@Param("accountId") long accountId);
+    List<Map<String, Object>> selectConfigSkills(@Param("configVersionId") long configVersionId);
+    void insertConfigSkill(@Param("id") long id, @Param("accountId") long accountId,
+        @Param("configVersionId") long configVersionId, @Param("skillVersionId") long skillVersionId,
+        @Param("enabled") boolean enabled, @Param("sortOrder") int sortOrder, @Param("now") Instant now);
     int countCurrentConfigAvailable(@Param("applicationId") long applicationId);
     int nextConfigVersionNo(@Param("applicationId") long applicationId);
     void insertConfig(@Param("id") long id, @Param("accountId") long accountId, @Param("applicationId") long applicationId,
-        @Param("versionNo") int versionNo, @Param("avatarVersionId") long avatarVersionId, @Param("voiceVersionId") long voiceVersionId,
+        @Param("versionNo") int versionNo, @Param("mode") String mode,
+        @Param("avatarVersionId") long avatarVersionId, @Param("voiceVersionId") long voiceVersionId,
+        @Param("llmRelayVersionId") Long llmRelayVersionId, @Param("asrRelayVersionId") Long asrRelayVersionId,
+        @Param("llmModelId") String llmModelId, @Param("systemPrompt") String systemPrompt,
+        @Param("llmParameters") String llmParameters, @Param("llmCapabilities") String llmCapabilities,
         @Param("contextPolicy") String contextPolicy, @Param("runtimeLimits") String runtimeLimits, @Param("configHash") byte[] configHash,
         @Param("now") Instant now);
     int replaceCurrentConfig(@Param("applicationId") long applicationId, @Param("configVersionId") long configVersionId,
-        @Param("expectedRevision") long expectedRevision);
+        @Param("currentPolicy") String currentPolicy, @Param("expectedRevision") long expectedRevision);
     void releaseCurrentReferences(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
     void insertCurrentReference(@Param("id") long id, @Param("accountId") long accountId, @Param("applicationId") long applicationId,
         @Param("operationId") String operationId, @Param("resourceType") String resourceType, @Param("resourceId") long resourceId,

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "framing": "FULL_BODY",
+  "action": "idle",
+  "frameSize": {
+    "width": 512,
+    "height": 768
+  },
+  "frameCount": 6,
+  "fps": 6,
+  "loop": true,
+  "sourceSha256": "7be7407f31292a36889ce9fdf9e8cc8419a6756cb55fd94eb02e6ab0336f45d9",
+  "frames": [
+    {
+      "file": "frame-00.png",
+      "sha256": "8e8ee48f8bc439f3a14fdfb46fa6dec21b85478936de253d74ea98557b86733d",
+      "x": 0,
+      "y": 0,
+      "width": 512,
+      "height": 768
+    },
+    {
+      "file": "frame-01.png",
+      "sha256": "8133d48c969c4da9865df6dbebfe7d9863b4ef7322f9c09bdb6ca98910d09d22",
+      "x": 512,
+      "y": 0,
+      "width": 512,
+      "height": 768
+    },
+    {
+      "file": "frame-02.png",
+      "sha256": "be8e350e53750305737017856132ca24e23260f441d2de2730e8c6e8679ed1d3",
+      "x": 1024,
+      "y": 0,
+      "width": 512,
+      "height": 768
+    },
+    {
+      "file": "frame-03.png",
+      "sha256": "23388219e44dc61b8b50e02550466e768d677288e66a49257dff9a3b4451d539",
+      "x": 0,
+      "y": 768,
+      "width": 512,
+      "height": 768
+    },
+    {
+      "file": "frame-04.png",
+      "sha256": "07e971c06390038c32dfadb6b624664c4ebcf4a89497c8f22a53955e0ffe5ca2",
+      "x": 512,
+      "y": 768,
+      "width": 512,
+      "height": 768
+    },
+    {
+      "file": "frame-05.png",
+      "sha256": "57703d74810d9e36581b570e79b0110f081864a5950439c4f89da3a7cb830c60",
+      "x": 1024,
+      "y": 768,
+      "width": 512,
+      "height": 768
+    }
+  ],
+  "atlas": {
+    "file": "atlas.png",
+    "sha256": "0048e9d8509bf77a25094e70fbb3fc2fb4fa25a7a9bfe961dee1a3bca6811875",
+    "width": 1536,
+    "height": 1536,
+    "layout": {
+      "columns": 3,
+      "rows": 2
+    }
+  },
+  "warnings": [
+    "touches_border_05"
+  ],
+  "geometryOk": false
+}

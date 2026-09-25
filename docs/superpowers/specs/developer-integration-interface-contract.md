@@ -1,6 +1,6 @@
 # 开发者接入接口与授权过程协议（待确认草案）
 
-日期：2026-09-25。状态：DEV-01～04 接口族已随各模块实施固定；DEV-05～11 的逐接口 Schema 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
+日期：2026-09-25。状态：DEV-01～04 接口族已随各模块实施固定；DEV-05 的接口 Schema 已固定；DEV-06～11 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
 
 依据：[开发者接入执行计划](2026-09-23-developer-integration-modules.md)、[项目需求](../../../项目需求说明书.md)、[数据库设计](../../../数据库设计说明书.md)、[项目架构](../../../项目架构说明书.md)、[平台内共享契约](platform-console-shared-contract.md)、[接口设计说明书01](../../../接口设计说明书01.md)。
 
@@ -93,6 +93,18 @@ ASR 的 `POST /audio/transcriptions` 为完整录音 multipart，字段 `audio,r
 `VersionInput` 区分 `skillType=PROMPT|HTTP_TOOL`。Prompt 只接收 `instructions`（非空，最多 32768 字符）、`contextRequirements`（`element/page/hybrid` 布尔需求）和可选 `importFormat=JSON`；导入只解析指令 JSON，不执行脚本。HTTP Tool 接收唯一可见 `toolName`、固定 `toolUrl`、`httpMethod=GET|POST`、有限 `inputSchema/outputSchema`、可选 `accessToken`、`frontendFields`、`identityBinding`、`requiresUserCredential`、`timeoutMs`（1000～30000）、`maxResultBytes`（1～1048576）及 `maxCallsPerTurn`（1～10）。Schema 仅允许顶层 object、最多 20 个标量字段的 `type/properties/required`，禁止 `$ref`、嵌套结构和模型声明的身份字段；前端字段必须属于输出 Schema。身份只允许服务端把经认证的 `externalUserId/applicationId/sessionId` 注入固定头，模型参数不能覆盖。Tool Token 用 `p_secret(TOOL_ACCESS)` 单独加密，详情只显示后缀；版本和幂等记录不存明文。未经认证的模型输入须先过 Schema 校验，原始响应先按字节上限和 Schema 校验，再按 `frontendFields` 裁剪，默认不向前端返回字段。开发者必须保证远端端点只读并自行检查业务身份；HTTP 方法与 Schema 不能证明远端无副作用。
 
 内部 `POST /internal/v1/skills/resolve` 只允许 Session 服务身份，请求 `{accountId,applicationId,sessionId,skillVersionId}`；每次核对固定应用配置、已确认 Session 引用、应用/Skill 当前状态和跨账号归属，再为 Tool 重新解析并返回已验证公网 `pinnedAddress`、固定配置与秘密。DEV-05 负责绑定版本及同一应用内 Tool 名冲突，DEV-08 消费此解析结果、执行请求前的身份注入/参数校验、次数限制和结果裁剪；本模块不宣称 Tool 已实际调用或业务数据授权已完成。
+
+#### DEV-05 Application 接口（2026-09-25）
+
+后台继续使用 `/api/v1/applications`，Management Key 使用同构的 `/openapi/v1/management/applications`，两者调用同一 Application Service。读操作要求后台 `platform:application:read` 或 Key 的 `config:read`；写操作要求 `platform:application:write` 或 `config:write`。`GET /` 接受 `pageNum/pageSize/status`，`GET /resources` 返回当前可选择 Avatar、官方 Voice、Relay、Skill，`GET /{applicationId}` 返回应用、当前配置和历史版本，`GET /{applicationId}/config-versions/{configVersionId}` 返回不可变配置。资源候选只用于编辑，发布仍重新锁定并校验当前授权。
+
+`POST /` 请求 `{name,description?}`。 `POST /{applicationId}/config-versions` 要求 `If-Match=revision` 和 `Idempotency-Key`，请求体为 `{mode,avatarVersionId,voiceVersionId,llmRelayVersionId?,asrRelayVersionId?,llmModelId?,systemPrompt?,llmParameters?,llmCapabilities?,contextPolicy,runtimeLimits?,skills?}`。ID 为十进制字符串。CHAT 必须有 LLM Relay 版本、模型 ID 和官方 Voice；ASR 可选，`llmParameters` 只支持 `temperature:0..2`、`maxOutputTokens:1..8192`；`llmCapabilities` 只支持布尔 `image/tool`，且对应 Relay 版本也须声明。SPEAK_ONLY 只允许 Avatar、官方 Voice 与 `{enabled:false}`。两种模式均不接收自有 TTS 或 RELAY Voice。
+
+`skills` 最多 20 项，每项 `{skillVersionId,enabled,sortOrder}`；版本 ID 与顺序不得重复。启用的 HTTP Tool 需要模型和 Relay 的 Tool 能力，同一应用内 Tool 名称不得重复。Skill Context 要求必须被应用策略覆盖。`contextPolicy` 关闭时只能是 `{enabled:false}`；启用时必须指定 `modes`（EXPLICIT/AI_ON_DEMAND）、`sources`（ELEMENT/PAGE/HYBRID）、`captureScope` 与 `dom` 的 allow/deny 选择器数组、`dom.excludePassword=true`、`targets`、`fullPageEnabled`、`resultMode`（PARTIAL/STRICT）、`highlightMode`（EVENT_ONLY/AUTO）、`maxCapturesPerTurn:1..5`。Context 需要图片能力，AI_ON_DEMAND 还需要 Tool 能力。页面采集仍只在 DEV-10 的运行入口发生。运行限值当前只允许 `toolCallsPerTurn/capturesPerTurn:0..20`；平台没有跨轮历史配置或聊天正文保存。
+
+发布响应含 `applicationId,configVersionId,versionNo,configHash,capabilities,effectiveLimits`；同一幂等键重试返回原版本，同键异参 409。缺少/不匹配修订分别为 428/412；无效配置 400，资源状态/能力/授权不可用于新绑定 422，同一应用 Tool 名冲突 409。发布在一个事务中写不可变配置、Skill 绑定、当前指针/策略、APP_CURRENT 引用、修订与幂等事实，保留既有 SESSION 引用。发布不触发 LLM、ASR、Tool 或官方 TTS 请求。
+
+`POST /{applicationId}/status` 请求 `{status:ACTIVE|DISABLED,reason}` 并要求 `If-Match`、`Idempotency-Key`；停用递增应用授权 epoch 和 Outbox，重新启用须当前配置与资源仍可用，管理员禁用不能由开发者解除。Application Secret 仍由 DEV-01 独立管理，重新发布不轮换 Secret。现有 DEBUG 播报入口仅接受 SPEAK_ONLY；CHAT、ASR、Skill、Context 调试分别随 DEV-08～10 接入。DEV-06 创建 BUSINESS Session 时应固定发布版本并建立 SESSION 引用；旧版本不能因更新 current 指针而被修改或删除。
 
 以下路径表示本计划必须覆盖的资源族。每个模块实施前在本协议下固定该族的方法、DTO、Scope、错误与后台对应 Service；不得只完成后台页面而宣称开放 API 已完成。
 

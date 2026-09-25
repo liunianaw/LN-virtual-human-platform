@@ -4,17 +4,17 @@
   <select id="nextId" resultType="long">select uuid_short()</select>
   <select id="selectApplications" resultType="map">
     select cast(a.id as char) applicationId,a.name,a.description,a.status,a.admin_disabled adminDisabled,cast(a.current_config_id as char) currentConfigVersionId,
-      cast(a.revision as char) revision,a.created_at createdAt,a.updated_at updatedAt,
+      cast(a.revision as char) revision,c.mode currentMode,a.created_at createdAt,a.updated_at updatedAt,
       case when a.current_config_id is null then 'UNCONFIGURED' else 'CONFIGURED' end configStatus
-    from p_application a where a.account_id=#{accountId} and a.purpose='USER'
+    from p_application a left join p_app_config c on c.id=a.current_config_id where a.account_id=#{accountId} and a.purpose='USER'
       and (#{status} is null or a.status=#{status}) order by a.created_at desc,a.id desc limit #{limit} offset #{offset}
   </select>
   <select id="countApplications" resultType="int">select count(*) from p_application where account_id=#{accountId} and purpose='USER' and (#{status} is null or status=#{status})</select>
   <select id="selectApplication" resultType="map">
     select cast(a.id as char) applicationId,a.name,a.description,a.status,a.admin_disabled adminDisabled,cast(a.current_config_id as char) currentConfigVersionId,
-      cast(a.revision as char) revision,cast(a.auth_epoch as char) authEpoch,a.created_at createdAt,a.updated_at updatedAt,
+      cast(a.revision as char) revision,cast(a.auth_epoch as char) authEpoch,c.mode currentMode,a.created_at createdAt,a.updated_at updatedAt,
       case when a.current_config_id is null then 'UNCONFIGURED' else 'CONFIGURED' end configStatus
-    from p_application a where a.id=#{applicationId} and a.account_id=#{accountId} and a.purpose='USER'
+    from p_application a left join p_app_config c on c.id=a.current_config_id where a.id=#{applicationId} and a.account_id=#{accountId} and a.purpose='USER'
   </select>
   <select id="selectApplicationForUpdate" resultType="map">
     select id,account_id accountId,status,admin_disabled adminDisabled,current_config_id currentConfigVersionId,revision,auth_epoch authEpoch
@@ -30,18 +30,90 @@
   </select>
   <select id="selectConfig" resultType="map">
     select cast(c.id as char) configVersionId,c.version_no versionNo,c.mode,cast(c.avatar_version_id as char) avatarVersionId,
-      cast(c.voice_version_id as char) voiceVersionId,c.context_policy contextPolicy,c.runtime_limits runtimeLimits,lower(hex(c.config_hash)) configHash,c.published_at publishedAt
+      cast(c.voice_version_id as char) voiceVersionId,cast(c.llm_relay_version_id as char) llmRelayVersionId,cast(c.asr_relay_version_id as char) asrRelayVersionId,
+      c.llm_model_id llmModelId,c.system_prompt systemPrompt,c.llm_parameters llmParameters,c.llm_capabilities llmCapabilities,
+      c.context_policy contextPolicy,c.runtime_limits runtimeLimits,lower(hex(c.config_hash)) configHash,c.published_at publishedAt
     from p_app_config c where c.id=#{configVersionId} and c.application_id=#{applicationId} and c.account_id=#{accountId}
+  </select>
+  <select id="selectConfigSkills" resultType="map">
+    select cast(skill_version_id as char) skillVersionId,enabled,sort_order sortOrder
+    from p_app_skill where app_config_id=#{configVersionId} order by sort_order,id
   </select>
   <select id="selectIdempotencyForUpdate" resultType="map">select request_hash requestHash,resource_id resourceId from p_api_idempotency where account_id=#{accountId} and scope=#{scope} and request_id=#{requestId} for update</select>
   <insert id="insertIdempotency">insert into p_api_idempotency (id,created_at,updated_at,account_id,scope,request_id,request_hash,resource_type,resource_id,status,expires_at) values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{scope},#{requestId},#{hash},#{resourceType},#{resourceId},'SUCCEEDED',#{expiresAt})</insert>
   <insert id="insertApplication">insert into p_application (id,created_at,updated_at,account_id,purpose,name,description,status,current_policy,auth_epoch,revision) values (#{id},#{now},#{now},#{accountId},'USER',#{name},#{description},'ACTIVE',cast('{}' as json),1,1)</insert>
   <select id="countAvailableAvatarVersion" resultType="int">select count(*) from p_avatar_version v join p_avatar a on a.id=v.avatar_id where v.id=#{versionId} and v.status='PUBLISHED' and a.status='PUBLISHED' and (a.account_id=#{accountId} or a.visibility='OFFICIAL') for update</select>
   <select id="countAvailableOfficialVoiceVersion" resultType="int">select count(*) from p_voice_version v join p_voice voice on voice.id=v.voice_id join p_official_service s on s.id=v.official_service_id where v.id=#{versionId} and v.service_type='OFFICIAL' and voice.visibility='OFFICIAL' and voice.status='PUBLISHED' and voice.current_version_id=v.id and s.capability='TTS' and s.status='ACTIVE' for update</select>
-  <select id="countCurrentConfigAvailable" resultType="int">select count(*) from p_application a join p_app_config c on c.id=a.current_config_id join p_avatar_version av on av.id=c.avatar_version_id join p_avatar avatar on avatar.id=av.avatar_id join p_voice_version vv on vv.id=c.voice_version_id join p_voice voice on voice.id=vv.voice_id join p_official_service s on s.id=vv.official_service_id where a.id=#{applicationId} and c.mode='SPEAK_ONLY' and av.status='PUBLISHED' and avatar.status='PUBLISHED' and voice.visibility='OFFICIAL' and voice.status='PUBLISHED' and voice.current_version_id=vv.id and vv.service_type='OFFICIAL' and s.capability='TTS' and s.status='ACTIVE'</select>
+  <select id="selectRelayBindingForUpdate" resultType="map">
+    select cast(v.id as char) versionId,v.capabilities capabilities
+    from p_relay_version v join p_relay_service r on r.id=v.relay_service_id
+    where v.id=#{versionId} and r.account_id=#{accountId} and v.account_id=#{accountId}
+      and r.status='ACTIVE' and r.admin_disabled=0 and r.current_version_id=v.id
+      and json_unquote(json_extract(v.capabilities,concat('$.',#{capability})))='true'
+      and (r.grant_mode='ALL_ACCOUNT_APPS' or exists (
+        select 1 from p_relay_grant g where g.relay_service_id=r.id
+          and g.application_id=#{applicationId} and g.account_id=#{accountId}
+          and g.status='ACTIVE' and json_contains(g.scopes,json_quote(upper(#{capability})))))
+    for update
+  </select>
+  <select id="selectSkillBindingForUpdate" resultType="map">
+    select cast(v.id as char) versionId,v.skill_type skillType,v.tool_name toolName,
+      v.context_requirements contextRequirements
+    from p_skill_version v join p_skill s on s.id=v.skill_id
+    where v.id=#{versionId} and s.status='PUBLISHED' and s.current_version_id=v.id
+      and (s.account_id=#{accountId} or s.visibility='OFFICIAL')
+    for update
+  </select>
+  <select id="selectRelayChoices" resultType="map">
+    select cast(v.id as char) versionId,r.name,v.capabilities
+    from p_relay_service r join p_relay_version v on v.id=r.current_version_id
+    where r.account_id=#{accountId} and r.status='ACTIVE' and r.admin_disabled=0
+    order by r.name,r.id
+  </select>
+  <select id="selectSkillChoices" resultType="map">
+    select cast(v.id as char) versionId,s.name,v.skill_type skillType,v.tool_name toolName,
+      v.context_requirements contextRequirements
+    from p_skill s join p_skill_version v on v.id=s.current_version_id
+    where s.status='PUBLISHED' and (s.account_id=#{accountId} or s.visibility='OFFICIAL')
+    order by s.name,s.id
+  </select>
+  <insert id="insertConfigSkill">
+    insert into p_app_skill (id,created_at,updated_at,account_id,app_config_id,skill_version_id,enabled,sort_order)
+    values (#{id},#{now},#{now},#{accountId},#{configVersionId},#{skillVersionId},#{enabled},#{sortOrder})
+  </insert>
+  <select id="countCurrentConfigAvailable" resultType="int">
+    select count(*) from p_application a
+      join p_app_config c on c.id=a.current_config_id
+      join p_avatar_version av on av.id=c.avatar_version_id
+      join p_avatar avatar on avatar.id=av.avatar_id
+      join p_voice_version vv on vv.id=c.voice_version_id
+      join p_voice voice on voice.id=vv.voice_id
+      join p_official_service official on official.id=vv.official_service_id
+    where a.id=#{applicationId} and av.status='PUBLISHED' and avatar.status in ('PUBLISHED','UNLISTED')
+      and voice.visibility='OFFICIAL' and voice.status in ('PUBLISHED','UNLISTED')
+      and vv.service_type='OFFICIAL' and official.capability='TTS' and official.status='ACTIVE'
+      and (c.mode='SPEAK_ONLY' or c.mode='CHAT' and exists (
+        select 1 from p_relay_version rv join p_relay_service rs on rs.id=rv.relay_service_id
+        where rv.id=c.llm_relay_version_id and rs.account_id=a.account_id and rs.status='ACTIVE'
+          and rs.admin_disabled=0 and json_unquote(json_extract(rv.capabilities,'$.llm'))='true'
+          and (rs.grant_mode='ALL_ACCOUNT_APPS' or exists (
+            select 1 from p_relay_grant g where g.relay_service_id=rs.id and g.application_id=a.id
+              and g.status='ACTIVE' and json_contains(g.scopes,'"LLM"'))))
+      and (c.asr_relay_version_id is null or exists (
+        select 1 from p_relay_version rv join p_relay_service rs on rs.id=rv.relay_service_id
+        where rv.id=c.asr_relay_version_id and rs.account_id=a.account_id and rs.status='ACTIVE'
+          and rs.admin_disabled=0 and json_unquote(json_extract(rv.capabilities,'$.asr'))='true'
+          and (rs.grant_mode='ALL_ACCOUNT_APPS' or exists (
+            select 1 from p_relay_grant g where g.relay_service_id=rs.id and g.application_id=a.id
+              and g.status='ACTIVE' and json_contains(g.scopes,'"ASR"'))))
+      and not exists (
+        select 1 from p_app_skill binding join p_skill_version sv on sv.id=binding.skill_version_id
+          join p_skill skill on skill.id=sv.skill_id
+        where binding.app_config_id=c.id and binding.enabled=1 and skill.status not in ('PUBLISHED','UNLISTED'))
+  </select>
   <select id="nextConfigVersionNo" resultType="int">select coalesce(max(version_no),0)+1 from p_app_config where application_id=#{applicationId} for update</select>
-  <insert id="insertConfig">insert into p_app_config (id,created_at,updated_at,account_id,application_id,version_no,mode,avatar_version_id,voice_version_id,context_policy,runtime_limits,config_hash,published_at,created_by) values (#{id},#{now},#{now},#{accountId},#{applicationId},#{versionNo},'SPEAK_ONLY',#{avatarVersionId},#{voiceVersionId},cast(#{contextPolicy} as json),cast(#{runtimeLimits} as json),#{configHash},#{now},#{accountId})</insert>
-  <update id="replaceCurrentConfig">update p_application set current_config_id=#{configVersionId},updated_at=utc_timestamp(3),revision=revision+1 where id=#{applicationId} and revision=#{expectedRevision}</update>
+  <insert id="insertConfig">insert into p_app_config (id,created_at,updated_at,account_id,application_id,version_no,mode,avatar_version_id,voice_version_id,llm_relay_version_id,asr_relay_version_id,llm_model_id,system_prompt,llm_parameters,llm_capabilities,context_policy,runtime_limits,config_hash,published_at,created_by) values (#{id},#{now},#{now},#{accountId},#{applicationId},#{versionNo},#{mode},#{avatarVersionId},#{voiceVersionId},#{llmRelayVersionId},#{asrRelayVersionId},#{llmModelId},#{systemPrompt},cast(#{llmParameters} as json),cast(#{llmCapabilities} as json),cast(#{contextPolicy} as json),cast(#{runtimeLimits} as json),#{configHash},#{now},#{accountId})</insert>
+  <update id="replaceCurrentConfig">update p_application set current_config_id=#{configVersionId},current_policy=cast(#{currentPolicy} as json),updated_at=utc_timestamp(3),revision=revision+1 where id=#{applicationId} and revision=#{expectedRevision}</update>
   <update id="releaseCurrentReferences">update p_resource_reference set state='RELEASED',released_at=utc_timestamp(3),updated_at=utc_timestamp(3) where account_id=#{accountId} and holder_type='APP_CURRENT' and holder_id=#{applicationId} and state in ('RESERVED','CONFIRMED')</update>
   <insert id="insertCurrentReference">insert into p_resource_reference (id,created_at,updated_at,account_id,holder_type,holder_id,operation_id,resource_type,resource_id,state,confirmed_at) values (#{id},#{now},#{now},#{accountId},'APP_CURRENT',#{applicationId},#{operationId},#{resourceType},#{resourceId},'CONFIRMED',#{now}) on duplicate key update account_id=values(account_id),operation_id=values(operation_id),state='CONFIRMED',confirmed_at=values(confirmed_at),released_at=null,updated_at=values(updated_at)</insert>
   <update id="updateStatus">update p_application set status=#{status},auth_epoch=auth_epoch+1,updated_at=utc_timestamp(3),revision=revision+1 where id=#{applicationId} and revision=#{expectedRevision}</update>

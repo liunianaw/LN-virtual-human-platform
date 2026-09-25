@@ -2,20 +2,20 @@
 
 前置说明书：[编写与执行规范](../../../执行计划书编写与执行规范.md) · [项目整体说明书](../../../项目整体说明书.md) · [需求](../../../项目需求说明书.md) · [数据库](../../../数据库设计说明书.md) · [架构](../../../项目架构说明书.md) · [平台内共享契约](platform-console-shared-contract.md) · [开发者接入接口草案](developer-integration-interface-contract.md)
 
-日期：2026-09-23。版本：0.8。确认状态：用户于 2026-09-25 分别授权实施 DEV-01～DEV-04；其余 DEV 模块仍须按各自接口契约与计划确认后实施。
+日期：2026-09-23。版本：0.8。确认状态：用户于 2026-09-25 分别授权实施 DEV-01～DEV-05；DEV-06～11 仍须按各自接口契约与计划确认后实施。
 
 ## 1. 当前状态
 
 | 项目 | 当前事实 |
 |---|---|
 | 平台内能力 | 账号、角色资产、官方声音、SPEAK_ONLY 应用、DEBUG Session、正式角色包读取、WSS、分段播报、停止和临时音频清理已有实现，可作为开发者接入的基础内核。平台内能力的真实验收结论以各原计划为准。 |
-| Application | 当前 `ApplicationServiceImpl` 只接受关闭 Context 的 `SPEAK_ONLY` 配置和已发布官方 Voice；LLM、ASR、Skills、Context 仍被明确拒绝。 |
+| Application | DEV-05 已静态扩展现有 `ApplicationServiceImpl`，支持 CHAT/SPEAK_ONLY 的固定配置、Relay/Skill/Context、官方 Voice 与引用；真实运行验收尚未执行。 |
 | Session | `session_db` 已有 BUSINESS/DEBUG、BUSINESS_KEY/CONSOLE_DEBUG、JTI、epoch、消息、Context、operation、幂等和清理等基础表；当前 Java 运行链主要实现 CONSOLE_DEBUG。 |
 | SDK | `avatar-sdk` 当前提供 manifest 解析、Canvas 角色播放、动作、音频与 speaking 状态；尚无正式的业务 Session 客户端、聊天、录音、Context 和高亮模块。 |
 | Relay、Skills、凭证、Webhook、用量 | V1 数据库已有对应基础表；DEV-01 凭证、DEV-03 LLM/ASR Relay 与 DEV-04 Skills 已静态实现。本机 `platform_db` 已执行 Flyway V16～V20；DEV-04 的 V20 已随本机 system 启动自动执行，Skill 管理 Key 接口正反路径及当前账号 HTTP Tool 页面创建、错误提示和 TLS 检查均已验收；官方 Skill 页面由用户确认通过。Webhook 和完整用量仍属后续模块。 |
 | 外部示例 | `examples/integration-demo` 无可运行内容；按用户最新决定，本计划不建设示例。 |
-| 交付范围 | DEV-01～03 已分别本地提交；DEV-04 代码、迁移、测试与进度文档同批交付。本地 `logs/`、运行密钥与诊断资料不纳入 Git。 |
-| 下一步 | DEV-01～04 已通过静态验证；用户于 2026-09-25 废弃视频制作虚拟人需求，DEV-02 仅保留图片输入。本机 `platform_db` 的 V16～V20 已迁移，system/session/auth/gateway、媒体与前端已启动并通过健康检查；DEV-04 管理 Key 接口及当前账号的 Prompt/HTTP Tool 页面已实测，官方 Skill 页面由用户确认通过，模块自身验收完成；Relay、实际 Tool 业务调用、COS/生成及跨模块用户终点仍待对应模块验收。DEV-05～11 不因前四模块实施而自动进入实施。 |
+| 交付范围 | DEV-01～03 已分别本地提交；DEV-04 代码、迁移、测试与进度文档同批交付；DEV-05 当前工作树待交付。本地 `logs/`、运行密钥与诊断资料不纳入 Git。 |
+| 下一步 | DEV-01～05 已通过静态验证；用户于 2026-09-25 废弃视频制作虚拟人需求，DEV-02 仅保留图片输入。本机 `platform_db` 的 V16～V20 已迁移，system/session/auth/gateway、媒体与前端已启动并通过健康检查；DEV-04 管理 Key 接口及当前账号的 Prompt/HTTP Tool 页面已实测，官方 Skill 页面由用户确认通过，模块自身验收完成；Relay、实际 Tool 业务调用、COS/生成及跨模块用户终点仍待对应模块验收。DEV-05 已按用户本轮授权完成静态实现；DEV-06～11 不自动进入实施。 |
 
 ## 2. 目标与边界
 
@@ -420,4 +420,5 @@
 | 2026-09-25 | DEV-04 本机迁移与启动 | V20 已执行；服务就绪；真实接口和页面待验收 | 用户要求启动项目。既定启动器完成 system/session/auth/gateway、媒体 API/Worker、Relay、Vue 和 MySQL/Redis/Nacos/RabbitMQ 启动；Maven package 成功。system Flyway 日志确认 `platform_db` 从 V19 迁到 V20；system、session、auth、gateway、media-api 及 gateway-to-system OpenAPI 健康检查均返回 200，Worker 输出 ready/heartbeat，前端首页返回 200。无凭证访问 Skills 后台和 Management Key 接口均返回业务码 401。 | 真实后台登录后的 Skill 配置、Management Key 正反路径及页面体验待用户验收；未发起 Tool 业务请求或付费调用。 |
 | 2026-09-25 | DEV-04 本机接口验收 | 管理 Key 正反路径通过；HTTP Tool 页面体验待验 | 用户确认首项 Prompt 页面操作通过。使用本机隔离测试账号和临时管理 Key 实测：config:read/write Scope 拒绝、官方写入路由不存在、私网 HTTP 目标/嵌套 Schema/越界前端字段拒绝、HTTP Tool 创建及 Token 仅显示后缀、跨账号私有详情返回 404、发布候选、下架/重新发布/停用、停用后拒绝新版本、引用时删除返回 409、无引用删除成功。连接检查对已验证公网 IP 完成 TLS 握手且仅返回 TARGET_TLS_ONLY，未调用 Tool 业务 URL。临时 Key、Skill 和合成引用已清理，残留计数均为 0。静态复核修正停用态重复和不可执行的页面按钮，Vue typecheck 通过。 | Application 绑定与同应用 Tool 名冲突随 DEV-05 验；实际 Tool 调用、次数/结果裁剪和业务数据授权随 DEV-08 验。页面实测见下一行；官方 Skill 页面由用户确认通过。 |
 | 2026-09-25 | DEV-04 HTTP Tool 页面点击验收 | 当前 `user001` 私有 Tool 页面通过 | 在运行中的 Chrome 后台页面实际点击“创建私有 Skill”并切换 HTTP Tool：私网 HTTP 地址被拒且显示安全提示，输入 Schema 字段误作前端字段被拒且显示明确错误；改用输出字段 `summary` 后创建成功，详情显示版本 1、HTTP_TOOL、工具名和引用 0；点击“检查 TLS”显示公网地址与 TLS 验证通过，未调用 Tool 业务接口。新版本表单正确回填当前配置且 Token 留空。发现新建表单保留上一次工具名和前端字段，现已修复重置；“前端返回字段”提示明确只能填输出 Schema 字段。修复后再次取消、重开新建表单，确认工具名/URL/前端字段为空且 Schema 恢复默认；Vue `npm run typecheck` 通过。临时 Skill 无应用或运行引用，数据库中对应 Skill、版本、幂等记录均已清理为 0，页面刷新后不再显示。 | 当前账号无需切换；官方 Skill 页面由用户确认已完成验收。DEV-05/08 联动仍按模块计划执行。 |
+| 2026-09-25 | DEV-05 Application 完整配置 | 静态实现；用户终点与 DEV-06/08～10 联动待验 | 本轮用户明确授权 DEV-05。扩展现有 Application 发布事务与前端，支持 CHAT 的 LLM/可选 ASR Relay、模型配置、Skills、Context 和必选官方 Voice；SPEAK_ONLY 保持纯播报且必选官方 Voice。发布锁定并核对当前资源、Relay 能力/授权和 Skill 需求，写不可变配置、Skill 绑定、current policy、APP_CURRENT 引用、修订和幂等；同应用 Tool 名重复拒绝。Management Key Application 入口复用同一 Service，按 config Scope 授权。现有 DEBUG 播报只接受 SPEAK_ONLY。无新迁移，V1 既有字段承载；system Maven 编译、Application 聚焦单测、Vue typecheck 与 XML 静态解析通过，未启动服务或调用外部服务。 | 使用真实后台及管理 Key 核对 CHAT/SPEAK_ONLY 发布、错误组合、归属/Scope/幂等及页面体验；DEV-06 验新旧 Session 固定版本和 SESSION 引用，DEV-08～10 验 CHAT/ASR/Skill/Context 调试与实时限制。 |
 | 2026-09-25 | DEV-04 验收结论修正 | 模块完成；联动待验 | 用户说明官方 Skill 页面验收此前已完成，本轮再次确认；Prompt 页面由用户验收，私有 HTTP Tool 页面和 Management Key 正反路径已在本机实测，V20 迁移、启动与聚焦检查均通过。此前记录为“需切换管理员账号”是验收状态误记。 | Application 绑定及同应用 Tool 名冲突随 DEV-05 验；实际 Tool 调用、业务权限、次数与结果裁剪随 DEV-08 验。 |
