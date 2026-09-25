@@ -209,8 +209,9 @@ function Get-LocalYamlValue {
     return $match.Groups['value'].Value.Trim().Trim("'`"")
 }
 
-function Get-LocalOfficialServiceMasterKey {
-    $keyPath = Join-Path $runtimeLogRoot 'official-service-master-key.dpapi'
+function Get-LocalProtectedKey {
+    param([Parameter(Mandatory)] [string]$FileName)
+    $keyPath = Join-Path $runtimeLogRoot $FileName
     if (Test-Path -LiteralPath $keyPath) {
         try {
             $protected = Get-Content -LiteralPath $keyPath -Raw -Encoding ascii
@@ -224,7 +225,7 @@ function Get-LocalOfficialServiceMasterKey {
             }
         }
         catch {
-            throw "Local official-service master key cannot be read: $keyPath"
+            throw "Local protected key cannot be read: $keyPath"
         }
     }
     else {
@@ -244,7 +245,7 @@ function Get-LocalOfficialServiceMasterKey {
         if ([Convert]::FromBase64String($key).Length -ne 32) { throw 'invalid length' }
     }
     catch {
-        throw "Local official-service master key is invalid: $keyPath"
+        throw "Local protected key is invalid: $keyPath"
     }
     return $key
 }
@@ -355,7 +356,8 @@ try {
         throw 'Ignored local provider configuration does not contain an API key; no services were started.'
     }
 
-    $officialServiceMasterKey = Get-LocalOfficialServiceMasterKey
+    $officialServiceMasterKey = Get-LocalProtectedKey -FileName 'official-service-master-key.dpapi'
+    $accessKeyPepper = Get-LocalProtectedKey -FileName 'access-key-pepper.dpapi'
 
     $nacosUsername = if ($env:NACOS_USERNAME) { $env:NACOS_USERNAME } else { 'nacos' }
     $nacosPassword = if ($env:NACOS_PASSWORD) { $env:NACOS_PASSWORD } else { 'nacos' }
@@ -366,6 +368,9 @@ try {
     $runtimeTokenSecret = Get-LocalServiceToken -FileName 'session-runtime-token-secret.dpapi'
     $commonEnvironment = @{
         NACOS_ADDR = $nacosAddress
+        SPRING_CLOUD_NACOS_DISCOVERY_IP = '127.0.0.1'
+        MANAGEMENT_HEALTH_SENTINEL_ENABLED = 'false'
+        MANAGEMENT_HEALTH_MAIL_ENABLED = 'false'
         NACOS_USERNAME = $nacosUsername
         NACOS_PASSWORD = $nacosPassword
         REDIS_HOST = '127.0.0.1'
@@ -454,6 +459,7 @@ try {
         RUOYI_MEDIA_INTERNAL_TOKEN = $internalToken
         LN_OFFICIAL_SERVICE_MASTER_KEY = $officialServiceMasterKey
         LN_OFFICIAL_SERVICE_MASTER_KEY_VERSION = 'local-dpapi-v1'
+        LN_ACCESS_KEY_PEPPER = $accessKeyPepper
         LN_SYSTEM_TO_SESSION_URL = 'http://127.0.0.1:9202'
         LN_SYSTEM_TO_SESSION_INTERNAL_BEARER = $systemToSessionBearer
         LN_SESSION_TO_SYSTEM_INTERNAL_BEARER = $sessionToSystemBearer
@@ -560,7 +566,7 @@ try {
         }
     }
 
-    & (Join-Path $cloudRoot 'bin\check-m1-services.ps1')
+    & (Join-Path $cloudRoot 'bin\check-m1-services.ps1') -TimeoutSeconds 15
     if ($LASTEXITCODE -ne 0) {
         throw 'The final M1 HTTP health check failed.'
     }

@@ -62,6 +62,7 @@ public class ManagementKeyFilter extends OncePerRequestFilter
             if (resource.matches("avatar-reference-files/" + id)) return "assets:read";
             if (resource.equals("voices")) return "config:read";
             if (resource.matches("relay-services(?:/" + id + ")?")) return "config:read";
+            if (resource.matches("skills(?:/candidates|/" + id + ")?")) return "config:read";
         }
         if ("POST".equals(method))
         {
@@ -71,10 +72,12 @@ public class ManagementKeyFilter extends OncePerRequestFilter
                 return "generation:write";
             if (resource.matches("relay-services(?:/" + id + "/(?:versions|token|status|connection-test))?"))
                 return "config:write";
+            if (resource.matches("skills(?:/" + id + "/(?:versions|status|connection-check))?")) return "config:write";
         }
         if ("PUT".equals(method) && resource.matches("relay-services/" + id + "/grants")) return "config:write";
         if ("DELETE".equals(method) && resource.matches("avatars/" + id)) return "assets:write";
         if ("DELETE".equals(method) && resource.matches("relay-services/" + id)) return "config:write";
+        if ("DELETE".equals(method) && resource.matches("skills/" + id)) return "config:write";
         return null;
     }
 }

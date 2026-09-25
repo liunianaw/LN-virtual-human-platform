@@ -1,6 +1,6 @@
 # 开发者接入接口与授权过程协议（待确认草案）
 
-日期：2026-09-25。状态：DEV-01～03 接口族已随各模块实施固定；DEV-04～11 的逐接口 Schema 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
+日期：2026-09-25。状态：DEV-01～04 接口族已随各模块实施固定；DEV-05～11 的逐接口 Schema 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
 
 依据：[开发者接入执行计划](2026-09-23-developer-integration-modules.md)、[项目需求](../../../项目需求说明书.md)、[数据库设计](../../../数据库设计说明书.md)、[项目架构](../../../项目架构说明书.md)、[平台内共享契约](platform-console-shared-contract.md)、[接口设计说明书01](../../../接口设计说明书01.md)。
 
@@ -83,6 +83,16 @@ LN_RELAY/1 调用头固定为 `Authorization: Bearer {Relay Token}`、`X-LN-Prot
 ASR 的 `POST /audio/transcriptions` 为完整录音 multipart，字段 `audio,requestId,applicationId,sessionId,externalUserId,language?`；返回 `{text,language?,durationMs?,usage?,providerRequestId?}`，不会隐式继续发起 LLM。尽力取消为 `POST /requests/{requestId}/cancel`，返回 `state=CANCELLED/ALREADY_FINISHED/NOT_SUPPORTED/UNKNOWN`；取消不能承诺上游免费。错误 JSON 仅安全 `code,message,retryable,requestId`，不得透出厂商响应正文或 Key。此协议供 DEV-08/09 的实际流式 LLM 与录音 ASR 编排使用；DEV-03 的连接测试只做无计费握手。
 
 后台管理员独立使用 `POST /api/v1/admin/relay-services/{relayId}/restriction`，提交 `disabled,reason`，要求管理员身份和 `platform:relay:admin-disable`；此限制递增 epoch。内部 `POST /internal/v1/relay-services/resolve` 只允许 Session 服务身份，输入 `accountId,applicationId,sessionId,relayVersionId,capability,externalUserId,turnId?`；服务端核对当前 Relay 状态、管理员限制、授权和已确认的 Session 配置引用，重新验证 DNS 后才返回 Token、固定版本配置及 `pinnedAddress`。运行方须每次新外部操作前重新解析，以 `pinnedAddress` 建立连接并按原主机验证 TLS，不缓存授权为永久许可。DEV-06 建立 BUSINESS principal 与引用，DEV-08/09 分别消费 LLM/ASR 协议并记录逐次调用事实。
+
+#### DEV-04 Skills 接口固定契约（2026-09-25）
+
+后台 `/api/v1/developer/skills` 与 Management Key `/openapi/v1/management/skills` 调用同一 Skill Service；开放读取要求 `config:read`，创建、版本、状态、连接检查与删除要求 `config:write`。后台读取/写入分别要求 `platform:skill:read/write`。`GET /` 返回分页 `{items,total,pageNum,pageSize}`，`GET /candidates` 仅返回当前 `PUBLISHED` 且有版本的官方/本账号 Skill，`GET /{skillId}` 返回脱敏详情、不可变版本和引用数；跨账号私有资源按不存在处理。官方 Skill 只由管理员后台 `POST /api/v1/developer/skills/official` 创建，Management Key 没有官方写入路由。
+
+`POST /` 请求 `{name,description?,version}`，成功返回已发布版本的详情；`POST /{skillId}/versions` 追加不可变版本并切换当前版本；`POST /{skillId}/status` 请求 `{status:PUBLISHED|UNLISTED|DISABLED,reason}`；`POST /{skillId}/connection-check` 仅对当前 HTTP Tool 验证公网解析、原主机 TLS 证书和连通，不发出 GET/POST 工具业务请求，返回 `{success,checked?:TARGET_TLS_ONLY,errorCode?:TARGET|TLS|NETWORK}`；`DELETE /{skillId}` 有配置或运行引用时返回 409。写操作用 1～64 位可打印 ASCII `Idempotency-Key`，版本、状态和删除还要十进制文本 `If-Match=revision`；同键不同参数 409，修订不匹配 412，缺失 `If-Match` 428。普通 `UNLISTED` 阻止新候选，但已绑定版本可继续用于历史展示和既有 Session；`DISABLED` 即时拒绝新 Tool 动作；软删除保留版本并禁用所关联秘密。
+
+`VersionInput` 区分 `skillType=PROMPT|HTTP_TOOL`。Prompt 只接收 `instructions`（非空，最多 32768 字符）、`contextRequirements`（`element/page/hybrid` 布尔需求）和可选 `importFormat=JSON`；导入只解析指令 JSON，不执行脚本。HTTP Tool 接收唯一可见 `toolName`、固定 `toolUrl`、`httpMethod=GET|POST`、有限 `inputSchema/outputSchema`、可选 `accessToken`、`frontendFields`、`identityBinding`、`requiresUserCredential`、`timeoutMs`（1000～30000）、`maxResultBytes`（1～1048576）及 `maxCallsPerTurn`（1～10）。Schema 仅允许顶层 object、最多 20 个标量字段的 `type/properties/required`，禁止 `$ref`、嵌套结构和模型声明的身份字段；前端字段必须属于输出 Schema。身份只允许服务端把经认证的 `externalUserId/applicationId/sessionId` 注入固定头，模型参数不能覆盖。Tool Token 用 `p_secret(TOOL_ACCESS)` 单独加密，详情只显示后缀；版本和幂等记录不存明文。未经认证的模型输入须先过 Schema 校验，原始响应先按字节上限和 Schema 校验，再按 `frontendFields` 裁剪，默认不向前端返回字段。开发者必须保证远端端点只读并自行检查业务身份；HTTP 方法与 Schema 不能证明远端无副作用。
+
+内部 `POST /internal/v1/skills/resolve` 只允许 Session 服务身份，请求 `{accountId,applicationId,sessionId,skillVersionId}`；每次核对固定应用配置、已确认 Session 引用、应用/Skill 当前状态和跨账号归属，再为 Tool 重新解析并返回已验证公网 `pinnedAddress`、固定配置与秘密。DEV-05 负责绑定版本及同一应用内 Tool 名冲突，DEV-08 消费此解析结果、执行请求前的身份注入/参数校验、次数限制和结果裁剪；本模块不宣称 Tool 已实际调用或业务数据授权已完成。
 
 以下路径表示本计划必须覆盖的资源族。每个模块实施前在本协议下固定该族的方法、DTO、Scope、错误与后台对应 Service；不得只完成后台页面而宣称开放 API 已完成。
 
