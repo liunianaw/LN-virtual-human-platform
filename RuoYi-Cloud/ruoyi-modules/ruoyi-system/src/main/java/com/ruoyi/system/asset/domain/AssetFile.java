@@ -17,6 +17,7 @@ public class AssetFile
     private Integer height;
     private String status;
     private String rightsNoticeVersion;
+    private Long storageReservationId;
 
     public Long getId() { return id; }
     public void setId(Long value) { id = value; }
@@ -46,4 +47,6 @@ public class AssetFile
     public void setStatus(String value) { status = value; }
     public String getRightsNoticeVersion() { return rightsNoticeVersion; }
     public void setRightsNoticeVersion(String value) { rightsNoticeVersion = value; }
+    public Long getStorageReservationId() { return storageReservationId; }
+    public void setStorageReservationId(Long value) { storageReservationId = value; }
 }

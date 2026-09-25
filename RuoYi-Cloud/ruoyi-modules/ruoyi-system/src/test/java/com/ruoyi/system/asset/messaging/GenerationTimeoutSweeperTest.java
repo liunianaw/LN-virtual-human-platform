@@ -10,6 +10,7 @@ import org.mockito.InOrder;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.ruoyi.system.asset.mapper.GenerationWorkerMapper;
+import com.ruoyi.system.asset.service.IGenerationQuotaService;
 
 class GenerationTimeoutSweeperTest
 {
@@ -25,10 +26,12 @@ class GenerationTimeoutSweeperTest
             return null;
         }).when(transactions).executeWithoutResult(any());
 
-        new GenerationTimeoutSweeper(mapper, transactions, 300).sweep();
+        IGenerationQuotaService quota = mock(IGenerationQuotaService.class);
+        new GenerationTimeoutSweeper(mapper, transactions, quota, 300).sweep();
 
         InOrder order = inOrder(mapper);
         order.verify(mapper).expireStalledUnsubmittedSteps(300);
         order.verify(mapper).markTimedOutTasksFailed();
+        org.mockito.Mockito.verify(quota).finishTimedOutTasks();
     }
 }

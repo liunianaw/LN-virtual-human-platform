@@ -8,6 +8,9 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.ruoyi.common.core.exception.ServiceException;
@@ -25,7 +28,9 @@ public class OpenApiErrors
         return ResponseEntity.status(status).body(body(code, status >= 500 ? "接入操作失败" : error.getMessage()));
     }
 
-    @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})
+    @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class,
+        MissingServletRequestParameterException.class, MissingServletRequestPartException.class,
+        MethodArgumentTypeMismatchException.class})
     public ResponseEntity<Map<String, Object>> invalid(Exception error)
     { return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body("INVALID_REQUEST", "请求参数无效")); }
 

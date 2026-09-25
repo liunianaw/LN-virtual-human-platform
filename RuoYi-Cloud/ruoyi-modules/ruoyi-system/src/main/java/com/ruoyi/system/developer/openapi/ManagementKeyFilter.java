@@ -29,12 +29,9 @@ public class ManagementKeyFilter extends OncePerRequestFilter
     {
         try
         {
-            // DEV-02 onward adds explicit resource-to-scope mappings here as each family is implemented.
-            String path = request.getRequestURI();
-            if (!path.startsWith("/openapi/v1/management/access-keys")
-                && !path.matches("/openapi/v1/management/applications/[0-9]+/secrets(?:/reset|/[0-9]+/(?:disable|delete))?"))
-            { response.sendError(404); return; }
-            var principal = keys.authenticate(request.getHeader("Authorization"), "MANAGEMENT", "keys:write");
+            String scope = requiredScope(request.getMethod(), request.getRequestURI());
+            if (scope == null) { response.sendError(404); return; }
+            var principal = keys.authenticate(request.getHeader("Authorization"), "MANAGEMENT", scope);
             request.setAttribute(PRINCIPAL, principal);
             chain.doFilter(request, response);
         }
@@ -44,5 +41,35 @@ public class ManagementKeyFilter extends OncePerRequestFilter
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"code\":\"ACCESS_DENIED\",\"message\":\"接入凭证无效或权限不足\",\"retryable\":false,\"requestId\":\"" + UUID.randomUUID() + "\"}");
         }
+    }
+
+    static String requiredScope(String method, String path)
+    {
+        String base = "/openapi/v1/management/";
+        if (!path.startsWith(base)) return null;
+        String resource = path.substring(base.length());
+        String id = "[0-9]+";
+        String version = "avatars/" + id + "/versions/" + id;
+        if (resource.matches("access-keys(?:/" + id + "/(?:rotations|disable|delete))?")
+            || resource.matches("applications/" + id + "/secrets(?:/reset|/" + id + "/(?:disable|delete))?"))
+            return "keys:write";
+        if ("GET".equals(method))
+        {
+            if (resource.matches("avatars(?:/public|/" + id + "(?:/references|/versions/" + id + "/preview)?)?")) return "assets:read";
+            if (resource.matches("avatar-generation-tasks(?:/" + id + "(?:/steps)?)?"
+                + "|avatar-generation-services|" + version + "/(?:production|actions/[^/]+/results/" + id + "/preview)"))
+                return "generation:read";
+            if (resource.matches("avatar-reference-files/" + id)) return "assets:read";
+            if (resource.equals("voices")) return "config:read";
+        }
+        if ("POST".equals(method))
+        {
+            if (resource.equals("avatar-reference-files") || resource.matches(version + "/publish|avatars/" + id + "/versions")) return "assets:write";
+            if (resource.equals("avatar-generation-tasks")
+                || resource.matches(version + "/(?:assemble|actions/[^/]+/(?:selection|generations|attempts/" + id + "/(?:recovery|discard)))"))
+                return "generation:write";
+        }
+        if ("DELETE".equals(method) && resource.matches("avatars/" + id)) return "assets:write";
+        return null;
     }
 }

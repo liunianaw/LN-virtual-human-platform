@@ -16,6 +16,8 @@ import com.ruoyi.system.asset.dto.GenerationStoredObject;
 import com.ruoyi.system.asset.mapper.AssetMapper;
 import com.ruoyi.system.asset.mapper.GenerationWorkerMapper;
 import com.ruoyi.system.asset.service.IGenerationWorkerService;
+import com.ruoyi.system.asset.service.IAssetStorageQuotaService;
+import com.ruoyi.system.asset.service.IGenerationQuotaService;
 import com.ruoyi.system.operations.OperationsService;
 import com.ruoyi.system.storage.ObjectStorage;
 
@@ -29,10 +31,13 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
     private final TransactionTemplate transactions;
     private final ObjectMapper objectMapper;
     private final OperationsService callFacts;
+    private final IGenerationQuotaService quota;
+    private final IAssetStorageQuotaService storageQuota;
 
     public GenerationWorkerServiceImpl(GenerationWorkerMapper workerMapper, AssetMapper assetMapper,
         ObjectProvider<ObjectStorage> storageProvider,
-        TransactionTemplate transactions, ObjectMapper objectMapper, OperationsService callFacts)
+        TransactionTemplate transactions, ObjectMapper objectMapper, OperationsService callFacts,
+        IGenerationQuotaService quota, IAssetStorageQuotaService storageQuota)
     {
         this.workerMapper = workerMapper;
         this.assetMapper = assetMapper;
@@ -40,6 +45,8 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
         this.transactions = transactions;
         this.objectMapper = objectMapper;
         this.callFacts = callFacts;
+        this.quota = quota;
+        this.storageQuota = storageQuota;
     }
 
     public Map<String, Object> claim(Long accountId, Long taskId, String workerId)
@@ -169,7 +176,7 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
                 || workerMapper.updateAttemptSuccess(attemptId, stepId, claim.getAttemptNo(), leaseEpoch, primaryFileId) != 1)
                 throw staleLease();
             workerMapper.updateTaskProgress(accountId, taskId);
-            workerMapper.markTaskSucceeded(accountId, taskId);
+            if (workerMapper.markTaskSucceeded(accountId, taskId) == 1) quota.finish(accountId, taskId);
             callFacts.generation(attemptId, accountId, "SUCCEEDED", null, null);
         });
     }
@@ -191,7 +198,7 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
                 || workerMapper.finishTerminalAttempt(attemptId, stepId, claim.getAttemptNo(), leaseEpoch, state) != 1)
                 throw staleLease();
             workerMapper.updateTaskProgress(accountId, taskId);
-            workerMapper.markTaskFailed(accountId, taskId);
+            if (workerMapper.markTaskFailed(accountId, taskId) == 1) quota.finish(accountId, taskId);
             callFacts.generation(attemptId, accountId, state, null, null);
         });
     }
@@ -234,7 +241,9 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
             file.setStorageProvider(storage.provider()); file.setBucket(storage.bucket()); file.setObjectKey(object.objectKey());
             file.setContentType(object.contentType()); file.setSizeBytes(object.sizeBytes()); file.setSha256(java.util.HexFormat.of().parseHex(object.sha256()));
             file.setStatus("AVAILABLE");
+            file.setStorageReservationId(storageQuota.reserve(claim.getAccountId(), file.getId(), object.sizeBytes()));
             assetMapper.insertFile(file);
+            storageQuota.complete(claim.getAccountId(), file.getId());
             if (files.putIfAbsent(name, file) != null) throw new ServiceException("Worker 输出对象重复");
         }
         return files;

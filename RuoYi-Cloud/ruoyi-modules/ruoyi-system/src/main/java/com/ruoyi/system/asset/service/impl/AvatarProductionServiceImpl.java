@@ -18,6 +18,8 @@ import com.ruoyi.system.asset.dto.AvatarAttemptRequest;
 import com.ruoyi.system.asset.dto.AvatarSelectedResult;
 import com.ruoyi.system.asset.dto.CreateAvatarVersionRequest;
 import com.ruoyi.system.asset.service.IAvatarProductionService;
+import com.ruoyi.system.asset.service.IAssetStorageQuotaService;
+import com.ruoyi.system.asset.service.IGenerationQuotaService;
 import com.ruoyi.system.storage.ObjectStorage;
 import com.ruoyi.common.security.utils.SecurityUtils;
 import org.springframework.beans.factory.ObjectProvider;
@@ -33,10 +35,12 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
     private final AssetMapper assetMapper;
     private final ObjectMapper json;
     private final ObjectProvider<ObjectStorage> storage;
+    private final IGenerationQuotaService quota;
+    private final IAssetStorageQuotaService storageQuota;
 
     public AvatarProductionServiceImpl(AvatarProductionMapper mapper, AssetMapper assetMapper, ObjectMapper json,
-        ObjectProvider<ObjectStorage> storage)
-    { this.mapper = mapper; this.assetMapper = assetMapper; this.json = json; this.storage = storage; }
+        ObjectProvider<ObjectStorage> storage, IGenerationQuotaService quota, IAssetStorageQuotaService storageQuota)
+    { this.mapper = mapper; this.assetMapper = assetMapper; this.json = json; this.storage = storage; this.quota = quota; this.storageQuota = storageQuota; }
 
     public Map<String, Object> production(Long accountId, Long avatarId, Long versionId)
     {
@@ -183,8 +187,7 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
                     throw new ServiceException("上次结果待核对；再次生成前必须确认可能重复计费", 409);
             }
             Long taskId = nextId(), stepId = nextId(), attemptId = nextId(), reservationId = nextId();
-            assetMapper.insertQuotaReservation(reservationId, accountId, taskId.toString());
-            assetMapper.insertQuotaEntry(nextId(), accountId, reservationId, "generation:" + taskId + ":trace");
+            quota.reserve(accountId, taskId, reservationId);
             mapper.insertActionTask(taskId, accountId, avatarId, versionId, Long.valueOf((String) context.get("sourceFileId")),
                 Long.valueOf((String) context.get("officialServiceId")), (String) context.get("serviceSnapshot"),
                 (String) context.get("pipelineVersion"), reservationId, request.requestId());
@@ -234,6 +237,7 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
                 throw new ServiceException("该尝试当前不需要恢复", 409);
             if (context.get("providerTaskId") == null && context.get("receiptTaskId") == null && context.get("imageUrl") == null)
                 throw new ServiceException("没有可安全恢复的厂商任务或结果证据", 409);
+            quota.resume(accountId, Long.valueOf((String) context.get("taskId")));
             if (mapper.scheduleAttemptRecovery(accountId, versionId, actionCode, attemptId, request.expectedActionRevision()) != 1
                 || mapper.reactivateAttempt(accountId, versionId, actionCode, attemptId) != 1
                 || mapper.reactivateTask(accountId, versionId, actionCode, attemptId) != 1
@@ -356,8 +360,7 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
                     "sourceSha256", java.util.HexFormat.of().formatHex(source.getSha256())));
                 mapper.insertCandidateVersion(versionId, accountId, avatarId, versionNo, source.getId(), PIPELINE_VERSION, recipe);
                 Long generationTaskId = nextId(), reservationId = nextId();
-                assetMapper.insertQuotaReservation(reservationId, accountId, generationTaskId.toString());
-                assetMapper.insertQuotaEntry(nextId(), accountId, reservationId, "generation:" + generationTaskId + ":trace");
+                quota.reserve(accountId, generationTaskId, reservationId);
                 assetMapper.insertGenerationTask(generationTaskId, accountId, avatarId, versionId, source.getId(),
                     generationService.getId(), snapshot, PIPELINE_VERSION, reservationId, request.requestId(), hash);
                 for (String action : ACTIONS)
@@ -459,7 +462,9 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
             manifestFile.setObjectKey(objectKey); manifestFile.setOriginalName("manifest.json");
             manifestFile.setContentType("application/json"); manifestFile.setSizeBytes((long) manifestBytes.length);
             manifestFile.setSha256(manifestHash); manifestFile.setStatus("AVAILABLE");
+            manifestFile.setStorageReservationId(storageQuota.reserve(accountId, manifestFile.getId(), manifestBytes.length));
             assetMapper.insertFile(manifestFile);
+            storageQuota.complete(accountId, manifestFile.getId());
             mapper.deleteDraftActions(accountId, versionId);
             for (Map<String, Object> row : selected)
                 if (mapper.insertFormalAction(nextId(), accountId, versionId, Long.valueOf((String) row.get("resultId"))) != 1)

@@ -88,7 +88,11 @@ public class VoiceService
         int page = requestedPage == null ? 1 : requestedPage;
         int size = requestedSize == null ? 20 : requestedSize;
         if (page < 1 || size < 1 || size > 100) throw badRequest("分页参数无效");
-        String filter = publishedOnly ? "voice.status = 'PUBLISHED'" : "voice.visibility = 'OFFICIAL'";
+        String filter = publishedOnly
+            ? "voice.visibility = 'OFFICIAL' and voice.status = 'PUBLISHED' and exists ("
+                + "select 1 from p_voice_version v join p_official_service s on s.id = v.official_service_id "
+                + "where v.id = voice.current_version_id and v.service_type = 'OFFICIAL' and s.status = 'ACTIVE' and s.capability = 'TTS')"
+            : "voice.visibility = 'OFFICIAL'";
         Object[] args = new Object[0];
         if (!publishedOnly && status != null && !status.isBlank())
         {

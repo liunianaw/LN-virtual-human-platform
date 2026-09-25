@@ -42,6 +42,26 @@ Management Key 的资源 Scope 见下表；Application Secret 只允许 `session
 - 缺失/错误凭证返回 401，类型不匹配返回 401，有效 Key 但 Scope 或归属不足返回 403，同键不同参数及状态冲突返回 409；开放接口错误体含稳定 `code/message/retryable/requestId`。账号或应用不可用时拒绝新请求。Application Secret 重置只使旧 Secret 的后端请求失效，不撤销此前签发的浏览器 grant；管理员禁用写独立事实并限制后续业务动作，运行侧在 DEV-06/07 接入实时核对。
 - 每次 Key 创建、停用或删除同步写不含秘密的 `p_access_key_audit` 和 Outbox；后台 JWT 拦截器跳过开放 API 与内部 Secret 校验路径，避免将 Key 当 JWT 解析并写入异常日志。
 
+#### DEV-02 资产与任务接口（2026-09-25）
+
+以下路径均在 `/openapi/v1/management` 下，仅接收 Management Key。`accountId` 从 Key 推导，客户端不得指定；路径及响应 ID 使用十进制字符串。DEV-02 沿用既有资产 DTO 的 JSON 数值修订号（`expectedAvatarRevision`、`expectedActionRevision`、`expectedCandidateRevision` 等），`If-Match` 则为文本；本模块以此替代上文针对新增模块的统一字符串修订号约定。生成、版本、动作和组装请求沿用后台对应 DTO 的 `requestId`（1～64 位，作为同账号幂等键），同键不同参数返回 409；删除使用 `Idempotency-Key` 与 `If-Match`。上传要求 multipart `file`、`rightsNoticeVersion`、`rightsConfirmed=true`，原服务负责图片格式、尺寸、权利确认和归属校验；账号单文件上限与存储余额同时生效。生成任务按账号并发上限与 `AVATAR_COUNT` 余额准入。管理员须先在目标环境配置限额和授予余额，缺失配置时上传/生成返回限额错误。JSON 成功响应沿用 `AjaxResult.data`；错误沿用 `code/message/retryable/requestId`。不存在或不属于当前账号的私有资源拒绝访问；管理 Key 不获得官方制作、发布或后台核对权限。
+
+| 方法与路径后缀 | Scope | 请求与公开结果 |
+|---|---|---|
+| `POST /avatar-reference-files`、`GET /avatar-reference-files/{fileId}` | `assets:write`、`assets:read` | 上传返回文件 ID、媒体类型、大小/尺寸与短期读取 URL；读取重新核对归属并签发短期 URL。 |
+| `GET /avatar-generation-services` | `generation:read` | 可选的启用官方 Avatar 制作服务 ID、名称、模型和修订号，不含端点与秘密。 |
+| `POST /avatar-generation-tasks` | `generation:write` | `{sourceFileId,officialServiceId,expectedServiceRevision,requestId,name}`；复用同账号幂等提交、额度预占及 Outbox，返回真实 `taskId/avatarId/avatarVersionId`、状态、进度、安全错误码和创建时间。仅创建私有 Avatar。 |
+| `GET /avatar-generation-tasks?pageNum=&pageSize=`、`GET /avatar-generation-tasks/{taskId}`、`GET /avatar-generation-tasks/{taskId}/steps` | `generation:read` | 任务分页上限每页 100；步骤只暴露 ID、类型、动作、状态、安全错误码和时间，不暴露租约、厂商请求 ID、服务快照或内部状态。 |
+| `GET /avatars/{avatarId}/versions/{versionId}/production` | `generation:read` | 复用制作服务的版本动作阶段、结果 ID、可执行操作和组装资格；任务历史状态与步骤使用上面的任务路径查询。 |
+| `GET /avatars`、`GET /avatars/public`、`GET /avatars/{avatarId}`、`GET /avatars/{avatarId}/references` | `assets:read` | 私有目录/官方已发布目录、可访问版本与引用计数；目录分页上限每页 100，列表只保留稳定展示字段及短期预览 URL。 |
+| `POST /avatars/{avatarId}/versions`、`GET /avatars/{avatarId}/versions/{versionId}/preview`、`POST /avatars/{avatarId}/versions/{versionId}/publish` | 写入 `assets:write`、预览 `assets:read` | 新版本请求沿用 `CreateAvatarVersionRequest`；发布要求 `{visualAccepted:true,reviewNote}`，私有版本仍执行原有人工验收、状态及引用规则；预览 URL 短期有效。 |
+| `POST /avatars/{avatarId}/versions/{versionId}/actions/{actionCode}/selection|generations`、`POST .../actions/{actionCode}/attempts/{attemptId}/recovery|discard`、`POST .../assemble` | `generation:write` | 请求沿用 `AvatarActionSelectionRequest`、`AvatarActionGenerationRequest`、`AvatarAttemptRequest`、`AvatarAttemptDiscardRequest`、`AvatarAssemblyRequest`，包含 `requestId` 与期望修订号；仅调用原制作服务。 |
+| `GET /avatars/{avatarId}/versions/{versionId}/actions/{actionCode}/results/{resultId}/preview` | `generation:read` | 归属校验后返回动作结果 ID、帧布局及短期 atlas URL，不返回 object key、原始 QA 报告或厂商元数据。 |
+| `DELETE /avatars/{avatarId}` | `assets:write` | `If-Match` 与 `Idempotency-Key` 必填；引用或活动任务存在时 409，成功为 202 与 `DELETING`，原资产生命周期服务执行异步清理。 |
+| `GET /voices?pageNum=&pageSize=` | `config:read` | 仅列出当前已发布且官方 TTS 服务有效的 Voice/版本及公开配置；无私有 Voice 写入或管理员发布入口。 |
+
+任务、步骤和厂商尝试是长期业务事实。V17 已清空历史 `p_generation_task.expires_at`；V18 再清空过渡期写入并加 `expires_at IS NULL` 约束。现有制作代码不设置任务到期时间，资产删除保留任务/步骤/尝试记录及外键限制；临时素材仍按原生命周期清理。DEV-02 不启动真实生成、不投递 Webhook；任务终态 Webhook 由 DEV-11 完成。
+
 以下路径表示本计划必须覆盖的资源族。每个模块实施前在本协议下固定该族的方法、DTO、Scope、错误与后台对应 Service；不得只完成后台页面而宣称开放 API 已完成。
 
 | 模块 | Management Key 资源族 | 写入边界 |

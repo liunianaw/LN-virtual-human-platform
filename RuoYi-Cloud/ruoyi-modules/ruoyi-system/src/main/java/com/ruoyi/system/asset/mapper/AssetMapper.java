@@ -1,6 +1,7 @@
 package com.ruoyi.system.asset.mapper;
 
 import java.util.List;
+import java.util.Map;
 import org.apache.ibatis.annotations.Param;
 import com.ruoyi.system.asset.domain.AssetFile;
 import com.ruoyi.system.asset.domain.GenerationServiceConfig;
@@ -23,12 +24,50 @@ public interface AssetMapper
     GenerationTask selectTaskByAccountAndId(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
 
     List<GenerationTask> selectRecentTasksByAccount(@Param("accountId") Long accountId);
+    List<GenerationTask> selectPageTasksByAccount(@Param("accountId") Long accountId,
+        @Param("limit") int limit, @Param("offset") int offset);
+    int countTasksByAccount(@Param("accountId") Long accountId);
+    List<java.util.Map<String, Object>> selectTaskStepsByAccount(@Param("accountId") Long accountId,
+        @Param("taskId") Long taskId);
 
     GenerationServiceConfig selectActiveAvatarGenerationService(@Param("serviceId") Long serviceId);
 
     List<AvatarGenerationServiceResponse> selectActiveAvatarGenerationServices();
 
     int reserveAvatarQuota(@Param("accountId") Long accountId);
+    Integer maxGenerationTasksForUpdate(@Param("accountId") Long accountId);
+    int countActiveGenerationTasks(@Param("accountId") Long accountId);
+    Long availableAvatarQuota(@Param("accountId") Long accountId);
+    Map<String, Object> taskReservationForUpdate(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
+    int changeTaskReservation(@Param("accountId") Long accountId, @Param("taskId") Long taskId,
+        @Param("oldReservationId") Long oldReservationId, @Param("reservationId") Long reservationId,
+        @Param("reservationNo") int reservationNo);
+    int settleQuotaReservation(@Param("reservationId") Long reservationId);
+    int releaseQuotaReservation(@Param("reservationId") Long reservationId);
+    int reviewQuotaReservation(@Param("reservationId") Long reservationId);
+    int settleAvatarQuota(@Param("accountId") Long accountId);
+    int releaseAvatarQuota(@Param("accountId") Long accountId);
+    List<Map<String, Object>> timedOutTasksForQuota();
+
+    Long maxFileBytesForUpdate(@Param("accountId") Long accountId);
+    int reserveStorageBalance(@Param("accountId") Long accountId, @Param("bytes") long bytes);
+    int settleStorageBalance(@Param("accountId") Long accountId, @Param("bytes") long bytes);
+    int releaseStorageBalance(@Param("accountId") Long accountId, @Param("bytes") long bytes);
+    int freeStorageBalance(@Param("accountId") Long accountId, @Param("bytes") long bytes);
+    int insertStorageReservation(@Param("id") Long id, @Param("accountId") Long accountId,
+        @Param("fileId") Long fileId, @Param("bytes") long bytes);
+    int insertStorageEntry(@Param("id") Long id, @Param("accountId") Long accountId,
+        @Param("reservationId") Long reservationId, @Param("eventKey") String eventKey,
+        @Param("entryType") String entryType, @Param("deltaUsed") long deltaUsed,
+        @Param("deltaReserved") long deltaReserved);
+    Map<String, Object> storageFileForUpdate(@Param("accountId") Long accountId, @Param("fileId") Long fileId);
+    int settleStorageReservation(@Param("reservationId") Long reservationId, @Param("bytes") long bytes);
+    int releaseStorageReservation(@Param("reservationId") Long reservationId);
+    int completeStorageFile(@Param("accountId") Long accountId, @Param("fileId") Long fileId);
+    int failStorageFile(@Param("accountId") Long accountId, @Param("fileId") Long fileId);
+    int countStorageFreeEntry(@Param("accountId") Long accountId, @Param("fileId") Long fileId);
+    List<Map<String, Object>> expiredStorageUploads();
+    int claimExpiredStorageUpload(@Param("accountId") Long accountId, @Param("fileId") Long fileId);
 
     int insertFile(AssetFile file);
 
@@ -39,10 +78,13 @@ public interface AssetMapper
         @Param("sourceFileId") Long sourceFileId, @Param("pipelineVersion") String pipelineVersion,
         @Param("generationRecipe") String generationRecipe);
 
-    int insertQuotaReservation(@Param("id") Long id, @Param("accountId") Long accountId, @Param("businessId") String businessId);
+    int insertQuotaReservation(@Param("id") Long id, @Param("accountId") Long accountId,
+        @Param("taskId") Long taskId, @Param("reservationNo") int reservationNo);
 
-    int insertQuotaEntry(@Param("id") Long id, @Param("accountId") Long accountId, @Param("reservationId") Long reservationId,
-        @Param("eventKey") String eventKey);
+    int insertQuotaEntry(@Param("id") Long id, @Param("accountId") Long accountId,
+        @Param("reservationId") Long reservationId, @Param("eventKey") String eventKey,
+        @Param("entryType") String entryType, @Param("deltaUsed") int deltaUsed,
+        @Param("deltaReserved") int deltaReserved);
 
     int insertGenerationTask(@Param("id") Long id, @Param("accountId") Long accountId, @Param("avatarId") Long avatarId,
         @Param("avatarVersionId") Long avatarVersionId, @Param("sourceFileId") Long sourceFileId,

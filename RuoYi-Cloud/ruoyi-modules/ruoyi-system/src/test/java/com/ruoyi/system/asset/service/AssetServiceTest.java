@@ -54,10 +54,36 @@ class AssetServiceTest
         assertEquals(403, error.getCode());
     }
 
+    @Test
+    void concurrentSameKeyReturnsCommittedTaskAfterQuotaAdmissionRace()
+    {
+        AssetMapper mapper = mock(AssetMapper.class);
+        TransactionTemplate transactions = mock(TransactionTemplate.class);
+        GenerationTask task = new GenerationTask();
+        task.setId(101L);
+        task.setAccountId(7L);
+        task.setRequestId("request-1");
+        task.setStatus("QUEUED");
+        task.setInternalState("READY");
+        task.setProgress(0);
+        when(mapper.selectTaskByAccountAndRequest(7L, "request-1")).thenReturn(null, task);
+        when(transactions.execute(org.mockito.ArgumentMatchers.any()))
+            .thenThrow(new ServiceException("生成任务并发上限已达到", 429));
+        when(mapper.countMatchingTaskRequest(org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(101L),
+            org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(byte[].class))).thenReturn(1);
+        AssetServiceImpl service = new AssetServiceImpl(mapper,
+            new StaticListableBeanFactory().getBeanProvider(com.ruoyi.system.storage.ObjectStorage.class),
+            transactions, new ObjectMapper(), mock(IGenerationQuotaService.class), mock(IAssetStorageQuotaService.class));
+
+        assertEquals(101L, service.createGenerationTask(7L, request()).getTaskId());
+    }
+
     private static AssetServiceImpl service(AssetMapper mapper)
     {
         return new AssetServiceImpl(mapper, new StaticListableBeanFactory().getBeanProvider(com.ruoyi.system.storage.ObjectStorage.class),
-            new TransactionTemplate(), new ObjectMapper());
+            new TransactionTemplate(), new ObjectMapper(), mock(IGenerationQuotaService.class),
+            mock(IAssetStorageQuotaService.class));
     }
 
     private static CreateGenerationTaskRequest request()

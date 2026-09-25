@@ -52,6 +52,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
                size_bytes, sha256, width, height, status, rights_notice_version
         from p_file
         where account_id = #{accountId} and id = #{fileId} and purpose = 'AVATAR_SOURCE' and status = 'AVAILABLE'
+          and content_type in ('image/png', 'image/jpeg')
     </select>
 
     <sql id="taskColumns">
@@ -85,6 +86,23 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         limit 100
     </select>
 
+    <select id="selectPageTasksByAccount" resultMap="GenerationTaskResult">
+        select <include refid="taskColumns"/> from p_generation_task
+        where account_id = #{accountId}
+        order by created_at desc, id desc limit #{limit} offset #{offset}
+    </select>
+    <select id="countTasksByAccount" resultType="int">
+        select count(*) from p_generation_task where account_id = #{accountId}
+    </select>
+    <select id="selectTaskStepsByAccount" resultType="map">
+        select cast(s.id as char) stepId, s.step_key stepKey, s.step_type stepType,
+            s.action_code actionCode, s.status, s.error_code errorCode,
+            s.created_at createdAt, s.updated_at updatedAt
+        from p_generation_step s join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
+        where s.account_id = #{accountId} and s.task_id = #{taskId}
+        order by s.created_at, s.id
+    </select>
+
     <select id="selectActiveAvatarGenerationService" resultMap="GenerationServiceResult">
         select id, name, provider_code, endpoint, model_id, parameters, revision
         from p_official_service
@@ -107,14 +125,145 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         where account_id = #{accountId} and quota_type = 'AVATAR_COUNT'
           and reserved_units &lt; granted_units - used_units
     </update>
+    <select id="maxGenerationTasksForUpdate" resultType="int">
+        select max_generation_tasks from p_account_limit where account_id = #{accountId} for update
+    </select>
+    <select id="countActiveGenerationTasks" resultType="int">
+        select count(*) from p_generation_task where account_id = #{accountId} and status in ('QUEUED','PROCESSING')
+    </select>
+    <select id="availableAvatarQuota" resultType="long">
+        select greatest(granted_units - used_units - reserved_units, 0)
+        from p_quota_balance where account_id = #{accountId} and quota_type = 'AVATAR_COUNT'
+    </select>
+    <select id="taskReservationForUpdate" resultType="map">
+        select r.id reservationId, r.state, r.reserved_units reservedUnits, r.reservation_no reservationNo,
+            t.status taskStatus,
+            (select count(*) from p_generation_attempt a where a.account_id = t.account_id
+                and a.task_id = t.id and a.status = 'UNKNOWN') unknownAttempts
+        from p_generation_task t join p_quota_reservation r on r.id = t.quota_reservation_id
+            and r.account_id = t.account_id
+        where t.account_id = #{accountId} and t.id = #{taskId} for update
+    </select>
+    <update id="changeTaskReservation">
+        update p_generation_task set quota_reservation_id = #{reservationId}, reservation_no = #{reservationNo},
+            updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{taskId} and quota_reservation_id = #{oldReservationId}
+            and status = 'FAILED'
+    </update>
+    <update id="settleQuotaReservation">
+        update p_quota_reservation set state = 'SETTLED', settled_units = 1, settled_at = utc_timestamp(3),
+            updated_at = utc_timestamp(3)
+        where id = #{reservationId} and reserved_units = 1 and state in ('RESERVED','REVIEW_REQUIRED')
+    </update>
+    <update id="releaseQuotaReservation">
+        update p_quota_reservation set state = 'RELEASED', released_at = utc_timestamp(3),
+            updated_at = utc_timestamp(3)
+        where id = #{reservationId} and reserved_units = 1 and state in ('RESERVED','REVIEW_REQUIRED')
+    </update>
+    <update id="reviewQuotaReservation">
+        update p_quota_reservation set state = 'REVIEW_REQUIRED', updated_at = utc_timestamp(3)
+        where id = #{reservationId} and reserved_units = 1 and state = 'RESERVED'
+    </update>
+    <update id="settleAvatarQuota">
+        update p_quota_balance set reserved_units = reserved_units - 1, used_units = used_units + 1,
+            revision = revision + 1, updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and quota_type = 'AVATAR_COUNT' and reserved_units &gt; 0
+    </update>
+    <update id="releaseAvatarQuota">
+        update p_quota_balance set reserved_units = reserved_units - 1, revision = revision + 1,
+            updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and quota_type = 'AVATAR_COUNT' and reserved_units &gt; 0
+    </update>
+    <select id="timedOutTasksForQuota" resultType="map">
+        select t.account_id accountId, t.id taskId
+        from p_generation_task t join p_quota_reservation r on r.id = t.quota_reservation_id
+        where t.status = 'FAILED' and t.error_code = 'GENERATION_START_TIMEOUT'
+            and r.state = 'RESERVED' and r.reserved_units = 1
+        order by t.id limit 1000
+    </select>
+
+    <select id="maxFileBytesForUpdate" resultType="long">
+        select max_file_bytes from p_account_limit where account_id = #{accountId} for update
+    </select>
+    <update id="reserveStorageBalance">
+        update p_quota_balance set reserved_units = reserved_units + #{bytes}, revision = revision + 1,
+            updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and quota_type = 'STORAGE_BYTE'
+            and #{bytes} &lt;= granted_units - used_units - reserved_units
+    </update>
+    <update id="settleStorageBalance">
+        update p_quota_balance set reserved_units = reserved_units - #{bytes}, used_units = used_units + #{bytes},
+            revision = revision + 1, updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and quota_type = 'STORAGE_BYTE' and reserved_units &gt;= #{bytes}
+    </update>
+    <update id="releaseStorageBalance">
+        update p_quota_balance set reserved_units = reserved_units - #{bytes}, revision = revision + 1,
+            updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and quota_type = 'STORAGE_BYTE' and reserved_units &gt;= #{bytes}
+    </update>
+    <update id="freeStorageBalance">
+        update p_quota_balance set used_units = used_units - #{bytes}, revision = revision + 1,
+            updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and quota_type = 'STORAGE_BYTE' and used_units &gt;= #{bytes}
+    </update>
+    <insert id="insertStorageReservation">
+        insert into p_quota_reservation (id,created_at,updated_at,account_id,quota_type,business_type,
+            business_id,reservation_no,reserved_units,settled_units,state)
+        values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},'STORAGE_BYTE','UPLOAD',
+            cast(#{fileId} as char),1,#{bytes},0,'RESERVED')
+    </insert>
+    <insert id="insertStorageEntry">
+        insert into p_quota_entry (id,created_at,updated_at,account_id,quota_type,reservation_id,event_key,
+            entry_type,delta_granted,delta_used,delta_reserved)
+        values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},'STORAGE_BYTE',#{reservationId},
+            #{eventKey},#{entryType},0,#{deltaUsed},#{deltaReserved})
+    </insert>
+    <select id="storageFileForUpdate" resultType="map">
+        select f.status, f.size_bytes sizeBytes, r.id reservationId, r.state
+        from p_file f join p_quota_reservation r on r.id = f.storage_reservation_id
+            and r.account_id = f.account_id and r.quota_type = 'STORAGE_BYTE'
+        where f.account_id = #{accountId} and f.id = #{fileId} for update
+    </select>
+    <update id="settleStorageReservation">
+        update p_quota_reservation set state = 'SETTLED', settled_units = #{bytes},
+            settled_at = utc_timestamp(3), updated_at = utc_timestamp(3)
+        where id = #{reservationId} and state = 'RESERVED' and reserved_units = #{bytes}
+    </update>
+    <update id="releaseStorageReservation">
+        update p_quota_reservation set state = 'RELEASED', released_at = utc_timestamp(3),
+            updated_at = utc_timestamp(3) where id = #{reservationId} and state = 'RESERVED'
+    </update>
+    <update id="completeStorageFile">
+        update p_file set status = 'AVAILABLE', upload_expires_at = null, updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{fileId} and status = 'UPLOADING'
+    </update>
+    <update id="failStorageFile">
+        update p_file set status = 'FAILED', upload_expires_at = null, updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{fileId} and status in ('UPLOADING','DELETE_PENDING')
+    </update>
+    <select id="countStorageFreeEntry" resultType="int">
+        select count(*) from p_quota_entry
+        where account_id = #{accountId} and event_key = concat('storage:', #{fileId}, ':free')
+    </select>
+    <select id="expiredStorageUploads" resultType="map">
+        select f.id fileId, f.account_id accountId, f.object_key objectKey, f.status
+        from p_file f where f.status in ('UPLOADING','DELETE_PENDING') and f.upload_expires_at &lt; utc_timestamp(3)
+        order by f.upload_expires_at, f.id limit 100
+    </select>
+    <update id="claimExpiredStorageUpload">
+        update p_file set status = 'DELETE_PENDING', updated_at = utc_timestamp(3)
+        where account_id = #{accountId} and id = #{fileId} and status = 'UPLOADING'
+            and upload_expires_at &lt; utc_timestamp(3)
+    </update>
 
     <insert id="insertFile" parameterType="com.ruoyi.system.asset.domain.AssetFile">
         insert into p_file (id, created_at, updated_at, account_id, purpose, storage_provider, bucket, object_key,
             original_name, content_type, size_bytes, sha256, width, height, status, rights_notice_version,
-            rights_confirmed_at, confirmed_by)
+            rights_confirmed_at, confirmed_by, storage_reservation_id, upload_expires_at)
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{purpose}, #{storageProvider}, #{bucket},
             #{objectKey}, #{originalName}, #{contentType}, #{sizeBytes}, #{sha256}, #{width}, #{height}, #{status},
-            #{rightsNoticeVersion}, utc_timestamp(3), #{accountId})
+            #{rightsNoticeVersion}, utc_timestamp(3), #{accountId}, #{storageReservationId},
+            case when #{status} = 'UPLOADING' then date_add(utc_timestamp(3), interval 1 hour) else null end)
     </insert>
 
     <insert id="insertAvatar">
@@ -132,15 +281,15 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     <insert id="insertQuotaReservation">
         insert into p_quota_reservation (id, created_at, updated_at, account_id, quota_type, business_type,
             business_id, reservation_no, reserved_units, settled_units, state)
-        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, 'AVATAR_COUNT', 'GENERATION', #{businessId},
-            1, 0, 0, 'RESERVED')
+        values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, 'AVATAR_COUNT', 'GENERATION', cast(#{taskId} as char),
+            #{reservationNo}, 1, 0, 'RESERVED')
     </insert>
 
     <insert id="insertQuotaEntry">
         insert into p_quota_entry (id, created_at, updated_at, account_id, quota_type, reservation_id, event_key,
             entry_type, delta_granted, delta_used, delta_reserved)
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, 'AVATAR_COUNT', #{reservationId}, #{eventKey},
-            'RESERVE', 0, 0, 0)
+            #{entryType}, 0, #{deltaUsed}, #{deltaReserved})
     </insert>
 
     <insert id="insertGenerationTask">

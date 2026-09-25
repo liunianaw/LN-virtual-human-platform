@@ -28,6 +28,8 @@ import com.ruoyi.system.asset.dto.CreateGenerationTaskRequest;
 import com.ruoyi.system.asset.dto.GenerationTaskResponse;
 import com.ruoyi.system.asset.mapper.AssetMapper;
 import com.ruoyi.system.asset.service.IAssetService;
+import com.ruoyi.system.asset.service.IAssetStorageQuotaService;
+import com.ruoyi.system.asset.service.IGenerationQuotaService;
 import com.ruoyi.system.storage.ObjectStorage;
 
 /** M2 参考图账本、账户授权和制作任务提交。 */
@@ -42,14 +44,19 @@ public class AssetServiceImpl implements IAssetService
     private final ObjectProvider<ObjectStorage> storageProvider;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
+    private final IGenerationQuotaService quota;
+    private final IAssetStorageQuotaService storageQuota;
 
     public AssetServiceImpl(AssetMapper assetMapper, ObjectProvider<ObjectStorage> storageProvider,
-        TransactionTemplate transactionTemplate, ObjectMapper objectMapper)
+        TransactionTemplate transactionTemplate, ObjectMapper objectMapper, IGenerationQuotaService quota,
+        IAssetStorageQuotaService storageQuota)
     {
         this.assetMapper = assetMapper;
         this.storageProvider = storageProvider;
         this.transactionTemplate = transactionTemplate;
         this.objectMapper = objectMapper;
+        this.quota = quota;
+        this.storageQuota = storageQuota;
     }
 
     public AssetFileResponse uploadReference(Long accountId, MultipartFile multipartFile, String rightsNoticeVersion,
@@ -78,20 +85,30 @@ public class AssetServiceImpl implements IAssetService
         file.setSha256(sha256(image.bytes()));
         file.setWidth(image.width());
         file.setHeight(image.height());
-        file.setStatus("AVAILABLE");
+        file.setStatus("UPLOADING");
         file.setRightsNoticeVersion(rightsNoticeVersion.trim());
 
-        storage.put(objectKey, image.bytes(), image.contentType());
+        transactionTemplate.executeWithoutResult(status -> {
+            file.setStorageReservationId(storageQuota.reserve(accountId, fileId, image.bytes().length));
+            assetMapper.insertFile(file);
+        });
         try
         {
-            assetMapper.insertFile(file);
+            storage.put(objectKey, image.bytes(), image.contentType());
+            String url = storage.readUrl(objectKey);
+            transactionTemplate.executeWithoutResult(status -> storageQuota.complete(accountId, fileId));
+            file.setStatus("AVAILABLE");
+            return fileResponse(file, url);
         }
         catch (RuntimeException e)
         {
-            cleanupUnrecordedObject(storage, objectKey);
+            if (cleanupUnrecordedObject(storage, objectKey))
+            {
+                try { transactionTemplate.executeWithoutResult(status -> storageQuota.fail(accountId, fileId)); }
+                catch (RuntimeException releaseFailure) { e.addSuppressed(releaseFailure); }
+            }
             throw e;
         }
-        return fileResponse(file, storage.readUrl(objectKey));
     }
 
     public AssetFileResponse readReference(Long accountId, Long fileId)
@@ -120,6 +137,15 @@ public class AssetServiceImpl implements IAssetService
         {
             GenerationTask duplicate = assetMapper.selectTaskByAccountAndRequest(accountId, request.getRequestId());
             if (duplicate != null) return matchingExistingTask(accountId, request, visibility, requestHash, duplicate);
+            throw e;
+        }
+        catch (ServiceException e)
+        {
+            if (e.getCode() == 429)
+            {
+                GenerationTask duplicate = assetMapper.selectTaskByAccountAndRequest(accountId, request.getRequestId());
+                if (duplicate != null) return matchingExistingTask(accountId, request, visibility, requestHash, duplicate);
+            }
             throw e;
         }
     }
@@ -152,6 +178,22 @@ public class AssetServiceImpl implements IAssetService
         return assetMapper.selectRecentTasksByAccount(accountId).stream().map(this::taskResponse).toList();
     }
 
+    public Map<String, Object> pageGenerationTasks(Long accountId, int pageNum, int pageSize)
+    {
+        requireAccount(accountId);
+        if (pageNum < 1 || pageSize < 1 || pageSize > 100 || (long) (pageNum - 1) * pageSize > Integer.MAX_VALUE)
+            throw new ServiceException("分页参数无效", HttpStatus.BAD_REQUEST);
+        return Map.of("items", assetMapper.selectPageTasksByAccount(accountId, pageSize, (pageNum - 1) * pageSize)
+            .stream().map(this::taskResponse).toList(), "total", assetMapper.countTasksByAccount(accountId),
+            "pageNum", pageNum, "pageSize", pageSize);
+    }
+
+    public List<Map<String, Object>> listGenerationSteps(Long accountId, Long taskId)
+    {
+        readGenerationTask(accountId, taskId);
+        return assetMapper.selectTaskStepsByAccount(accountId, taskId);
+    }
+
     /** 返回当前账号可选的启用官方制作服务；Mapper 仅查询可公开展示的字段。 */
     public List<AvatarGenerationServiceResponse> listAvatarGenerationServices(Long accountId)
     {
@@ -174,11 +216,10 @@ public class AssetServiceImpl implements IAssetService
         Long avatarVersionId = nextId();
         Long taskId = nextId();
         Long reservationId = nextId();
+        quota.reserve(accountId, taskId, reservationId);
         assetMapper.insertAvatar(avatarId, accountId, request.getName().trim(), visibility);
         assetMapper.insertAvatarVersion(avatarVersionId, avatarId, accountId, sourceFile.getId(), PIPELINE_VERSION,
             json(Map.of("pipelineVersion", PIPELINE_VERSION, "sourceSha256", hex(sourceFile.getSha256()))));
-        assetMapper.insertQuotaReservation(reservationId, accountId, taskId.toString());
-        assetMapper.insertQuotaEntry(nextId(), accountId, reservationId, "generation:" + taskId + ":reserve:1");
         assetMapper.insertGenerationTask(taskId, accountId, avatarId, avatarVersionId, sourceFile.getId(), service.getId(),
             serviceSnapshot(service), PIPELINE_VERSION, reservationId, request.getRequestId(), requestHash);
         for (String action : List.of("idle", "speaking", "listening", "thinking", "nod", "shake_head", "wave", "happy"))
@@ -330,12 +371,13 @@ public class AssetServiceImpl implements IAssetService
         return storage;
     }
 
-    private void cleanupUnrecordedObject(ObjectStorage storage, String objectKey)
+    private boolean cleanupUnrecordedObject(ObjectStorage storage, String objectKey)
     {
-        try { storage.delete(objectKey); }
+        try { storage.delete(objectKey); return true; }
         catch (RuntimeException ignored)
         {
-            org.slf4j.LoggerFactory.getLogger(getClass()).warn("未登记的参考图对象清理失败");
+            org.slf4j.LoggerFactory.getLogger(getClass()).warn("参考图对象清理失败，保留存储预占待核对");
+            return false;
         }
     }
 
