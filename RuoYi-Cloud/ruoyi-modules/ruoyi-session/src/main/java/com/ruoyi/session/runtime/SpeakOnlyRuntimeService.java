@@ -11,12 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-/**
- * In-memory orchestration for a fixed SPEAK_ONLY DEBUG Session. Persistent
- * Session/grant/operation records and actual provider calls are deliberately
- * outside this M2 foundation; all late audio is still rejected and queued for
- * cleanup before it can reach a client publisher.
- */
+/** In-memory DEBUG SPEAK_ONLY turns; each turn belongs to one connection epoch. */
 @Service
 public class SpeakOnlyRuntimeService implements TtsCompletionSink
 {
@@ -36,18 +31,16 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         this.events = events;
     }
 
-    public SpeechStarted start(RuntimePrincipal principal, String requestId, String text)
+    public SpeechStarted start(RuntimePrincipal principal, String requestId, String text, long connectionEpoch)
     {
         principal.requireSpeakScope();
         validateRequest(requestId, text);
         List<SegmentPlan> chunks = plans(split(text, properties.getMaxCodePointsPerSegment()));
         String priorTurnId = activeTurnBySession.get(principal.sessionId());
-        if (priorTurnId != null)
-        {
-            stop(principal, priorTurnId);
-        }
-        long persistentTurnId = persistentStore.createSpeakTurn(principal, requestId, chunks);
-        TurnState state = new TurnState(principal, persistentTurnId, chunks);
+        TurnState prior = priorTurnId == null ? null : turns.get(priorTurnId);
+        if (prior != null && prior.connectionEpoch <= connectionEpoch) stop(principal, priorTurnId);
+        long persistentTurnId = persistentStore.createSpeakTurn(principal, requestId, chunks, connectionEpoch);
+        TurnState state = new TurnState(principal, persistentTurnId, chunks, connectionEpoch);
         turns.put(state.turnId, state);
         activeTurnBySession.put(principal.sessionId(), state.turnId);
         synchronized (state)
@@ -67,6 +60,12 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         }
         synchronized (state)
         {
+            if (!persistentStore.currentConnection(principal, state.connectionEpoch))
+            {
+                finishStopped(state, "REPLACED");
+                cleanupQueue.schedule(input.temporaryAudio());
+                return AudioReadyResult.ignored();
+            }
             if (state.stopped || input.generation() != state.generation
                     || !state.acceptAudio(input, properties.getMaxAudioBytes(), properties.getTemporaryAudioTtl()))
             {
@@ -75,7 +74,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
             }
             persistentStore.markAudioReady(Long.parseLong(state.turnId), input.ordinal(), principal, input.temporaryAudio(), input.bytes(), input.durationMs());
             List<AudioSegmentEvent> ready = state.drainOrderedEvents();
-            ready.forEach(event -> events.audioSegment(principal, event));
+            ready.forEach(event -> events.audioSegment(principal, state.connectionEpoch, event));
             return new AudioReadyResult(true, ready, List.of());
         }
     }
@@ -95,8 +94,8 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 return;
             }
             persistentStore.markAudioFailed(Long.parseLong(state.turnId), work.ordinal(), failureCode);
+            events.audioFailed(principal, state.connectionEpoch, work.turnId(), work.segmentId(), work.ordinal(), failureCode);
             finishFailed(state);
-            events.failed(principal, work.turnId(), failureCode);
         }
     }
 
@@ -148,6 +147,19 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         }
     }
 
+    /** A delayed older handshake must never stop a turn started by a newer connection. */
+    public void replaceConnection(RuntimePrincipal principal, long connectionEpoch)
+    {
+        String turnId = activeTurnBySession.get(principal.sessionId());
+        TurnState turn = turnId == null ? null : turns.get(turnId);
+        if (turn != null && turn.belongsTo(principal))
+        {
+            synchronized (turn)
+            {
+                if (turn.connectionEpoch < connectionEpoch) finishStopped(turn, "REPLACED");
+            }
+        }
+    }
     /** Called by trusted logout/revocation/expiry handling; it never trusts browser input. */
     public void revokeSession(long sessionId)
     {
@@ -179,6 +191,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
     private void finishCompleted(TurnState turn)
     {
         persistentStore.complete(Long.parseLong(turn.turnId));
+        events.completed(turn.principal, turn.connectionEpoch, turn.turnId, persistentStore.turnState(turn.principal, turn.turnId));
         turns.remove(turn.turnId, turn);
         activeTurnBySession.remove(turn.principal.sessionId(), turn.turnId);
     }
@@ -187,6 +200,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
     {
         turn.stop(cleanupQueue);
         persistentStore.fail(Long.parseLong(turn.turnId));
+        events.completed(turn.principal, turn.connectionEpoch, turn.turnId, persistentStore.turnState(turn.principal, turn.turnId));
         turns.remove(turn.turnId, turn);
         activeTurnBySession.remove(turn.principal.sessionId(), turn.turnId);
     }
@@ -231,11 +245,12 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         return List.copyOf(result);
     }
 
-    public void disconnect(RuntimePrincipal principal)
+    public void disconnect(RuntimePrincipal principal, long connectionEpoch)
     {
         String turnId = activeTurnBySession.get(principal.sessionId());
         TurnState turn = turnId == null ? null : turns.get(turnId);
-        if (turn != null && turn.belongsTo(principal)) synchronized (turn) { finishStopped(turn, "DISCONNECTED"); }
+        if (turn != null && turn.belongsTo(principal) && turn.connectionEpoch == connectionEpoch)
+            synchronized (turn) { finishStopped(turn, "DISCONNECTED"); }
     }
 
     private static List<SegmentPlan> plans(List<String> chunks)
@@ -280,6 +295,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
     {
         private final RuntimePrincipal principal;
         private final String turnId;
+        private final long connectionEpoch;
         private final long generation = 1L;
         private final List<SegmentState> segments;
         private final Map<String, SegmentState> byId;
@@ -287,10 +303,11 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         private int nextDelivery;
         private boolean stopped;
 
-        private TurnState(RuntimePrincipal principal, long turnId, List<SegmentPlan> chunks)
+        private TurnState(RuntimePrincipal principal, long turnId, List<SegmentPlan> chunks, long connectionEpoch)
         {
             this.principal = principal;
             this.turnId = Long.toString(turnId);
+            this.connectionEpoch = connectionEpoch;
             this.segments = new ArrayList<>();
             this.byId = new HashMap<>();
             for (SegmentPlan plan : chunks)

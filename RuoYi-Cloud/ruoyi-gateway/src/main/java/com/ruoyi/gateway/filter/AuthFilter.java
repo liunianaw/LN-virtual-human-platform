@@ -67,6 +67,12 @@ public class AuthFilter implements GlobalFilter, Ordered
             // The destination validates the hash, type, account, scope and current state on every request.
             return chain.filter(exchange.mutate().request(mutate.build()).build());
         }
+        // Runtime uses a signed short-lived Session Token; WSS authenticates its first-frame ticket.
+        // The session service verifies grant, scope, ownership and current state on every new action.
+        if (url.startsWith("/api/v1/runtime/") || url.equals("/api/v1/realtime"))
+        {
+            return chain.filter(exchange.mutate().request(mutate.build()).build());
+        }
         // 跳过不需要验证的路径
         if (StringUtils.matches(url, ignoreWhite.getWhites()))
         {

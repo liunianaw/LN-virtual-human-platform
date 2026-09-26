@@ -14,19 +14,42 @@ import org.springframework.stereotype.Component;
 public class SystemConsoleDebugGrantVerifier implements TrustedConsoleDebugGrantVerifier
 {
     private final RuntimeTokenCodec tokenCodec;
+    private final PersistentRuntimeStore store;
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
 
-    public SystemConsoleDebugGrantVerifier(RuntimeTokenCodec tokenCodec) { this.tokenCodec = tokenCodec; }
+    public SystemConsoleDebugGrantVerifier(RuntimeTokenCodec tokenCodec, PersistentRuntimeStore store) { this.tokenCodec = tokenCodec; this.store = store; }
 
     @Override
     public TrustedConsoleDebugGrantClaims verify(String authorizationHeader)
     {
-        RuntimeTokenCodec.Claims claims = tokenCodec.decode(authorizationHeader);
+        boolean v2 = authorizationHeader != null && authorizationHeader.startsWith("Bearer ln2.");
+        RuntimeTokenCodec.V2Claims newer = v2 ? tokenCodec.decodeV2(authorizationHeader) : null;
+        RuntimeTokenCodec.Claims claims = v2 ? null : tokenCodec.decode(authorizationHeader);
+        PersistentRuntimeStore.ConsoleGrantMetadata metadata = v2 ? store.consoleGrantMetadata(newer) : null;
+        String issuer = v2 ? metadata.issuerConsoleRef() : claims.issuerConsoleRef();
+        long accountId = v2 ? newer.accountId() : claims.accountId();
+        long applicationId = v2 ? newer.applicationId() : claims.applicationId();
+        long sessionId = v2 ? newer.sessionId() : claims.sessionId();
+        long configId = v2 ? newer.configVersionId() : claims.configVersionId();
+        VoiceRuntimeBinding voice = v2 ? metadata.voice() : claims.voice();
+        String tokenId = v2 ? newer.tokenId() : claims.tokenId();
+        verifyIssuer(issuer, accountId);
+        RuntimePrincipal principal = new RuntimePrincipal(accountId, applicationId, sessionId,
+                configId, java.util.Set.of("session:read", "avatar:read", "speak:write"), voice);
+        return new TrustedConsoleDebugGrantClaims(tokenId, accountId, applicationId, sessionId,
+                configId, v2 ? metadata.accountEpoch() : 1L, v2 ? metadata.applicationEpoch() : configId,
+                v2 ? metadata.principalEpoch() : 1L, v2 ? metadata.sessionEpoch() : 1L, issuer, principal);
+    }
+
+    public void verifyIssuer(String issuer, long accountId)
+    {
+        if (issuer == null || !issuer.matches("[0-9a-f]{64}") || accountId <= 0)
+            throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TOKEN_REVOKED", "Invalid DEBUG issuer.");
         String bearer = System.getenv("LN_SESSION_TO_SYSTEM_INTERNAL_BEARER");
         String baseUrl = System.getenv("LN_SESSION_TO_SYSTEM_URL");
         if (bearer == null || bearer.isBlank() || baseUrl == null || baseUrl.isBlank())
             throw new RuntimeProblem(HttpStatus.SERVICE_UNAVAILABLE, "DEBUG_AUTH_NOT_CONFIGURED", "Platform DEBUG authorization is not configured.");
-        String body = "{\"issuerConsoleRef\":\"" + claims.issuerConsoleRef() + "\",\"accountId\":" + claims.accountId() + "}";
+        String body = "{\"issuerConsoleRef\":\"" + issuer + "\",\"accountId\":" + accountId + "}";
         HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/internal/v1/console-debug-grants/verify"))
                 .timeout(Duration.ofSeconds(5)).header("Authorization", "Bearer " + bearer)
                 .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build();
@@ -43,10 +66,6 @@ public class SystemConsoleDebugGrantVerifier implements TrustedConsoleDebugGrant
             throw unavailable(e);
         }
         catch (IOException | IllegalArgumentException e) { throw unavailable(e); }
-        RuntimePrincipal principal = new RuntimePrincipal(claims.accountId(), claims.applicationId(), claims.sessionId(),
-                claims.configVersionId(), java.util.Set.of("session:read", "avatar:read", "speak:write"), claims.voice());
-        return new TrustedConsoleDebugGrantClaims(claims.tokenId(), claims.accountId(), claims.applicationId(), claims.sessionId(),
-                claims.configVersionId(), 1L, claims.configVersionId(), 1L, 1L, claims.issuerConsoleRef(), principal);
     }
 
     private static RuntimeProblem unavailable(Exception cause)

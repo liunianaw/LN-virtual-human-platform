@@ -17,12 +17,14 @@ public class ConsoleDebugInternalController
     private final InternalBearerGuard guard;
     private final ConsoleDebugGrantService grants;
     private final SpeakOnlyRuntimeService runtime;
+    private final RuntimeEventPublisher events;
 
-    public ConsoleDebugInternalController(InternalBearerGuard guard, ConsoleDebugGrantService grants, SpeakOnlyRuntimeService runtime)
+    public ConsoleDebugInternalController(InternalBearerGuard guard, ConsoleDebugGrantService grants, SpeakOnlyRuntimeService runtime, RuntimeEventPublisher events)
     {
         this.guard = guard;
         this.grants = grants;
         this.runtime = runtime;
+        this.events = events;
     }
 
     @PostMapping
@@ -51,6 +53,7 @@ public class ConsoleDebugInternalController
         guard.requireSystem(authorization);
         runtime.revokeSession(sessionId);
         grants.close(body.accountId(), sessionId);
+        events.revokeSession(sessionId);
     }
 
     public record CreateBody(long accountId, long applicationId, long configVersionId, String requestId) { }

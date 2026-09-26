@@ -49,7 +49,11 @@ spring:
           - id: platform-runtime
             uri: lb://ruoyi-session
             predicates:
-            - Path=/api/v1/runtime/**,/api/v1/realtime
+            - Path=/api/v1/runtime/**
+          - id: platform-realtime
+            uri: lb:ws://ruoyi-session
+            predicates:
+            - Path=/api/v1/realtime
 security:
   captcha:
     enabled: true

@@ -3,6 +3,7 @@ param(
     [switch]$SkipBuild,
     [switch]$SkipFrontend,
     [switch]$SkipRelay,
+    [switch]$SkipMediaWorker,
     [switch]$SkipNacosPublish,
     [ValidateRange(30, 300)]
     [int]$TimeoutSeconds = 120
@@ -367,6 +368,7 @@ try {
     $sessionToSystemBearer = Get-LocalServiceToken -FileName 'session-to-system-bearer.dpapi'
     $runtimeTokenSecret = Get-LocalServiceToken -FileName 'session-runtime-token-secret.dpapi'
     $commonEnvironment = @{
+        LN_RUNTIME_ALLOWED_ORIGINS = 'http://127.0.0.1'
         NACOS_ADDR = $nacosAddress
         SPRING_CLOUD_NACOS_DISCOVERY_IP = '127.0.0.1'
         MANAGEMENT_HEALTH_SENTINEL_ENABLED = 'false'
@@ -471,6 +473,7 @@ try {
         LN_SESSION_TTS_RELAY_ENABLED = 'true'
         LN_SESSION_TTS_RELAY_ENDPOINT = 'http://127.0.0.1:8024/ln-relay/v1'
         LN_SESSION_TTS_RELAY_ACCESS_TOKEN = $relayToken
+        LN_PUBLIC_RUNTIME_WS_URL = 'ws://127.0.0.1:8080/api/v1/realtime'
         LN_SESSION_TO_SYSTEM_URL = 'http://127.0.0.1:9201'
         LN_SESSION_TO_SYSTEM_INTERNAL_BEARER = $sessionToSystemBearer
         LN_SYSTEM_TO_SESSION_INTERNAL_BEARER = $systemToSessionBearer
@@ -527,7 +530,10 @@ try {
         RUOYI_MEDIA_QWEN_ENDPOINT = if ($providerConfig.api_host) { [string]$providerConfig.api_host } else { 'https://dashscope.aliyuncs.com' }
         M2_IMAGE_PROVIDER_ENABLED = 'true'
     }
-    if (-not (Test-MediaWorkerRunning -PythonPath $mediaPython)) {
+    if ($SkipMediaWorker) {
+        Write-Host '[skip] media-worker (provider calls disabled for this startup)'
+    }
+    elseif (-not (Test-MediaWorkerRunning -PythonPath $mediaPython)) {
         Start-DetachedProcess -Name 'media-worker' -FilePath $mediaPython -WorkingDirectory $mediaRoot `
             -ArgumentList @('-m', 'ruoyi_media.worker', '--consume-rabbit', '--interval', '30') -Environment $mediaEnvironment | Out-Null
         Start-Sleep -Milliseconds 750

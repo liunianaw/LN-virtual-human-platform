@@ -1,7 +1,7 @@
 {
   "name": "@ln-avatar/sdk",
   "version": "0.1.0",
-  "description": "Browser-side Canvas player for LN Avatar packages.",
+  "description": "Browser Avatar player and Session runtime client for LN applications.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

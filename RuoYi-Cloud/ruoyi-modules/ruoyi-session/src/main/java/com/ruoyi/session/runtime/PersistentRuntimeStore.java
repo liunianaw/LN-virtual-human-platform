@@ -18,19 +18,21 @@ import org.springframework.transaction.annotation.Transactional;
 public class PersistentRuntimeStore
 {
     private final JdbcTemplate jdbcTemplate;
+    private final com.fasterxml.jackson.databind.ObjectMapper json;
 
-    public PersistentRuntimeStore(JdbcTemplate jdbcTemplate)
+    public PersistentRuntimeStore(JdbcTemplate jdbcTemplate, com.fasterxml.jackson.databind.ObjectMapper json)
     {
         this.jdbcTemplate = jdbcTemplate;
+        this.json = json;
     }
 
     @Transactional
-    public long createSpeakTurn(RuntimePrincipal principal, String requestId, List<SegmentPlan> segments)
+    public long createSpeakTurn(RuntimePrincipal principal, String requestId, List<SegmentPlan> segments, long connectionEpoch)
     {
         try
         {
-            Long nextTurnNo = jdbcTemplate.queryForObject("select next_turn_no from s_session where id = ? and account_id = ? and application_id = ? and status = 'ACTIVE' for update",
-                    Long.class, principal.sessionId(), principal.accountId(), principal.applicationId());
+            Long nextTurnNo = jdbcTemplate.queryForObject("select next_turn_no from s_session where id = ? and account_id = ? and application_id = ? and status = 'ACTIVE' and expires_at > utc_timestamp(3) and connection_epoch = ? for update",
+                    Long.class, principal.sessionId(), principal.accountId(), principal.applicationId(), connectionEpoch);
             if (nextTurnNo == null)
             {
                 throw unavailable();
@@ -39,8 +41,8 @@ public class PersistentRuntimeStore
             Instant now = Instant.now();
             jdbcTemplate.update("update s_session set next_turn_no = ?, active_turn_id = ?, last_activity_at = ?, updated_at = ?, revision = revision + 1 where id = ?",
                     nextTurnNo + 1, turnId, now, now, principal.sessionId());
-            jdbcTemplate.update("insert into s_turn (id,created_at,updated_at,account_id,session_id,turn_no,client_request_id,request_hash,turn_type,status,text_status,audio_status,playback_status,connection_epoch,input_source,include_in_history,last_event_seq,started_at) values (?,?,?,?,?,?,?,?, 'SPEAK','RUNNING','NOT_REQUESTED','RUNNING','WAITING',0,'TEXT',0,0,?)",
-                    turnId, now, now, principal.accountId(), principal.sessionId(), nextTurnNo, requestId, hash(segments.stream().map(SegmentPlan::text).reduce("", String::concat)), now);
+            jdbcTemplate.update("insert into s_turn (id,created_at,updated_at,account_id,session_id,turn_no,client_request_id,request_hash,turn_type,status,text_status,audio_status,playback_status,connection_epoch,input_source,include_in_history,last_event_seq,started_at) values (?,?,?,?,?,?,?,?, 'SPEAK','RUNNING','NOT_REQUESTED','RUNNING','WAITING',?,'TEXT',0,0,?)",
+                    turnId, now, now, principal.accountId(), principal.sessionId(), nextTurnNo, requestId, hash(segments.stream().map(SegmentPlan::text).reduce("", String::concat)), connectionEpoch, now);
             for (SegmentPlan segment : segments)
             {
                 long operationId = nextId();
@@ -129,19 +131,62 @@ public class PersistentRuntimeStore
     @Transactional
     public long openConnection(RuntimePrincipal principal)
     {
-        Long oldEpoch = jdbcTemplate.queryForObject("select connection_epoch from s_session where id = ? and account_id = ? and application_id = ? and app_config_id = ? and status = 'ACTIVE' for update",
-            Long.class, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId());
+        Long oldEpoch = jdbcTemplate.query("select connection_epoch from s_session where id = ? and account_id = ? and application_id = ? and app_config_id = ? and status = 'ACTIVE' and expires_at > utc_timestamp(3) for update",
+            rs -> rs.next() ? rs.getLong(1) : null, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId());
         if (oldEpoch == null) throw unavailable();
+        Long priorTurnId = jdbcTemplate.query("select active_turn_id from s_session where id=?",
+            rs -> rs.next() && rs.getObject(1) != null ? rs.getLong(1) : null, principal.sessionId());
+        if (priorTurnId != null) stop(priorTurnId, "REPLACED");
         long epoch = oldEpoch + 1;
-        jdbcTemplate.update("update s_session set connection_epoch = ?,last_activity_at = ?,updated_at = ?,revision = revision + 1 where id = ?", epoch, Instant.now(), Instant.now(), principal.sessionId());
+        jdbcTemplate.update("update s_session set connection_epoch = ?,updated_at = ?,revision = revision + 1 where id = ?", epoch, Instant.now(), principal.sessionId());
         return epoch;
     }
 
     public boolean currentConnection(RuntimePrincipal principal, long epoch)
     {
-        Integer match = jdbcTemplate.queryForObject("select count(1) from s_session where id = ? and account_id = ? and application_id = ? and app_config_id = ? and status = 'ACTIVE' and connection_epoch = ?",
+        Integer match = jdbcTemplate.queryForObject("select count(1) from s_session where id = ? and account_id = ? and application_id = ? and app_config_id = ? and status = 'ACTIVE' and expires_at > utc_timestamp(3) and connection_epoch = ?",
             Integer.class, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId(), epoch);
         return match != null && match == 1;
+    }
+
+    public java.util.Map<String, Object> sessionState(RuntimePrincipal principal)
+    {
+        return jdbcTemplate.query("select s.status,s.expires_at,s.connection_epoch,s.active_turn_id,t.status,t.text_status,t.audio_status,t.playback_status "
+                + "from s_session s left join s_turn t on t.id=s.active_turn_id where s.id=? and s.account_id=? and s.application_id=? and s.app_config_id=?",
+            rs -> {
+                if (!rs.next() || !"ACTIVE".equals(rs.getString(1))) throw unavailable();
+                java.util.Map<String, Object> state = new java.util.LinkedHashMap<>();
+                state.put("sessionId", Long.toString(principal.sessionId()));
+                state.put("applicationId", Long.toString(principal.applicationId()));
+                state.put("configVersionId", Long.toString(principal.configVersionId()));
+                state.put("status", rs.getString(1));
+                state.put("expiresAt", rs.getTimestamp(2).toInstant().toString());
+                state.put("connectionEpoch", Long.toString(rs.getLong(3)));
+                state.put("effectiveScopes", principal.scopes());
+                state.put("capabilities", java.util.List.of("speech.create", "turn.stop", "playback.report"));
+                if (rs.getObject(4) == null) state.put("activeTurn", null);
+                else state.put("activeTurn", java.util.Map.of("turnId", Long.toString(rs.getLong(4)),
+                    "status", rs.getString(5), "textStatus", rs.getString(6), "audioStatus", rs.getString(7),
+                    "playbackStatus", rs.getString(8)));
+                return state;
+            }, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId());
+    }
+
+    public java.util.Map<String, Object> turnState(RuntimePrincipal principal, String turnId)
+    {
+        return jdbcTemplate.query("select t.status,t.text_status,t.audio_status,t.playback_status from s_turn t " +
+                "where t.id=? and t.session_id=? and t.account_id=?",
+            rs -> rs.next() ? java.util.Map.of("status", rs.getString(1), "textStatus", rs.getString(2),
+                "audioStatus", rs.getString(3), "playbackStatus", rs.getString(4)) : java.util.Map.of(),
+            turnId, principal.sessionId(), principal.accountId());
+    }
+
+    public boolean activeSession(RuntimePrincipal principal)
+    {
+        Integer count = jdbcTemplate.queryForObject("select count(1) from s_session where id=? and account_id=? " +
+            "and application_id=? and app_config_id=? and status='ACTIVE' and expires_at>utc_timestamp(3)",
+            Integer.class, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId());
+        return count != null && count == 1;
     }
 
     public TemporaryAudioReference readableAudio(RuntimePrincipal principal, String mediaId)
@@ -190,6 +235,34 @@ public class PersistentRuntimeStore
             throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TOKEN_REVOKED", "The Console DEBUG Session Token is no longer valid.");
         }
     }
+
+    public ConsoleGrantMetadata consoleGrantMetadata(RuntimeTokenCodec.V2Claims claims)
+    {
+        if (!"CONSOLE_DEBUG".equals(claims.source()))
+            throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TOKEN_SOURCE_INVALID", "The Session Token source is invalid.");
+        ConsoleGrantMetadata row = jdbcTemplate.query(
+            "select lower(hex(g.issuer_console_ref)),g.runtime_binding,g.account_epoch,g.application_epoch,g.principal_epoch,g.session_epoch,g.created_at,g.expires_at,g.signing_key_version " +
+            "from s_session_grant g join s_session s on s.id=g.session_id where g.token_id=? and g.grant_source='CONSOLE_DEBUG' and g.account_id=? and g.application_id=? " +
+            "and g.session_id=? and s.app_config_id=? and g.status='ACTIVE' and g.expires_at>utc_timestamp(3) and s.status='ACTIVE'",
+            rs -> {
+                if (!rs.next()) return null;
+                try
+                {
+                    VoiceRuntimeBinding voice = json.readValue(rs.getString(2), VoiceRuntimeBinding.class);
+                    return new ConsoleGrantMetadata(rs.getString(1), voice, rs.getLong(3), rs.getLong(4), rs.getLong(5),
+                        rs.getLong(6), rs.getTimestamp(7).toInstant(), rs.getTimestamp(8).toInstant(), rs.getString(9));
+                }
+                catch (Exception error) { throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TOKEN_REVOKED", "The DEBUG grant is invalid."); }
+            }, claims.tokenId(), claims.accountId(), claims.applicationId(), claims.sessionId(), claims.configVersionId());
+        if (row == null || !row.issuedAt().equals(claims.issuedAt()) || !row.expiresAt().equals(claims.expiresAt())
+            || !row.signingVersion().equals(claims.keyVersion()))
+            throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TOKEN_REVOKED", "The DEBUG grant is invalid.");
+        return row;
+    }
+
+    public record ConsoleGrantMetadata(String issuerConsoleRef, VoiceRuntimeBinding voice, long accountEpoch,
+        long applicationEpoch, long principalEpoch, long sessionEpoch, Instant issuedAt, Instant expiresAt,
+        String signingVersion) { }
 
     private long nextId()
     {

@@ -98,14 +98,14 @@
           and rs.admin_disabled=0 and json_unquote(json_extract(rv.capabilities,'$.llm'))='true'
           and (rs.grant_mode='ALL_ACCOUNT_APPS' or exists (
             select 1 from p_relay_grant g where g.relay_service_id=rs.id and g.application_id=a.id
-              and g.status='ACTIVE' and json_contains(g.scopes,'"LLM"'))))
+              and g.status='ACTIVE' and json_contains(g.scopes,'"LLM"')))))
       and (c.asr_relay_version_id is null or exists (
         select 1 from p_relay_version rv join p_relay_service rs on rs.id=rv.relay_service_id
         where rv.id=c.asr_relay_version_id and rs.account_id=a.account_id and rs.status='ACTIVE'
           and rs.admin_disabled=0 and json_unquote(json_extract(rv.capabilities,'$.asr'))='true'
           and (rs.grant_mode='ALL_ACCOUNT_APPS' or exists (
             select 1 from p_relay_grant g where g.relay_service_id=rs.id and g.application_id=a.id
-              and g.status='ACTIVE' and json_contains(g.scopes,'"ASR"'))))
+              and g.status='ACTIVE' and json_contains(g.scopes,'"ASR"')))))
       and not exists (
         select 1 from p_app_skill binding join p_skill_version sv on sv.id=binding.skill_version_id
           join p_skill skill on skill.id=sv.skill_id

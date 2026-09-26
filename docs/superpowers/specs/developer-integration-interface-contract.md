@@ -1,6 +1,6 @@
 # 开发者接入接口与授权过程协议（待确认草案）
 
-日期：2026-09-25。状态：DEV-01～04 接口族已随各模块实施固定；DEV-05 的接口 Schema 已固定；DEV-06～11 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
+日期：2026-09-25。状态：DEV-01～07 接口族已随各模块实施固定；DEV-08～11 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
 
 依据：[开发者接入执行计划](2026-09-23-developer-integration-modules.md)、[项目需求](../../../项目需求说明书.md)、[数据库设计](../../../数据库设计说明书.md)、[项目架构](../../../项目架构说明书.md)、[平台内共享契约](platform-console-shared-contract.md)、[接口设计说明书01](../../../接口设计说明书01.md)。
 
@@ -129,11 +129,49 @@ ASR 的 `POST /audio/transcriptions` 为完整录音 multipart，字段 `audio,r
 | `POST /openapi/v1/sessions/{sessionId}/tokens` | 同上，`sessions:grant`、`Idempotency-Key` | 签发 15 分钟浏览器授权；临近到期续签时旧 grant 保持到原到期时间，WSS 连接仍单活 |
 | `POST /openapi/v1/sessions/{sessionId}/revocations` | 同上，`Idempotency-Key` | 撤销 Session；用户退出全部会话时按 `(applicationId,externalUserId)` 撤销，不能跨应用 |
 
-上述表是待确认的最小跨模块契约；没有历史查询、已结束 Session 恢复或持久 Session Context 接口。DEV-01/06/07 实施前必须分别补足路由、JSON Schema、状态码、Scope、响应和 WSS 事件实例，并将其作为静态退出证据。浏览器不能直接调用这些 Application Secret 接口。
+DEV-06 的 BUSINESS Session 接口于 2026-09-25 随用户授权实施本模块而固定如下。浏览器不能调用这些 Application Secret 接口；不提供历史查询、已结束 Session 恢复或持久 Session Context 接口。DEV-07 的浏览器运行接口与 WSS 事件见下节。
 
-浏览器运行接口沿用已有 `/api/v1/runtime/session`、`connection-tickets`、`avatar-package`、`media/{mediaId}`、`asr`、`context-captures` 和 `stop`，每次从短期授权推导 Session。`GET /api/v1/runtime/session` 只返回当前状态、固定配置版本、有效权限和正在运行的 turn 摘要；不返回聊天正文。删除接口01的 `/api/v1/runtime/messages`。WSS 的 `text.delta` 以 `turnId`、requestId 和序号关联，不再包含指向持久 `s_message` 的 `messageId`；SDK 显示当前连接收到的文本，页面刷新后若需旧内容，由开发者自己的后端提供。
+#### DEV-06 请求、响应与事件 Schema（2026-09-25）
+
+所有请求使用 `Authorization: Bearer lna_...`。system 按 `sessions:create/read/grant/end/revoke` Scope 验证当前 Secret、账号和应用；session 再匹配固定 `(accountId,applicationId,externalUserId,sessionId)`。`externalUserId` 只由可信开发者后端声明，区分大小写，非空且最多 191 字符，不接受控制字符。JSON 中的 ID 为十进制字符串。写入的 `Idempotency-Key` 为 1～64 个可见 ASCII 字符；结束可用 `If-Match: <revision>`。同键异参返回 409。
+
+| 方法 | 请求 | 成功响应 | 主要失败 |
+|---|---|---|---|
+| `POST /openapi/v1/sessions` | `Idempotency-Key`；`{"externalUserId":"user-1","queryCredential":"可选短期只读凭证"}` | `{"sessionId":"...","applicationId":"...","configVersionId":"...","status":"ACTIVE","createdAt":"...","lastActivityAt":"...","expiresAt":"...","revision":"..."}` | 400 参数，401 Secret，403 Scope/停用，409 配置/幂等，422 资源，429 账号 Session 上限，503 内部授权不可用 |
+| `GET /openapi/v1/sessions/{sessionId}?externalUserId=user-1` | 同一应用 Secret，无正文 | 同上当前状态、固定配置和期限 | 404 跨身份或不存在，410 已结束 |
+| `DELETE /openapi/v1/sessions/{sessionId}` | `Idempotency-Key` 或 `If-Match`；`{"externalUserId":"user-1"}` | `DELETED` 墓碑摘要 | 404 跨身份，412 版本不符，428 缺少前置条件 |
+| `POST /openapi/v1/sessions/{sessionId}/tokens` | `Idempotency-Key`；`{"externalUserId":"user-1","scopes":["session:read","avatar:read"]}`，省略 `scopes` 使用当前允许权限 | `{"token":"ln2....","expiresAt":"...","scopes":[...]}`；同键有效期内重建原 Token | 400 超范围，409 已结束/同键异参/旧 grant 过期 |
+| `POST /openapi/v1/sessions/{sessionId}/revocations` | `Idempotency-Key`；`{"externalUserId":"user-1","allSessions":false}`；`true` 仅作用于同应用同用户 | `{"revokedSessions":1}` 或对应数量 | 404 跨身份，409 同键异参 |
+
+运行 Scope 从固定配置与当前授权计算：基础 `session:read/avatar:read/speak:write`；CHAT 增加 `chat:write`，有 ASR 增加 `asr:write`，启用 Context 增加 `context:capture`。可选 `queryCredential` 由已鉴权后端在创建时提供，AES-GCM 加密写 Redis，最多保存 15 分钟且不超过 Session 剩余期限；结束/撤销删除，不进入 Token、数据库、Prompt 或浏览器响应。Tool 消费由 DEV-08 按当前业务身份授权。
+
+`v2` payload 字段顺序固定为 `jti,accountId,applicationId,sessionId,configId,source,iat,exp`，ID 为十进制字符串，时间为 UTC 毫秒；`kid` 存于 `s_session_grant.signing_key_version`，与 Application Secret `issuer_key_epoch` 分离。验签后对照持久 JTI、来源、ID、时间、epoch、Scope 与当前 system 状态。DEBUG 新授权同用 v2，旧 v1 仅按原到期时间读取。续签的新旧 grant 并存至各自原到期，Secret 重置不追溯撤销既有 grant；管理员禁用及解除禁用递增应用 epoch，旧 grant 不复活。
+
+跨库状态为 `CREATING → ACTIVE → DELETING → DELETED`；失败创建保留 `FAILED` 墓碑至引用释放后转 `DELETED`。system 按 `(accountId,sessionId,referenceOperationId)` 预留、确认和释放配置、Avatar、Voice、Relay、Skill 版本引用；session 固定版本和引用操作号，重启扫描补偿。撤销事务写 `s_outbox` 的 `BUSINESS_SESSION_REVOKED` v1 事件，payload 例 `{"sessionId":"123","applicationId":"456"}`；引用释放与本地停止完成后标记完成。Session/principal 墓碑及长期脱敏事实保留，临时对象进入删除队列。DEV-07 从此状态定义 WSS 终止/重授权事件与单活连接语义。
+
+部署配置：`LN_SESSION_TO_SYSTEM_URL` 与 `LN_SESSION_TO_SYSTEM_INTERNAL_BEARER` 是既有 session→system 内部身份；`LN_SESSION_RUNTIME_TOKEN_KEY_VERSION` 指定当前 `kid`，对应秘密来自 `LN_SESSION_RUNTIME_TOKEN_SECRET_<kid>`（版本 1 兼容 `LN_SESSION_RUNTIME_TOKEN_SECRET`），至少 32 字节，旧版本须保留至对应 grant 全部到期。使用可选 `queryCredential` 时须配置 32 字节 Base64 的 `LN_BUSINESS_CREDENTIAL_ENCRYPTION_KEY` 和共享 Redis。创建幂等事实只保存该凭证的服务端 HMAC 摘要；同键不同凭证返回 409，不在重试时延长旧凭证 TTL。账号 `p_account_limit.max_sessions` 未配置或为 0 时拒绝新建业务 Session。
+
+浏览器运行接口在 DEV-07 实现 `/api/v1/runtime/session`、`connection-tickets`、`avatar-package`、`media/{mediaId}` 和 `stop`；`asr`、`context-captures` 分别由 DEV-09/10 追加，每次从短期授权推导 Session。`GET /api/v1/runtime/session` 只返回当前状态、固定配置版本、有效权限和正在运行的 turn 摘要；不返回聊天正文。删除接口01的 `/api/v1/runtime/messages`。WSS 的 `text.delta` 以 `turnId`、requestId 和序号关联，不再包含指向持久 `s_message` 的 `messageId`；SDK 显示当前连接收到的文本，页面刷新后若需旧内容，由开发者自己的后端提供。
 
 运行 Session 是平台处理当前连接、固定配置、停止、单活、幂等和额度的状态边界；它不是聊天记忆，也不因日志长期留存而永久可运行。浏览器授权是持有者可执行该 Session 操作的凭证，二者不应混称为“短期 Session”。BUSINESS Session 自最后一次成功业务活动起闲置 2 小时结束，创建满 24 小时强制结束，先到者为准；心跳不续期。浏览器授权 15 分钟，到期前由 SDK 经开发者后端续签，旧 grant 不因正常续签提前失效，最多保留到原到期时刻。Session 元数据墓碑及脱敏业务日志长期保留，与运行期限独立。
+
+#### DEV-07 浏览器 SDK 与运行连接 Schema（2026-09-25）
+
+`SessionClient` 独立于 Vue，构造参数为 `{baseUrl,getToken,player}`。`getToken():Promise<{token:string,expiresAt:string}>` 只调用开发者可信后端完成业务登录复核、Session Token 首次获取和到期前续签；Application Secret 不进入浏览器。核心方法为 `connect():Promise<SessionState>`、`chat(text)`、`speak(text)`、`stop(reason?)`、`playAction(action)`、`resumeAudio()`、`on(listener)`、`destroy()`。`chat.create` 和 BUSINESS 的 `speech.create` 在 DEV-08/09 上线前返回 `CAPABILITY_NOT_ALLOWED`；本模块可用的 BUSINESS 终点是 Session 状态、正式角色包、单活连接、动作和 stop。SDK 错误事件带稳定 `code`，能关联时带 `requestId/turnId`；网络断开、自动播放阻止、资源过期及不支持动作均发事件。
+
+| 接口 | 请求 | `data` 响应/规则 |
+|---|---|---|
+| `GET /api/v1/runtime/session` | `Authorization: Bearer ln2...`（旧 DEBUG v1 仅原期限兼容） | `sessionId/applicationId/configVersionId/status/expiresAt/connectionEpoch/effectiveScopes/capabilities/effectiveLimits/activeTurn`；`activeTurn` 只有 ID 与状态，不含正文。 |
+| `POST /api/v1/runtime/connection-tickets` | `{purpose:"CONNECT"}` 或 `{purpose:"REAUTHORIZE",connectionEpoch:"<当前十进制代数>"}` | `{ticket,expiresAt,webSocketUrl,protocol:"ln-avatar.v1"}`；30 秒一次性，绑定精确 grant、Session、用途；旧未绑定票据拒绝。续权票据只可由当前连接同 principal 消费，不分配新 epoch，不停本轮。 |
+| `GET /api/v1/runtime/avatar-package` | 当前 Token 与 `avatar:read` | 正式 manifest，交给 `AvatarPlayer.loadPackage`；资源过期需重新获取。 |
+| `GET /api/v1/runtime/media/{mediaId}` | 当前 Token 与 `speak:write` | 当前轮所属 WAV，`no-store`；过期或停止后不可读。 |
+| `POST /api/v1/runtime/stop` | `{turnId,reason}`、当前 Token、`X-Connection-Epoch: <当前十进制代数>` 与 `speak:write` | `{turnId,alreadyStopped}`；本地先停止，旧 turn ID 不停止新轮。 |
+
+WSS 固定 `/api/v1/realtime`、子协议 `ln-avatar.v1`，浏览器不用握手 Authorization 头。5 秒内首帧 `connection.auth` 携一次性 CONNECT ticket；返回 `connection.ready`，包含当前 epoch、权限、能力、限制与授权到期。`connection.reauthorize` 携一次性 REAUTHORIZE ticket 和当前 epoch；成功返回 `connection.reauthorized` 的新到期与有效 Scope，旧 grant 仍按自己原到期失效。服务端对每条新业务命令按精确 grant、Scope、Session/配置/用户与连接代数核验；`ping/pong` 只保活传输，不延长 Session。连接 epoch 在数据库持久递增，Redis 仅接受更高代；后连接取代前连接并停止旧轮。旧连接收到 `connection.replaced` 后关闭；跨节点旧连接最多一个扫描周期后关闭，期间不能再执行命令或接收新音频。20 秒心跳、60 秒无帧关闭；普通网络重连最多 3 次（约 1/2/4 秒加抖动），先查询当前状态，不恢复正文、不重发轮次或音频。被替换、撤销和删除不自动抢回连接。
+
+WSS 信封沿用[平台内共享契约 C4.2～C4.3](platform-console-shared-contract.md)：`v/type/requestId/sessionId/connectionEpoch/turnId/seq/occurredAt/data`，seq 按连接和 turn 独立递增并在发送锁内分配。SDK 只消费当前连接代、递增序号和未停止 turn 的事件；`connection.replaced/revoked` 及 `request.error` 均携稳定错误码或原因。`speech.create/turn.stop/playback.report` 属现有 DEBUG 播报内核；BUSINESS 的 chat、TTS、ASR、Context 和指导事件分别由 DEV-08～10 开通，不用空成功响应代替。浏览器释放 WSS、当前音频、Object URL、待处理 fetch、动画帧与监听器。
+
+部署须设置 `LN_PUBLIC_RUNTIME_WS_URL` 为公网 `wss://.../api/v1/realtime`；仅 loopback 本地开发可用 `ws://`。Gateway 与 session 同用 `LN_RUNTIME_ALLOWED_ORIGINS` 的明确页面来源列表，正式环境只接受 HTTPS 来源；没有配置时不开放跨源调用。Gateway 仅将 runtime 短期 Token 与 WSS 首帧票据交 session 验证，不按后台 JWT 解析，也不放行其他 API 路由。
 
 ## 3. 一个应用配置凭证、会话授权与重置
 

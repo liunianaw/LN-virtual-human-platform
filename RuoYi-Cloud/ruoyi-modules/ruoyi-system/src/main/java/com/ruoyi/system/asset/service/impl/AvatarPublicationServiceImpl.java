@@ -305,7 +305,11 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
                 item.put("code", action.getActionCode()); item.put("frameCount", action.getFrameCount());
                 item.put("fps", action.getFps()); item.put("loop", action.getLoopEnabled());
                 item.put("atlas", assetDescriptor(atlas, storage.readUrl(atlas.getObjectKey()), expiresAt));
-                item.put("frames", objectMapper.readTree(action.getFrameLayout()).get("frames"));
+                List<Map<String, Integer>> frames = new ArrayList<>();
+                for (JsonNode frame : objectMapper.readTree(action.getFrameLayout()).get("frames"))
+                    frames.add(Map.of("x", frame.get("x").intValue(), "y", frame.get("y").intValue(),
+                        "width", frame.get("width").intValue(), "height", frame.get("height").intValue()));
+                item.put("frames", frames);
                 actions.add(item);
             }
             manifest.put("actions", actions);

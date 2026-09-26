@@ -16,11 +16,13 @@ public class ConsoleDebugGrantService
 {
     private final JdbcTemplate jdbcTemplate;
     private final RuntimeTokenCodec tokenCodec;
+    private final com.fasterxml.jackson.databind.ObjectMapper json;
 
-    public ConsoleDebugGrantService(JdbcTemplate jdbcTemplate, RuntimeTokenCodec tokenCodec)
+    public ConsoleDebugGrantService(JdbcTemplate jdbcTemplate, RuntimeTokenCodec tokenCodec, com.fasterxml.jackson.databind.ObjectMapper json)
     {
         this.jdbcTemplate = jdbcTemplate;
         this.tokenCodec = tokenCodec;
+        this.json = json;
     }
 
     @Transactional
@@ -58,12 +60,17 @@ public class ConsoleDebugGrantService
         if (session == null) throw new RuntimeProblem(org.springframework.http.HttpStatus.CONFLICT, "SESSION_NOT_READY", "The DEBUG Session is not active.");
         String tokenId = UUID.randomUUID().toString().replace("-", "");
         Instant expiresAt = request.expiresAt().isBefore(Instant.now().plus(15, ChronoUnit.MINUTES)) ? request.expiresAt() : Instant.now().plus(15, ChronoUnit.MINUTES);
-        jdbcTemplate.update("insert into s_session_grant (id,created_at,updated_at,account_id,session_id,principal_id,application_id,grant_source,issuer_console_ref,token_id,scopes,account_epoch,application_epoch,principal_epoch,session_epoch,status,expires_at) values (?,?,?,?,?,?,?,'CONSOLE_DEBUG',unhex(?),?,json_array('session:read','avatar:read','speak:write'),1,?,?,?,?, 'ACTIVE',?)",
-                nextId(), Instant.now(), Instant.now(), request.accountId(), session.sessionId(), session.principalId(), request.applicationId(),
-                request.issuerConsoleRef(), tokenId, request.configVersionId(), session.principalEpoch(), session.sessionEpoch(), expiresAt);
-        RuntimeTokenCodec.Claims claims = new RuntimeTokenCodec.Claims(tokenId, request.accountId(), request.applicationId(),
-                session.sessionId(), request.configVersionId(), expiresAt, request.issuerConsoleRef(), request.voice());
-        return new IssuedToken(tokenCodec.encode(claims), expiresAt);
+        String binding;
+        try { binding = json.writeValueAsString(request.voice()); }
+        catch (Exception error) { throw new IllegalStateException(error); }
+        String version = tokenCodec.currentKeyVersion();
+        Instant issuedAt = Instant.now();
+        jdbcTemplate.update("insert into s_session_grant (id,created_at,updated_at,account_id,session_id,principal_id,application_id,grant_source,issuer_console_ref,token_id,scopes,account_epoch,application_epoch,principal_epoch,session_epoch,status,expires_at,signing_key_version,runtime_binding) values (?,?,?,?,?,?,?,'CONSOLE_DEBUG',unhex(?),?,json_array('session:read','avatar:read','speak:write'),1,?,?,?, 'ACTIVE',?,?,cast(? as json))",
+                nextId(), issuedAt, issuedAt, request.accountId(), session.sessionId(), session.principalId(), request.applicationId(),
+                request.issuerConsoleRef(), tokenId, request.configVersionId(), session.principalEpoch(), session.sessionEpoch(), expiresAt, version, binding);
+        RuntimeTokenCodec.V2Claims claims = new RuntimeTokenCodec.V2Claims(version, tokenId, request.accountId(),
+                request.applicationId(), session.sessionId(), request.configVersionId(), "CONSOLE_DEBUG", issuedAt, expiresAt);
+        return new IssuedToken(tokenCodec.encodeV2(claims), expiresAt);
     }
 
     @Transactional

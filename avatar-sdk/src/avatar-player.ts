@@ -47,6 +47,7 @@ export class AvatarPlayer {
   private audioEpoch = 0;
   private audioActive = false;
   private destroyed = false;
+  private assetAbort?: AbortController;
 
   constructor(options: AvatarPlayerOptions) {
     this.canvas = options.canvas ?? document.createElement("canvas");
@@ -76,26 +77,33 @@ export class AvatarPlayer {
   /** Validates the complete formal package before requesting any atlas. */
   async loadPackage(rawManifest: unknown): Promise<AvatarManifest> {
     this.assertAvailable();
-    const manifest = parseAvatarManifest(rawManifest);
-    const now = Date.now();
-    for (const asset of [manifest.preview, manifest.baseImage, ...manifest.actions.map((action) => action.atlas)]) {
-      if (Date.parse(asset.expiresAt) <= now) {
-        throw new AvatarSdkError("ASSET_EXPIRED", `Asset ${asset.fileId} has expired; refresh the runtime package.`);
+    this.assetAbort?.abort();
+    const controller = new AbortController();
+    this.assetAbort = controller;
+    try {
+      const manifest = parseAvatarManifest(rawManifest);
+      const now = Date.now();
+      for (const asset of [manifest.preview, manifest.baseImage, ...manifest.actions.map((action) => action.atlas)]) {
+        if (Date.parse(asset.expiresAt) <= now) {
+          throw new AvatarSdkError("ASSET_EXPIRED", `Asset ${asset.fileId} has expired; refresh the runtime package.`);
+        }
       }
+      const loadedAtlases = await Promise.all(manifest.actions.map(async (action) => [action.code, await loadAtlas(action, controller.signal)] as const));
+      await Promise.all([verifyAsset(manifest.preview, controller.signal), verifyAsset(manifest.baseImage, controller.signal)]);
+      this.assertAvailable();
+      if (this.assetAbort !== controller) throw new AvatarSdkError("PACKAGE_LOAD_CANCELLED", "Package load was superseded.");
+      this.stop();
+      this.manifest = manifest;
+      this.atlases.clear();
+      loadedAtlases.forEach(([code, image]) => this.atlases.set(code, image));
+      this.queue.splice(0);
+      this.audioActive = false;
+      this.select("idle");
+      return manifest;
+    } finally {
+      if (this.assetAbort === controller) this.assetAbort = undefined;
     }
-    const loadedAtlases = await Promise.all(manifest.actions.map(async (action) => [action.code, await loadAtlas(action)] as const));
-    await Promise.all([verifyAsset(manifest.preview), verifyAsset(manifest.baseImage)]);
-    this.assertAvailable();
-    this.stop();
-    this.manifest = manifest;
-    this.atlases.clear();
-    loadedAtlases.forEach(([code, image]) => this.atlases.set(code, image));
-    this.queue.splice(0);
-    this.audioActive = false;
-    this.select("idle");
-    return manifest;
   }
-
   playAction(code: string): void {
     this.assertAvailable();
     this.requireLoaded();
@@ -185,6 +193,7 @@ export class AvatarPlayer {
   destroy(): void {
     if (this.destroyed) return;
     this.stop();
+    this.assetAbort?.abort();
     this.destroyed = true;
     if (this.animationFrame !== undefined) cancelAnimationFrame(this.animationFrame);
     this.listeners.clear();
@@ -267,13 +276,26 @@ export function createAvatar(options: AvatarPlayerOptions): AvatarPlayer {
   return new AvatarPlayer(options);
 }
 
-async function loadAtlas(action: AvatarAction): Promise<HTMLImageElement> {
-  const blob = await fetchAsset(action.atlas);
+async function loadAtlas(action: AvatarAction, signal: AbortSignal): Promise<HTMLImageElement> {
+  const blob = await fetchAsset(action.atlas, signal);
   return new Promise((resolve, reject) => {
     const image = new Image();
     const blobUrl = URL.createObjectURL(blob);
-    image.onload = () => {
+    const cleanup = () => {
+      signal.removeEventListener("abort", onAbort);
+      image.onload = null;
+      image.onerror = null;
       URL.revokeObjectURL(blobUrl);
+    };
+    const onAbort = () => {
+      cleanup();
+      image.src = "";
+      reject(new AvatarSdkError("PACKAGE_LOAD_CANCELLED", `Atlas load for ${action.code} was cancelled.`));
+    };
+    if (signal.aborted) { onAbort(); return; }
+    signal.addEventListener("abort", onAbort, { once: true });
+    image.onload = () => {
+      cleanup();
       if (image.naturalWidth !== 1536 || image.naturalHeight !== 1536) {
         reject(new AvatarSdkError("ATLAS_LOAD_FAILED", `Atlas for ${action.code} must be 1536x1536.`));
         return;
@@ -281,21 +303,20 @@ async function loadAtlas(action: AvatarAction): Promise<HTMLImageElement> {
       resolve(image);
     };
     image.onerror = () => {
-      URL.revokeObjectURL(blobUrl);
+      cleanup();
       reject(new AvatarSdkError("ATLAS_LOAD_FAILED", `Could not load atlas for ${action.code}.`));
     };
     image.src = blobUrl;
   });
 }
-
-async function verifyAsset(asset: AvatarAsset): Promise<void> {
-  await fetchAsset(asset);
+async function verifyAsset(asset: AvatarAsset, signal: AbortSignal): Promise<void> {
+  await fetchAsset(asset, signal);
 }
 
-async function fetchAsset(asset: AvatarAsset): Promise<Blob> {
+async function fetchAsset(asset: AvatarAsset, signal: AbortSignal): Promise<Blob> {
   let response: Response;
   try {
-    response = await fetch(asset.url, { credentials: "omit" });
+    response = await fetch(asset.url, { credentials: "omit", signal });
   } catch (error) {
     throw new AvatarSdkError("ATLAS_LOAD_FAILED", `Could not fetch asset ${asset.fileId}.`, error);
   }

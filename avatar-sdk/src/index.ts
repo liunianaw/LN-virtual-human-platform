@@ -10,3 +10,4 @@ export {
   type AvatarFrame,
   type AvatarManifest,
 } from "./manifest.js";
+export { SessionClient, SessionClientError, type SessionClientEvent, type SessionClientOptions, type SessionState, type SessionToken } from "./session-client.js";

@@ -6,7 +6,8 @@ export type AvatarSdkErrorCode =
   | "ACTION_NOT_SUPPORTED"
   | "ACTION_QUEUE_FULL"
   | "AUDIO_PLAYBACK_BLOCKED"
-  | "PLAYER_DESTROYED";
+  | "PLAYER_DESTROYED"
+  | "PACKAGE_LOAD_CANCELLED";
 
 /** A recoverable, documented failure from the browser-side SDK. */
 export class AvatarSdkError extends Error {

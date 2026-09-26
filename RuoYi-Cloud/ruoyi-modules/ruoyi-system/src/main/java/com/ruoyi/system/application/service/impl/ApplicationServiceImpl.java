@@ -238,7 +238,7 @@ public class ApplicationServiceImpl implements IApplicationService
         ordered.sort(java.util.Comparator.comparingInt(ApplicationConfigRequest.SkillBinding::sortOrder));
         Long llm = optionalId(request.llmRelayVersionId()), asr = optionalId(request.asrRelayVersionId());
         Map<String, Boolean> capabilities = request.llmCapabilities() == null ? Map.of() : new TreeMap<>(request.llmCapabilities());
-        if (!Set.of("image", "tool").containsAll(capabilities.keySet()) || capabilities.containsValue(null))
+        if (!Set.of("image", "tool").containsAll(capabilities.keySet()) || capabilities.values().stream().anyMatch(java.util.Objects::isNull))
             throw badRequest("模型能力声明无效");
         Map<String, Object> parameters = request.llmParameters() == null ? Map.of() : new TreeMap<>(request.llmParameters());
         if (!Set.of("temperature", "maxOutputTokens").containsAll(parameters.keySet())) throw badRequest("模型参数无效");
