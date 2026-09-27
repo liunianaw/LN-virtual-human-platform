@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class RuntimeVoiceController
 {
     private final RuntimeAuthorization access;
-    private final TtsRuntimeAdapterRegistry adapters;
+    private final TtsSubmissionService submissions;
     private final SpeakOnlyRuntimeService runtime;
     private final RuntimeConnectionTicketService tickets;
     private final PersistentRuntimeStore store;
@@ -26,14 +26,16 @@ public class RuntimeVoiceController
     private final RuntimeLimits limits;
     private final IChatRuntimeService chat;
     private final ChatTurnStore chatStore;
+    private final AsrRuntimeService asr;
 
-    public RuntimeVoiceController(RuntimeAuthorization access, TtsRuntimeAdapterRegistry adapters,
+    public RuntimeVoiceController(RuntimeAuthorization access, TtsSubmissionService submissions,
             SpeakOnlyRuntimeService runtime, RuntimeConnectionTicketService tickets, PersistentRuntimeStore store,
             TemporaryWavStorage audioStorage, SystemRuntimeClient system, RuntimeLimits limits,
-            RuntimeConnectionEpochs epochs, IChatRuntimeService chat, ChatTurnStore chatStore)
+            RuntimeConnectionEpochs epochs, IChatRuntimeService chat, ChatTurnStore chatStore,
+            AsrRuntimeService asr)
     {
         this.access = access;
-        this.adapters = adapters;
+        this.submissions = submissions;
         this.runtime = runtime;
         this.tickets = tickets;
         this.store = store;
@@ -43,6 +45,7 @@ public class RuntimeVoiceController
         this.chat = chat;
         this.chatStore = chatStore;
         this.epochs = epochs;
+        this.asr = asr;
     }
 
     @PostMapping("/connection-tickets")
@@ -67,9 +70,8 @@ public class RuntimeVoiceController
         java.util.Map<String, Object> state = store.sessionState(grant.principal());
         state.put("effectiveLimits", limits.current());
         state.put("capabilities", grant.principal().scopes().contains("chat:write")
-            ? java.util.List.of("chat.create", "turn.stop")
-            : "CONSOLE_DEBUG".equals(grant.source())
-            ? java.util.List.of("speech.create", "turn.stop", "playback.report") : java.util.List.of("turn.stop"));
+            ? java.util.List.of("chat.create", "speech.create", "turn.stop", "playback.report")
+            : java.util.List.of("speech.create", "turn.stop", "playback.report"));
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(RuntimeEnvelope.ok(state));
     }
 
@@ -92,6 +94,20 @@ public class RuntimeVoiceController
             .body(audioStorage.read(store.readableAudio(principal, mediaId)));
     }
 
+    @PostMapping(value = "/asr", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<RuntimeEnvelope<AsrRuntimeService.Result>> asr(
+        @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+        @RequestHeader("Idempotency-Key") String requestId,
+        @org.springframework.web.bind.annotation.RequestPart("audio") org.springframework.web.multipart.MultipartFile audio,
+        @org.springframework.web.bind.annotation.RequestParam(required = false) String language) throws java.io.IOException
+    {
+        RuntimeAuthorization.Grant grant = access.authenticate(authorization);
+        if (audio.getSize() <= 0 || audio.getSize() > 1_900_000)
+            throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "RECORDING_SIZE_INVALID", "Recording size is invalid.");
+        AsrRuntimeService.Result result = asr.transcribe(grant, requestId, audio.getContentType(), audio.getBytes(), language);
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(RuntimeEnvelope.ok(result));
+    }
+
     @PostMapping("/debug/speech")
     public RuntimeEnvelope<SpeechResponse> speech(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
             @RequestHeader("X-Connection-Epoch") String connectionEpoch, @RequestBody SpeechRequest request)
@@ -100,9 +116,9 @@ public class RuntimeVoiceController
         principal.requireSpeakScope();
         if (principal.scopes().contains("chat:write"))
             throw new RuntimeProblem(org.springframework.http.HttpStatus.FORBIDDEN, "CAPABILITY_NOT_ALLOWED", "CHAT does not use this speech endpoint.");
-        TtsRuntimeAdapter adapter = adapters.requireAdapter(principal.voice());
+        RuntimeAuthorization.Grant grant = access.authenticate(authorization);
         SpeakOnlyRuntimeService.SpeechStarted started = runtime.start(principal, request.requestId(), request.text(), epoch(connectionEpoch));
-        dispatch(adapter, started.initialWork());
+        submissions.submit(grant, epoch(connectionEpoch), started.initialWork());
         return RuntimeEnvelope.ok(new SpeechResponse(started.turnId(), started.generation(), started.segmentCount()));
     }
 
@@ -120,9 +136,9 @@ public class RuntimeVoiceController
         catch (NumberFormatException error)
         { throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", "Turn ID is invalid."); }
         boolean chatTurn = chatStore.chatTurn(principal, turnId);
-        SpeakOnlyRuntimeService.StopResult stopped = chatTurn
-            ? new SpeakOnlyRuntimeService.StopResult(request.turnId(),
-                !chat.stop(principal, turnId, "USER_STOP"))
+        SpeakOnlyRuntimeService.StopResult stopped = runtime.hasTurn(request.turnId())
+            ? runtime.stop(principal, request.turnId()) : chatTurn
+            ? new SpeakOnlyRuntimeService.StopResult(request.turnId(), !chat.stop(principal, turnId, "USER_STOP"))
             : runtime.stop(principal, request.turnId());
         return RuntimeEnvelope.ok(new StopResponse(stopped.turnId(), stopped.alreadyStopped()));
     }
@@ -136,7 +152,7 @@ public class RuntimeVoiceController
                 request.state());
         if (updated.accepted() && !updated.nextWork().isEmpty())
         {
-            dispatch(adapters.requireAdapter(principal.voice()), updated.nextWork());
+            submissions.submit(access.authenticate(authorization), epoch(connectionEpoch), updated.nextWork());
         }
         return RuntimeEnvelope.ok(new PlaybackResponse(updated.accepted()));
     }
@@ -169,14 +185,6 @@ public class RuntimeVoiceController
     ResponseEntity<RuntimeEnvelope<Void>> runtimeProblem(RuntimeProblem problem)
     {
         return ResponseEntity.status(problem.status()).body(RuntimeEnvelope.error(problem.code(), problem.getMessage()));
-    }
-
-    private void dispatch(TtsRuntimeAdapter adapter, Iterable<TtsSynthesisWork> work)
-    {
-        for (TtsSynthesisWork item : work)
-        {
-            adapter.submit(item, runtime);
-        }
     }
 
     public record SpeechRequest(String requestId, String text)

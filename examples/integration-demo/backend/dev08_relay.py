@@ -21,6 +21,7 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 MAX_PROVIDER_CALLS = 8
 MAX_OUTPUT_TOKENS = 256
 MAX_INPUT_BYTES = 65536
+MAX_ASR_CALLS = 2
 PROVIDER_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 
 
@@ -78,11 +79,12 @@ def provider_messages(messages: list[dict]) -> list[dict]:
 def create_app(settings: Settings | None = None) -> Flask:
     settings = settings or Settings.from_environment()
     app = Flask(__name__)
-    app.config["MAX_CONTENT_LENGTH"] = 131072
+    app.config["MAX_CONTENT_LENGTH"] = 2_100_000
     lock = threading.Lock()
     history: OrderedDict[str, list[list[dict]]] = OrderedDict()
     latest_turn: dict[str, str] = {}
     provider_calls = 0
+    asr_calls = 0
 
     def bearer(expected: str) -> bool:
         return hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {expected}")
@@ -100,7 +102,53 @@ def create_app(settings: Settings | None = None) -> Flask:
         if not relay_authenticated():
             return jsonify({"code": "UNAUTHORIZED"}), 401
         return jsonify({"protocol": "LN_RELAY", "protocolVersion": "1",
-                        "capabilities": {"llm": True, "asr": False, "tool": True, "cancel": False}})
+                        "capabilities": {"llm": True, "asr": True, "tool": True, "cancel": False},
+                        "asr": {"inputMimeTypes": ["audio/webm", "audio/mp4", "audio/ogg", "audio/wav"]}})
+
+    @app.post("/ln-relay/v1/audio/transcriptions")
+    def transcribe() -> Response:
+        nonlocal asr_calls
+        if not relay_authenticated():
+            return jsonify({"code": "UNAUTHORIZED"}), 401
+        audio = request.files.get("audio")
+        if audio is None or audio.mimetype not in {"audio/webm", "audio/mp4", "audio/ogg", "audio/wav"}:
+            return jsonify({"code": "AUDIO_INVALID"}), 400
+        content = audio.read(1_900_001)
+        session_id = request.form.get("sessionId", "")
+        external_user = request.form.get("externalUserId", "")
+        if not 0 < len(content) <= 1_900_000 or request.form.get("requestId") != request.headers["X-Request-Id"] \
+            or request.form.get("applicationId") != settings.application_id \
+            or not re.fullmatch(r"[1-9][0-9]*", session_id) \
+            or external_user not in (settings.allowed_user, f"__ln_debug__:{session_id}"):
+            return jsonify({"code": "REQUEST_INVALID"}), 400
+        with lock:
+            if asr_calls >= MAX_ASR_CALLS:
+                return jsonify({"code": "TEST_BUDGET_EXHAUSTED"}), 429
+            asr_calls += 1
+        payload = {"model": "qwen3-asr-flash", "stream": False,
+                   "messages": [{"role": "user", "content": [{"type": "input_audio",
+                                 "input_audio": {"data": f"data:{audio.mimetype};base64,"
+                                                 + base64.b64encode(content).decode("ascii")}}]}]}
+        language = request.form.get("language")
+        if language:
+            payload["asr_options"] = {"language": language}
+        try:
+            upstream = Request(PROVIDER_URL, json.dumps(payload).encode("utf-8"),
+                               {"Authorization": f"Bearer {settings.provider_key}",
+                                "Content-Type": "application/json"}, method="POST")
+            with urlopen(upstream, timeout=30) as response:
+                result = json.load(response)
+            choice = result["choices"][0]
+            text = choice["message"]["content"]
+            if choice["finish_reason"] != "stop" or not isinstance(text, str) or not 0 < len(text) <= 4096:
+                raise ValueError("invalid ASR result")
+            annotations = choice["message"].get("annotations") or []
+            detected = annotations[0].get("language") if annotations else None
+            seconds = result.get("usage", {}).get("seconds")
+            return jsonify({"text": text, "language": detected, "providerRequestId": result.get("id"),
+                            "durationMs": seconds * 1000 if isinstance(seconds, int) else None})
+        except (HTTPError, URLError, TimeoutError, ValueError, KeyError, IndexError, TypeError):
+            return jsonify({"code": "ASR_UPSTREAM_FAILED"}), 502
 
     @app.get("/tool/lookup")
     def lookup() -> Response:
@@ -160,7 +208,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             latest_turn[user] = turn_id
         # Deterministic manual probes for stop/replacement; they never call the paid provider.
         last_user = next((m.get("content") for m in reversed(current) if m["role"] == "user"), "")
-        if last_user in ("DEV08_SLOW_TEST", "DEV08_FAST_TEST", "DEV08_TOOL_TIMEOUT_TEST", "DEV08_TOOL_DENIED_TEST"):
+        if last_user in ("DEV08_SLOW_TEST", "DEV08_FAST_TEST", "DEV08_TOOL_TIMEOUT_TEST", "DEV08_TOOL_DENIED_TEST", "DEV09_SENTENCES_TEST"):
             def probe():
                 if last_user in ("DEV08_TOOL_TIMEOUT_TEST", "DEV08_TOOL_DENIED_TEST"):
                     if any(message["role"] == "tool" for message in current):
@@ -171,7 +219,11 @@ def create_app(settings: Settings | None = None) -> Flask:
                                     arguments=json.dumps({"item": "timeout-test"}))
                     yield event("response.completed", usage={"inputTokens": 0, "outputTokens": 0})
                     return
-                yield event("text.delta", text="测试流")
+                if last_user == "DEV09_SENTENCES_TEST":
+                    yield event("text.delta", text="你好。")
+                    yield event("text.delta", text="测试完毕。")
+                else:
+                    yield event("text.delta", text="测试流")
                 if last_user == "DEV08_SLOW_TEST":
                     time.sleep(5)
                 yield event("response.completed", usage={"inputTokens": 0, "outputTokens": 0})

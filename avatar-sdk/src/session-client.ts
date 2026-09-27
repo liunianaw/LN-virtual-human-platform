@@ -55,6 +55,10 @@ export class SessionClient {
   private audio?: HTMLAudioElement;
   private audioUrl?: string;
   private mediaAbort?: AbortController;
+  private asrAbort?: AbortController;
+  private recording?: { recorder: MediaRecorder; stream: MediaStream; chunks: Blob[]; cancelled: boolean };
+  private recordingPending = false;
+  private recordingGeneration = 0;
   private readonly requests = new Set<AbortController>();
   private refreshTimer?: ReturnType<typeof setTimeout>;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -107,6 +111,80 @@ export class SessionClient {
     return requestId;
   }
 
+  async startRecording(): Promise<void> {
+    this.assertLive();
+    if (this.recording || this.recordingPending) throw new SessionClientError("RECORDING_ACTIVE", "Recording is already active.");
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined")
+      throw new SessionClientError("RECORDING_UNAVAILABLE", "Browser recording is unavailable.");
+    const mimeType = ["audio/webm", "audio/mp4", "audio/ogg"].find(type => MediaRecorder.isTypeSupported(type));
+    if (!mimeType) throw new SessionClientError("RECORDING_FORMAT_UNSUPPORTED", "No supported recording format is available.");
+    const generation = this.recordingGeneration;
+    this.recordingPending = true;
+    let stream: MediaStream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch { this.emit({ type: "recording.permission-denied" }); throw new SessionClientError("MICROPHONE_DENIED", "Microphone permission was denied."); }
+    finally { this.recordingPending = false; }
+    if (this.destroyed || generation !== this.recordingGeneration) {
+      stream.getTracks().forEach(track => track.stop());
+      throw new SessionClientError("RECORDING_CANCELLED", "Recording was cancelled.");
+    }
+    let recorder: MediaRecorder;
+    try { recorder = new MediaRecorder(stream, { mimeType }); }
+    catch { stream.getTracks().forEach(track => track.stop()); throw new SessionClientError("RECORDING_FORMAT_UNSUPPORTED", "Recording format could not be started."); }
+    const recording = { recorder, stream, chunks: [] as Blob[], cancelled: false };
+    recorder.ondataavailable = event => { if (!recording.cancelled && event.data.size) recording.chunks.push(event.data); };
+    this.recording = recording;
+    try { recorder.start(); }
+    catch { this.recording = undefined; stream.getTracks().forEach(track => track.stop()); throw new SessionClientError("RECORDING_FAILED", "Recording could not start."); }
+    this.emit({ type: "recording.started", data: { mimeType } });
+  }
+
+  async endRecording(chatAfterRecognition = false): Promise<string> {
+    this.assertLive();
+    const recording = this.recording;
+    if (!recording || recording.recorder.state === "inactive") throw new SessionClientError("RECORDING_NOT_ACTIVE", "No recording is active.");
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      recording.recorder.onerror = () => reject(new SessionClientError("RECORDING_FAILED", "Recording failed."));
+      recording.recorder.onstop = () => resolve(new Blob(recording.chunks, { type: recording.recorder.mimeType }));
+      recording.recorder.stop();
+    }).finally(() => { if (this.recording === recording) this.recording = undefined; recording.stream.getTracks().forEach(track => track.stop()); });
+    if (recording.cancelled) throw new SessionClientError("RECORDING_CANCELLED", "Recording was cancelled.");
+    if (!blob.size || blob.size > 1_900_000) throw new SessionClientError("RECORDING_SIZE_INVALID", "Recording must be at most 1.9 MB.");
+    this.emit({ type: "recording.ended", data: { bytes: blob.size } });
+    const requestId = this.requestId();
+    const form = new FormData();
+    form.append("audio", blob, "recording");
+    const controller = new AbortController();
+    this.asrAbort = controller;
+    try {
+      if (!this.token) throw new SessionClientError("TOKEN_REQUIRED", "Session Token is unavailable.");
+      const response = await fetch(`${this.baseUrl}/api/v1/runtime/asr`, { method: "POST", cache: "no-store",
+        headers: { Authorization: `Bearer ${this.token.token}`, "Idempotency-Key": requestId },
+        body: form, signal: controller.signal });
+      const envelope = await response.json() as { code: string; data?: { text: string; operationId: string; language?: string }; error?: { code: string; message: string } };
+      if (!response.ok || envelope.code !== "OK" || !envelope.data?.text)
+        throw new SessionClientError(envelope.error?.code ?? "ASR_FAILED", envelope.error?.message ?? "Recognition failed.", requestId);
+      if (controller.signal.aborted) throw new SessionClientError("RECORDING_CANCELLED", "Recognition was cancelled.", requestId);
+      this.emit({ type: "asr.completed", requestId, data: envelope.data });
+      if (chatAfterRecognition) this.chat(envelope.data.text);
+      return envelope.data.text;
+    } catch (error) { this.emitError(error, requestId); throw error; }
+    finally { if (this.asrAbort === controller) this.asrAbort = undefined; }
+  }
+
+  cancelRecording(): void {
+    ++this.recordingGeneration;
+    const recording = this.recording;
+    if (recording) {
+      recording.cancelled = true;
+      this.recording = undefined;
+      if (recording.recorder.state !== "inactive") recording.recorder.stop();
+      recording.stream.getTracks().forEach(track => track.stop());
+    }
+    this.asrAbort?.abort();
+    this.emit({ type: "recording.cancelled" });
+  }
+
   playAction(action: string): void {
     this.assertLive();
     try { this.player.playAction(action); }
@@ -115,6 +193,7 @@ export class SessionClient {
 
   stop(reason = "USER_STOP"): void {
     this.assertLive();
+    if (this.recording || this.asrAbort) this.cancelRecording();
     const turnId = this.activeTurn;
     for (const requestId of this.pendingSpeech) this.stopOnAck.set(requestId, reason);
     if (turnId) this.pendingStop.add(turnId);
@@ -131,6 +210,7 @@ export class SessionClient {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.cancelRecording();
     ++this.generation;
     this.clearTimers();
     if (this.reauthorization) {

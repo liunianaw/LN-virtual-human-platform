@@ -62,10 +62,13 @@ public class DebugSessionService
             registration.applicationId(), accountId);
         if (allowed == null || allowed != 1) throw new ServiceException("应用当前不可签发新授权", HttpStatus.FORBIDDEN.value());
         Binding binding = registration.binding();
+        Long asrRelayVersionId = "CHAT".equals(binding.mode()) ? jdbc.queryForObject(
+            "select asr_relay_version_id from p_app_config where id=? and account_id=?",
+            Long.class, binding.configVersionId(), accountId) : null;
         return sessionClient.mint(new SessionDebugClient.MintBody(accountId, registration.applicationId(), sessionId, binding.configVersionId(),
                 registration.issuerConsoleRef(), expiresAt.toEpochMilli(), binding.voiceVersionId(), binding.providerKind(),
                 binding.providerVoiceRef(), binding.relayVersionRef(), binding.officialServiceId(), binding.officialServiceRevision(),
-                binding.mode()));
+                binding.mode(), asrRelayVersionId != null && asrRelayVersionId > 0));
     }
 
     public void close(long accountId, LoginUser login, long sessionId)

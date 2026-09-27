@@ -70,7 +70,9 @@ public class ConsoleDebugGrantService
         catch (Exception error) { throw new IllegalStateException(error); }
         String version = tokenCodec.currentKeyVersion();
         String scopes = "CHAT".equals(request.mode())
-            ? "[\"session:read\",\"avatar:read\",\"speak:write\",\"chat:write\"]"
+            ? request.asrEnabled()
+                ? "[\"session:read\",\"avatar:read\",\"speak:write\",\"chat:write\",\"asr:write\"]"
+                : "[\"session:read\",\"avatar:read\",\"speak:write\",\"chat:write\"]"
             : "[\"session:read\",\"avatar:read\",\"speak:write\"]";
         jdbcTemplate.update("insert into s_session_grant (id,created_at,updated_at,account_id,session_id,principal_id,application_id,grant_source,issuer_console_ref,token_id,scopes,account_epoch,application_epoch,principal_epoch,session_epoch,status,expires_at,signing_key_version,runtime_binding) values (?,?,?,?,?,?,?,'CONSOLE_DEBUG',unhex(?),?,cast(? as json),1,?,?,?, 'ACTIVE',?,?,cast(? as json))",
                 nextId(), issuedAt, issuedAt, request.accountId(), session.sessionId(), session.principalId(), request.applicationId(),
@@ -129,7 +131,7 @@ public class ConsoleDebugGrantService
     private record SessionRow(long sessionId, long principalId, long sessionEpoch, long principalEpoch) { }
     public record CreateRequest(long accountId, long applicationId, long configVersionId, String requestId) { }
     public record MintRequest(long accountId, long applicationId, long sessionId, long configVersionId, String issuerConsoleRef,
-            Instant expiresAt, VoiceRuntimeBinding voice, String mode) { }
+            Instant expiresAt, VoiceRuntimeBinding voice, String mode, boolean asrEnabled) { }
     public record DebugSession(long sessionId, long applicationId, long configVersionId) { }
     public record IssuedToken(String token, Instant expiresAt) { }
 }

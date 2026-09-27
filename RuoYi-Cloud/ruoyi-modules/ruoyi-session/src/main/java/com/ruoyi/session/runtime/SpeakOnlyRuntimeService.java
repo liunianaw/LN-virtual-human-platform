@@ -49,6 +49,26 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         }
     }
 
+    public boolean hasTurn(String turnId) { return turns.containsKey(turnId); }
+
+    /** Reuses the same CHAT turn so text completion and actual audio playback remain separate facts. */
+    public SpeechStarted startChatAudio(RuntimePrincipal principal, long turnId, String text, long connectionEpoch)
+    {
+        principal.requireSpeakScope();
+        if (text == null || text.isBlank() || text.length() > 65536 || properties.getMaxCodePointsPerSegment() <= 0
+            || properties.getMaxBufferedSegments() <= 0)
+            throw new RuntimeProblem(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", "CHAT audio text is invalid.");
+        List<SegmentPlan> chunks = plans(splitSentences(text, Math.min(8000, properties.getMaxCodePointsPerSegment())));
+        if (chunks.size() > 512)
+            throw new RuntimeProblem(HttpStatus.BAD_REQUEST, "TTS_SEGMENT_LIMIT", "CHAT audio has too many sentences.");
+        persistentStore.createChatAudio(principal, turnId, chunks, connectionEpoch);
+        TurnState state = new TurnState(principal, turnId, chunks, connectionEpoch);
+        turns.put(state.turnId, state);
+        activeTurnBySession.put(principal.sessionId(), state.turnId);
+        synchronized (state)
+        { return new SpeechStarted(state.turnId, state.generation, state.segments.size(), state.dispatchAvailable()); }
+    }
+
     @Override
     public AudioReadyResult onAudioReady(RuntimePrincipal principal, AudioReadyInput input)
     {
@@ -72,7 +92,13 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 cleanupQueue.schedule(input.temporaryAudio());
                 return AudioReadyResult.ignored();
             }
-            persistentStore.markAudioReady(Long.parseLong(state.turnId), input.ordinal(), principal, input.temporaryAudio(), input.bytes(), input.durationMs());
+            if (!persistentStore.markAudioReady(Long.parseLong(state.turnId), input.ordinal(), principal,
+                    input.temporaryAudio(), input.bytes(), input.durationMs()))
+            {
+                finishStopped(state, "REPLACED");
+                cleanupQueue.schedule(input.temporaryAudio());
+                return AudioReadyResult.ignored();
+            }
             List<AudioSegmentEvent> ready = state.drainOrderedEvents();
             ready.forEach(event -> events.audioSegment(principal, state.connectionEpoch, event));
             return new AudioReadyResult(true, ready, List.of());
@@ -200,7 +226,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
     {
         turn.stop(cleanupQueue);
         persistentStore.fail(Long.parseLong(turn.turnId));
-        events.completed(turn.principal, turn.connectionEpoch, turn.turnId, persistentStore.turnState(turn.principal, turn.turnId));
+        events.failed(turn.principal, turn.connectionEpoch, turn.turnId, persistentStore.turnState(turn.principal, turn.turnId));
         turns.remove(turn.turnId, turn);
         activeTurnBySession.remove(turn.principal.sessionId(), turn.turnId);
     }
@@ -243,6 +269,24 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
             start = end;
         }
         return List.copyOf(result);
+    }
+
+    static List<String> splitSentences(String text, int maxCodePoints)
+    {
+        List<String> result = new ArrayList<>();
+        int start = 0;
+        for (int index = 0; index < text.length();)
+        {
+            int point = text.codePointAt(index);
+            index += Character.charCount(point);
+            if ("。！？.!?;；\n".indexOf(point) >= 0)
+            {
+                result.addAll(split(text.substring(start, index), maxCodePoints));
+                start = index;
+            }
+        }
+        if (start < text.length()) result.addAll(split(text.substring(start), maxCodePoints));
+        return result.stream().filter(value -> !value.isBlank()).toList();
     }
 
     public void disconnect(RuntimePrincipal principal, long connectionEpoch)

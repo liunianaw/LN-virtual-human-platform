@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.operations.mapper.TtsQuotaMapper">
+  <select id="applicationPurpose" resultType="string">
+    select purpose from p_application where id=#{applicationId} and account_id=#{accountId}
+      and status='ACTIVE' and admin_disabled=0
+  </select>
+  <select id="balanceForUpdate" resultType="map">
+    select id from p_quota_balance where account_id=#{accountId} and quota_type='TTS_CHAR' for update
+  </select>
+  <select id="reservation" resultType="map">
+    select id,reserved_units reservedUnits,state from p_quota_reservation
+    where account_id=#{accountId} and quota_type='TTS_CHAR' and business_type='TTS_SEGMENT'
+      and business_id=#{businessId} and reservation_no=1
+  </select>
+  <select id="reservationForUpdate" resultType="map">
+    select id,reserved_units reservedUnits,state from p_quota_reservation
+    where account_id=#{accountId} and quota_type='TTS_CHAR' and business_type='TTS_SEGMENT'
+      and business_id=#{businessId} and reservation_no=1 for update
+  </select>
+  <update id="reserveBalance">
+    update p_quota_balance set reserved_units=reserved_units+#{units},revision=revision+1,
+      updated_at=utc_timestamp(3)
+    where account_id=#{accountId} and quota_type='TTS_CHAR'
+      and granted_units-used_units-reserved_units &gt;= #{units}
+  </update>
+  <update id="finishBalance">
+    update p_quota_balance set reserved_units=reserved_units-#{units},used_units=used_units+#{usedUnits},
+      revision=revision+1,updated_at=utc_timestamp(3)
+    where account_id=#{accountId} and quota_type='TTS_CHAR' and reserved_units &gt;= #{units}
+      and granted_units-used_units &gt;= #{usedUnits}
+  </update>
+  <insert id="insertReservation">
+    insert into p_quota_reservation (id,created_at,updated_at,account_id,quota_type,business_type,business_id,
+      reservation_no,reserved_units,settled_units,state,expires_at)
+    values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},'TTS_CHAR','TTS_SEGMENT',#{businessId},
+      1,#{units},0,'RESERVED',date_add(utc_timestamp(3),interval 1 day))
+  </insert>
+  <update id="finishReservation">
+    update p_quota_reservation set state=#{state},settled_units=#{settledUnits},
+      settled_at=case when #{state}='SETTLED' then utc_timestamp(3) else null end,
+      released_at=case when #{state}='RELEASED' then utc_timestamp(3) else null end,
+      updated_at=utc_timestamp(3) where id=#{id} and state='RESERVED'
+  </update>
+  <update id="reviewReservation">
+    update p_quota_reservation set state='REVIEW_REQUIRED',updated_at=utc_timestamp(3)
+    where id=#{id} and state='RESERVED'
+  </update>
+  <insert id="insertEntry">
+    insert into p_quota_entry (id,created_at,updated_at,account_id,quota_type,reservation_id,event_key,
+      entry_type,delta_granted,delta_used,delta_reserved)
+    values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},'TTS_CHAR',#{reservationId},#{eventKey},
+      #{entryType},0,#{usedUnits},#{reservedUnits})
+  </insert>
+  <select id="nextId" resultType="long">select uuid_short()</select>
+</mapper>

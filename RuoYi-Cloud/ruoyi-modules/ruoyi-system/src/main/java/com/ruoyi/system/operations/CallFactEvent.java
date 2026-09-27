@@ -4,9 +4,14 @@ import java.math.BigDecimal;
 
 /** Whitelisted cross-service calling fact.  It deliberately has no request body, credential or URL field. */
 public record CallFactEvent(String eventId, String operationKey, Long accountId, String capability, String status,
-    Long applicationId, Long sessionId, Long turnId, String providerRequestId, Usage usage,
+    Long applicationId, Long sessionId, Long turnId, Long quotaReservationId, String providerRequestId, Usage usage,
     BigDecimal costAmount, String currency, String costSource, String errorCode)
 {
+    public CallFactEvent(String eventId, String operationKey, Long accountId, String capability, String status,
+        Long applicationId, Long sessionId, Long turnId, String providerRequestId, Usage usage,
+        BigDecimal costAmount, String currency, String costSource, String errorCode)
+    { this(eventId, operationKey, accountId, capability, status, applicationId, sessionId, turnId,
+        null, providerRequestId, usage, costAmount, currency, costSource, errorCode); }
     public record Usage(Long inputChars, Long imageCount, Long audioDurationMs, Boolean usageAvailable,
         Long inputTokens, Long outputTokens)
     {

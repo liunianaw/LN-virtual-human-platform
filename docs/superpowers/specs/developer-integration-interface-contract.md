@@ -1,6 +1,6 @@
 # 开发者接入接口与授权过程协议（待确认草案）
 
-日期：2026-09-26。状态：DEV-01～08 接口族已随各模块实施固定；DEV-09～11 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
+日期：2026-09-27。状态：DEV-01～08 接口族已随各模块实施固定；DEV-09 契约已按本节细化、静态实现待最终复核；DEV-10～11 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
 
 依据：[开发者接入执行计划](2026-09-23-developer-integration-modules.md)、[项目需求](../../../项目需求说明书.md)、[数据库设计](../../../数据库设计说明书.md)、[项目架构](../../../项目架构说明书.md)、[平台内共享契约](platform-console-shared-contract.md)、[接口设计说明书01](../../../接口设计说明书01.md)。
 
@@ -182,6 +182,14 @@ Session 服务通过受保护内部身份读取固定 CHAT 配置及已确认 SE
 LN_RELAY/1 的 SSE 每个事件使用单行 JSON `data:`，可有 `event:` 指定类型，事件以空行结束；类型为 `text.delta {text}`、`tool_call.delta {id,name?,arguments?}`、`response.completed {usage?:{inputTokens?,outputTokens?},providerRequestId?}`、`error`。Tool 参数片段只能在 `response.completed` 后作为完整 JSON 对象解析；模型提议的名称必须属于固定应用配置。每轮 Tool 总次数默认 10、显式限值至多 20，并且每个 Tool 仍受其 `maxCallsPerTurn` 限制。Tool 输入和输出只允许发布时确定的标量 Schema；服务端注入身份头 `X-LN-External-User-Id-B64`、`X-LN-Application-Id`、`X-LN-Session-Id`，需要业务查询凭证时从短期加密 Redis 读取并以 `X-LN-Query-Credential-B64` 传递，`-B64` 为 UTF-8 Base64URL 无填充。开发者 Tool 服务负责实际只读和业务身份授权；平台不从 GET/POST 推断无副作用。成功 Tool 结果按输出 Schema 过滤后只送回本轮模型，浏览器的 `tool.result` 仅含 `frontendFields`；失败送模型稳定错误码，不编造业务结果。
 
 每次 LLM/Tool 在外部提交前写 `s_operation` 和同事务 `CALL_FACT_RECORDED` Outbox；被绑定、Schema、次数或凭证预检拒绝的模型 Tool 提议只作为失败结果回给模型，不建立外部调用事实；终态再写事实、可获取 token 用量，并转发到 `p_call_record/p_usage_daily`，归属为 `DEVELOPER`。停止、退出或在途连接关闭不能证明上游未计费，在途事实标为 `UNKNOWN`，留待 DEV-11 核对。请求正文、Tool 参数与原始结果只在有界当前轮内存中，不进入数据库、Outbox 或日志。DEV-08 的 session V6 增量迁移解除 V1 的 CHAT 历史标记约束；原 V1 文件不改。真实 Relay/Tool 网络、费用和用户终点须独立验收。
+
+#### DEV-09 ASR、官方 TTS 与独立播报 Schema（2026-09-27）
+
+`POST /api/v1/runtime/asr` 使用 Session Token、`asr:write` 与 1～64 位可见 ASCII `Idempotency-Key`；`multipart/form-data` 只含完整 `audio` 文件及可选 `language`。录音 MIME 限 `audio/webm|audio/mp4|audio/ogg|audio/wav`，文件至多 1.9 MB；服务端从 grant 推导账号、应用、Session、固定配置和 BUSINESS 身份，DEBUG 使用隔离身份。固定配置必须含 ASR Relay 版本；平台通过受保护的 Relay resolve 读取 ASR 授权与固定公网地址，随后以 `LN_RELAY/1` 的 `POST /audio/transcriptions` 提交完整录音。响应 `{code:"OK",data:{operationId,text,language?}}`；识别结果仅回当前请求，不在 Session 数据库保存。调用前写独立 `s_operation` 与 Outbox；网络提交后未确认的调用记 `UNKNOWN`，待核对。SDK `startRecording/endRecording/cancelRecording` 负责麦克风权限、格式、大小、取消和错误事件；`endRecording(true)` 在识别成功后提交 chat，默认返回文本供开发者确认。
+
+WSS `speech.create {text}` 对当前 BUSINESS/DEBUG Session 开放，使用 `speak:write`、固定官方 Voice 与当前授权；CHAT 应用同样可独立 speak，但此命令不调用 LLM/Skills/Context。`chat.create` 的 LLM 流持续发送 `text.delta`；完整结果触发 `text.completed`，随后按句界及段长度合成官方 TTS，尾段也合成。每个新段提交官方服务前核对 grant、连接代、应用状态并以 `turnId:ordinal` 预占 `TTS_CHAR`；成功合成结算，提交前取消释放，结果不确定保留待核对。逐段 `s_operation`、额度流水及调用事实保留，正文与音频仅在内存/临时存储。`audio.segment` 含 `segmentId,ordinal,mediaId,mimeType,durationMs,expiresAt`；SDK 按 ordinal 播放并用 `playback.report {segmentId,state:STARTED|ENDED|FAILED}` 驱动 speaking 和后续段。`turn.completed` 表示播放完成；合成/播放失败发 `audio.failed` 或 `turn.failed`，文字仍由当前浏览器保留。stop 先终止本地音频/录音，再发服务端 stop；停止轮的迟到段不可读取或播放。
+
+官方百炼实时 TTS 适配器固定 `response_format=pcm`、`sample_rate=24000`，只在收到 `response.audio.done` 与成功的 `response.done` 后发送 `session.finish`，收到 `session.finished` 才将 PCM 封装为受限的单声道 WAV 并写临时媒体。不能在 `response.audio.done` 后立即关闭 WebSocket；百炼会将这种提前断开记为 `ClientDisconnect`。停止轮若外部合成最终成功，逐段额度与调用事实仍记成功，播放保持 `STOPPED` 且媒体不可读。DEBUG Token 的 `asr:write` 只随固定 CHAT 配置中的 ASR Relay 授予；BUSINESS Token 同样从固定配置计算该 Scope。
 
 ## 3. 一个应用配置凭证、会话授权与重置
 

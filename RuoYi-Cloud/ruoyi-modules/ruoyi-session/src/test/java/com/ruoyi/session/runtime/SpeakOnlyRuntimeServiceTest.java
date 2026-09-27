@@ -1,6 +1,7 @@
 package com.ruoyi.session.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -16,6 +17,14 @@ import org.junit.jupiter.api.Test;
 
 class SpeakOnlyRuntimeServiceTest
 {
+    @Test
+    void chatAudioUsesCompleteSentencesAndKeepsTheTail()
+    {
+        assertEquals(java.util.List.of("你好。", "下一句！", "尾段"),
+            SpeakOnlyRuntimeService.splitSentences("你好。下一句！尾段", 100));
+        assertEquals(java.util.List.of("abcd", "ef"),
+            SpeakOnlyRuntimeService.splitSentences("abcdef", 4));
+    }
     @Test
     void oldConnectionCloseCannotStopNewerConnectionsTurn()
     {

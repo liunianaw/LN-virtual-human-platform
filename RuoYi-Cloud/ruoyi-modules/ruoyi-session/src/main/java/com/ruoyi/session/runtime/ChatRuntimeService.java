@@ -40,16 +40,20 @@ public class ChatRuntimeService implements IChatRuntimeService
     private final PinnedHttps https;
     private final ChatToolPolicy policy;
     private final ObjectMapper json;
+    private final SpeakOnlyRuntimeService speech;
+    private final TtsSubmissionService submissions;
     private final Map<Long, Running> running = new ConcurrentHashMap<>();
     private final ThreadPoolExecutor workers = new ThreadPoolExecutor(2, 8, 30, TimeUnit.SECONDS,
         new ArrayBlockingQueue<>(32), new ThreadPoolExecutor.AbortPolicy());
 
     public ChatRuntimeService(ChatTurnStore store, BusinessSystemClient system, BusinessCredentialStore credentials,
         RuntimeAuthorization access, RuntimeConnectionEpochs epochs, RuntimeEventPublisher events,
-        PinnedHttps https, ChatToolPolicy policy, ObjectMapper json)
+        PinnedHttps https, ChatToolPolicy policy, ObjectMapper json,
+        SpeakOnlyRuntimeService speech, TtsSubmissionService submissions)
     {
         this.store = store; this.system = system; this.credentials = credentials; this.access = access;
         this.epochs = epochs; this.events = events; this.https = https; this.policy = policy; this.json = json;
+        this.speech = speech; this.submissions = submissions;
     }
 
     @Override
@@ -88,7 +92,11 @@ public class ChatRuntimeService implements IChatRuntimeService
         int maxCalls = Math.min(20, Math.max(0, config.path("runtimeLimits").path("toolCallsPerTurn").asInt(10)));
         if (!config.path("capabilities").path("tool").asBoolean(false)) maxCalls = 0;
         ChatTurnStore.Started started = store.start(principal, epoch, requestId, text);
-        if (started.priorTurnId() != null) cancel(started.priorTurnId());
+        if (started.priorTurnId() != null)
+        {
+            cancel(started.priorTurnId());
+            speech.stop(principal, Long.toString(started.priorTurnId()));
+        }
         String externalUserId = "CONSOLE_DEBUG".equals(grant.source())
             ? "__ln_debug__:" + principal.sessionId() : started.externalUserId();
         Running current = new Running(grant.id(), grant.source(), principal, epoch, requestId, started.turnId(),
@@ -193,8 +201,19 @@ public class ChatRuntimeService implements IChatRuntimeService
                 operationId = 0;
                 if (completion.calls.isEmpty())
                 {
-                    if (store.finish(turn.principal, turn.turnId, true, null))
-                        emit(turn, "turn.completed", Map.of("textStatus", "COMPLETED"));
+                    store.textCompleted(turn.principal, turn.turnId);
+                    emit(turn, "text.completed", Map.of("textStatus", "COMPLETED"));
+                    if (completion.text.isBlank())
+                    {
+                        if (store.finish(turn.principal, turn.turnId, true, null))
+                            emit(turn, "turn.completed", Map.of("textStatus", "COMPLETED", "audioStatus", "NOT_REQUESTED"));
+                    }
+                    else
+                    {
+                        SpeakOnlyRuntimeService.SpeechStarted started = speech.startChatAudio(
+                            turn.principal, turn.turnId, completion.text, turn.epoch);
+                        submissions.submit(access.verify(turn.grantId), turn.epoch, started.initialWork());
+                    }
                     return;
                 }
                 messages.add(Map.of("role", "assistant", "content", completion.text,

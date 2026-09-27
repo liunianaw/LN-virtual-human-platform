@@ -99,9 +99,11 @@ public class ChatTurnStore
     @Transactional
     public boolean finish(RuntimePrincipal principal, long turnId, boolean success, String code)
     {
-        int changed = jdbc.update("update s_turn set status=?,text_status=?,error_code=?,ended_at=utc_timestamp(3)," +
+        int changed = jdbc.update("update s_turn set status=?,text_status=case when text_status='COMPLETED' " +
+            "then 'COMPLETED' else ? end,audio_status=case when ?=0 and text_status='COMPLETED' then 'FAILED' " +
+            "else audio_status end,error_code=?,ended_at=utc_timestamp(3)," +
             "updated_at=utc_timestamp(3) where id=? and account_id=? and session_id=? and status='RUNNING'",
-            success ? "COMPLETED" : "FAILED", success ? "COMPLETED" : "FAILED", code,
+            success ? "COMPLETED" : "FAILED", success ? "COMPLETED" : "FAILED", success ? 1 : 0, code,
             turnId, principal.accountId(), principal.sessionId());
         if (changed == 1)
             jdbc.update("update s_session set active_turn_id=null,updated_at=utc_timestamp(3),revision=revision+1 " +
@@ -132,6 +134,59 @@ public class ChatTurnStore
         Integer count = jdbc.queryForObject("select count(*) from s_turn where id=? and account_id=? and session_id=? and turn_type='CHAT'",
             Integer.class, turnId, principal.accountId(), principal.sessionId());
         return count != null && count == 1;
+    }
+
+    public void textCompleted(RuntimePrincipal principal, long turnId)
+    {
+        jdbc.update("update s_turn set text_status='COMPLETED',updated_at=utc_timestamp(3) " +
+            "where id=? and account_id=? and session_id=? and turn_type='CHAT' and status='RUNNING'",
+            turnId, principal.accountId(), principal.sessionId());
+    }
+
+    public Long activeChat(RuntimePrincipal principal)
+    {
+        return jdbc.query("select t.id from s_session s join s_turn t on t.id=s.active_turn_id " +
+            "where s.id=? and s.account_id=? and s.application_id=? and t.turn_type='CHAT' and t.status='RUNNING'",
+            rs -> rs.next() ? rs.getLong(1) : null, principal.sessionId(), principal.accountId(), principal.applicationId());
+    }
+
+    public String externalUserId(RuntimePrincipal principal)
+    {
+        return jdbc.query("select p.external_user_id from s_session s join s_principal p on p.id=s.principal_id " +
+            "where s.id=? and s.account_id=? and s.application_id=? and s.app_config_id=? and s.status='ACTIVE'",
+            rs -> rs.next() ? rs.getString(1) : null, principal.sessionId(), principal.accountId(),
+            principal.applicationId(), principal.configVersionId());
+    }
+
+    @Transactional
+    public long beginAsr(RuntimePrincipal principal, String requestId, long relayVersionId, byte[] audio)
+    {
+        Integer existing = jdbc.queryForObject("select count(*) from s_operation where session_id=? and client_request_id=?",
+            Integer.class, principal.sessionId(), requestId);
+        if (existing != null && existing > 0) throw problem("REQUEST_ALREADY_USED");
+        long operationId = id();
+        jdbc.update("insert into s_operation (id,created_at,updated_at,account_id,session_id,client_request_id," +
+            "operation_type,ordinal,config_resource_id,status,input_hash,started_at) " +
+            "values (?,utc_timestamp(3),utc_timestamp(3),?,?,?,'ASR',0,?,'RUNNING',?,utc_timestamp(3))",
+            operationId, principal.accountId(), principal.sessionId(), requestId, relayVersionId,
+            sha256(audio));
+        fact(principal.accountId(), principal.applicationId(), principal.sessionId(), null,
+            operationId, "ASR", "STARTED", null, null, null, null);
+        return operationId;
+    }
+
+    @Transactional
+    public void endAsr(RuntimePrincipal principal, long operationId, String status, String code, String providerRequestId,
+        Long durationMs)
+    {
+        if (!java.util.Set.of("SUCCEEDED", "FAILED", "UNKNOWN").contains(status)) throw problem("OPERATION_STATE_INVALID");
+        int changed = jdbc.update("update s_operation set status=?,error_code=?,provider_request_id=?," +
+            "result_summary=json_object('durationMs',?)," +
+            "finished_at=utc_timestamp(3),updated_at=utc_timestamp(3) where id=? and account_id=? and session_id=? " +
+            "and operation_type='ASR' and status='RUNNING'", status, code, providerRequestId, durationMs,
+            operationId, principal.accountId(), principal.sessionId());
+        if (changed == 1) fact(principal.accountId(), principal.applicationId(), principal.sessionId(), null,
+            operationId, "ASR", status, code, providerRequestId, null, null, durationMs);
     }
 
     @Transactional
@@ -169,7 +224,8 @@ public class ChatTurnStore
 
     private void interrupt(long turnId, String reason)
     {
-        jdbc.update("update s_turn set status='INTERRUPTED',text_status='INTERRUPTED',cancel_reason=?," +
+        jdbc.update("update s_turn set status='INTERRUPTED',text_status=case when turn_type='CHAT' " +
+            "and text_status='RUNNING' then 'INTERRUPTED' else text_status end,cancel_reason=?," +
             "ended_at=utc_timestamp(3),updated_at=utc_timestamp(3) where id=? and status='RUNNING'", reason, turnId);
         jdbc.update("update s_session set active_turn_id=null,updated_at=utc_timestamp(3),revision=revision+1 " +
             "where active_turn_id=?", turnId);
@@ -193,8 +249,14 @@ public class ChatTurnStore
             operationId, type, status, code, providerRequestId, inputTokens, outputTokens);
     }
 
-    private void fact(long accountId, long applicationId, long sessionId, long turnId, long operationId,
+    private void fact(long accountId, long applicationId, long sessionId, Long turnId, long operationId,
         String type, String status, String code, String providerRequestId, Long inputTokens, Long outputTokens)
+    { fact(accountId, applicationId, sessionId, turnId, operationId, type, status, code,
+        providerRequestId, inputTokens, outputTokens, null); }
+
+    private void fact(long accountId, long applicationId, long sessionId, Long turnId, long operationId,
+        String type, String status, String code, String providerRequestId, Long inputTokens, Long outputTokens,
+        Long audioDurationMs)
     {
         try
         {
@@ -211,9 +273,10 @@ public class ChatTurnStore
             payload.put("providerRequestId", providerRequestId);
             payload.put("errorCode", code);
             Map<String, Object> usage = new java.util.LinkedHashMap<>();
-            usage.put("usageAvailable", inputTokens != null || outputTokens != null);
+            usage.put("usageAvailable", inputTokens != null || outputTokens != null || audioDurationMs != null);
             usage.put("inputTokens", inputTokens);
             usage.put("outputTokens", outputTokens);
+            usage.put("audioDurationMs", audioDurationMs);
             payload.put("usage", usage);
             payload.put("costSource", "UNKNOWN");
             jdbc.update("insert into s_outbox (id,created_at,updated_at,account_id,event_id,event_type,aggregate_type," +
@@ -234,6 +297,12 @@ public class ChatTurnStore
     private static byte[] digest(String value)
     {
         try { return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)); }
+        catch (Exception error) { throw new IllegalStateException(error); }
+    }
+
+    private static byte[] sha256(byte[] value)
+    {
+        try { return MessageDigest.getInstance("SHA-256").digest(value); }
         catch (Exception error) { throw new IllegalStateException(error); }
     }
     private static RuntimeProblem problem(String code)

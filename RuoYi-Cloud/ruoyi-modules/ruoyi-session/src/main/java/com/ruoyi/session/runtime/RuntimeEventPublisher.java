@@ -172,10 +172,16 @@ public class RuntimeEventPublisher
     }
 
     public void completed(RuntimePrincipal principal, long turnEpoch, String turnId, Map<String, Object> state)
+    { terminal(principal, turnEpoch, turnId, state, "turn.completed"); }
+
+    public void failed(RuntimePrincipal principal, long turnEpoch, String turnId, Map<String, Object> state)
+    { terminal(principal, turnEpoch, turnId, state, "turn.failed"); }
+
+    private void terminal(RuntimePrincipal principal, long turnEpoch, String turnId, Map<String, Object> state, String type)
     {
         Connection connection = connections.get(principal.sessionId());
         if (connection == null || connection.epoch() != turnEpoch) return;
-        send(connection, Map.of("v", 1, "type", "turn.completed", "sessionId", Long.toString(principal.sessionId()),
+        send(connection, Map.of("v", 1, "type", type, "sessionId", Long.toString(principal.sessionId()),
             "connectionEpoch", Long.toString(connection.epoch()), "turnId", turnId, "requestId", "runtime",
             "occurredAt", Instant.now().toString(), "data", state));
     }

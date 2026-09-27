@@ -50,8 +50,6 @@ public class PersistentRuntimeStore
                 jdbcTemplate.update("insert into s_operation (id,created_at,updated_at,account_id,session_id,turn_id,client_request_id,operation_type,ordinal,config_resource_id,status,playback_status,input_char_count,input_hash,result_summary) values (?,?,?,?,?,?,?,?,?,?,'QUEUED','WAITING',?,?,json_object('segmentId',?))",
                         operationId, now, now, principal.accountId(), principal.sessionId(), turnId, operationRequestId, "TTS", segment.ordinal(),
                         principal.voice().voiceVersionId(), (long) segment.text().codePointCount(0, segment.text().length()), hash(segment.text()), segment.segmentId());
-                callOutbox(principal.accountId(), turnId, segment.segmentId(), operationId, "STARTED",
-                    (long) segment.text().codePointCount(0, segment.text().length()), null, null, null);
             }
             return turnId;
         }
@@ -62,32 +60,117 @@ public class PersistentRuntimeStore
     }
 
     @Transactional
-    public void markAudioReady(long turnId, int ordinal, RuntimePrincipal principal, TemporaryAudioReference audio, long bytes, long durationMs)
+    public void createChatAudio(RuntimePrincipal principal, long turnId, List<SegmentPlan> segments, long epoch)
+    {
+        int changed = jdbcTemplate.update("update s_turn t join s_session s on s.active_turn_id=t.id " +
+            "set t.text_status='COMPLETED',t.audio_status='RUNNING',t.playback_status='WAITING'," +
+            "t.updated_at=utc_timestamp(3) where t.id=? and t.account_id=? and t.session_id=? and t.turn_type='CHAT' " +
+            "and t.status='RUNNING' and s.connection_epoch=?", turnId, principal.accountId(), principal.sessionId(), epoch);
+        if (changed != 1) throw unavailable();
+        for (SegmentPlan segment : segments)
+        {
+            jdbcTemplate.update("insert into s_operation (id,created_at,updated_at,account_id,session_id,turn_id," +
+                "client_request_id,operation_type,ordinal,config_resource_id,status,playback_status,input_char_count,input_hash," +
+                "result_summary) values (uuid_short(),utc_timestamp(3),utc_timestamp(3),?,?,?,?,'TTS',?,?,'QUEUED'," +
+                "'WAITING',?,?,json_object('segmentId',?))", principal.accountId(), principal.sessionId(), turnId,
+                turnId + ":tts:" + segment.ordinal(), segment.ordinal(), principal.voice().voiceVersionId(),
+                (long) segment.text().codePointCount(0, segment.text().length()), hash(segment.text()), segment.segmentId());
+        }
+    }
+
+    @Transactional
+    public void beginTts(RuntimePrincipal principal, TtsSynthesisWork work, long epoch, Long reservationId)
+    {
+        Operation operation = jdbcTemplate.query("select o.id,o.input_char_count,json_unquote(json_extract(o.result_summary,'$.segmentId')) " +
+            "from s_operation o join s_session s on s.id=o.session_id and s.active_turn_id=o.turn_id " +
+            "where o.turn_id=? and o.ordinal=? and o.operation_type='TTS' and o.status='QUEUED' " +
+            "and s.account_id=? and s.application_id=? and s.app_config_id=? and s.connection_epoch=? for update",
+            rs -> rs.next() ? new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)) : null,
+            Long.parseLong(work.turnId()), work.ordinal(), principal.accountId(), principal.applicationId(),
+            principal.configVersionId(), epoch);
+        if (operation == null || !work.segmentId().equals(operation.segmentId())) throw unavailable();
+        jdbcTemplate.update("update s_operation set status='RUNNING',quota_reservation_id=?,started_at=utc_timestamp(3)," +
+            "updated_at=utc_timestamp(3) where id=? and status='QUEUED'", reservationId, operation.id());
+        callOutbox(principal.accountId(), Long.parseLong(work.turnId()), work.segmentId(), operation.id(),
+            "STARTED", operation.inputChars(), null, null, null);
+    }
+
+    @Transactional
+    public void cancelNotSubmitted(RuntimePrincipal principal, TtsSynthesisWork work)
+    {
+        String prior = jdbcTemplate.query("select status from s_operation where turn_id=? and ordinal=? " +
+            "and operation_type='TTS' and account_id=? and session_id=? for update",
+            rs -> rs.next() ? rs.getString(1) : null, Long.parseLong(work.turnId()), work.ordinal(),
+            principal.accountId(), principal.sessionId());
+        if (prior == null || !java.util.Set.of("QUEUED", "RUNNING", "UNKNOWN").contains(prior)) return;
+        jdbcTemplate.update("update s_operation set status='CANCELLED',error_code='TTS_NOT_SUBMITTED'," +
+            "finished_at=utc_timestamp(3),updated_at=utc_timestamp(3) where turn_id=? and ordinal=? " +
+            "and operation_type='TTS' and account_id=? and session_id=?", Long.parseLong(work.turnId()),
+            work.ordinal(), principal.accountId(), principal.sessionId());
+        if (!"QUEUED".equals(prior))
+        {
+            Operation operation = jdbcTemplate.query("select id,input_char_count,json_unquote(json_extract(result_summary,'$.segmentId')) " +
+                "from s_operation where turn_id=? and ordinal=? and operation_type='TTS'",
+                rs -> rs.next() ? new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)) : null,
+                Long.parseLong(work.turnId()), work.ordinal());
+            if (operation != null) callOutbox(principal.accountId(), Long.parseLong(work.turnId()), work.segmentId(),
+                operation.id(), "CANCELLED", operation.inputChars(), null, "TTS_NOT_SUBMITTED", null);
+        }
+    }
+
+    @Transactional
+    public boolean markAudioReady(long turnId, int ordinal, RuntimePrincipal principal, TemporaryAudioReference audio, long bytes, long durationMs)
     {
         Instant now = Instant.now();
         Operation operation = jdbcTemplate.query("select id,input_char_count,json_unquote(json_extract(result_summary,'$.segmentId')) from s_operation where turn_id = ? and ordinal = ? and operation_type = 'TTS'",
             rs -> rs.next() ? new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)) : null, turnId, ordinal);
         if (operation == null)
         {
-            return;
+            return false;
         }
-        jdbcTemplate.update("update s_operation set status = 'SUCCEEDED', result_summary = json_set(coalesce(result_summary,json_object()),'$.mediaId', ?), updated_at = ?, finished_at = ? where id = ? and status in ('QUEUED','RUNNING')",
+        int changed = jdbcTemplate.update("update s_operation set status = 'SUCCEEDED', result_summary = json_set(coalesce(result_summary,json_object()),'$.mediaId', ?), updated_at = ?, finished_at = ? where id = ? and status = 'RUNNING'",
                 audio.mediaId(), now, now, operation.id());
+        if (changed != 1) return false;
         jdbcTemplate.update("insert into s_temp_object (id,media_id,created_at,updated_at,account_id,session_id,turn_id,operation_id,purpose,storage_provider,bucket,object_key,size_bytes,status,expires_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE',?)",
                 nextId(), audio.mediaId(), now, now, principal.accountId(), principal.sessionId(), turnId, operation.id(), "TTS_AUDIO", audio.storageProvider(),
                 audio.bucket(), audio.objectKey(), bytes, audio.expiresAt());
         callOutbox(principal.accountId(), turnId, operation.segmentId(), operation.id(), "SUCCEEDED", operation.inputChars(), durationMs, null, null);
+        return true;
+    }
+
+    /** A stopped turn must never deliver late audio, but a completed provider synthesis remains billable. */
+    @Transactional
+    public void markLateAudioSucceeded(RuntimePrincipal principal, TtsSynthesisWork work, long durationMs)
+    {
+        long turnId = Long.parseLong(work.turnId());
+        Operation operation = jdbcTemplate.query("select id,input_char_count,json_unquote(json_extract(result_summary,'$.segmentId')) " +
+            "from s_operation where turn_id=? and ordinal=? and operation_type='TTS' and account_id=? " +
+            "and session_id=? and status='UNKNOWN' and playback_status='STOPPED' for update",
+            rs -> rs.next() ? new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)) : null,
+            turnId, work.ordinal(), principal.accountId(), principal.sessionId());
+        if (operation == null || !work.segmentId().equals(operation.segmentId())) return;
+        if (jdbcTemplate.update("update s_operation set status='SUCCEEDED',error_code=null,updated_at=utc_timestamp(3) " +
+            "where id=? and status='UNKNOWN' and playback_status='STOPPED'", operation.id()) == 1)
+            callOutbox(principal.accountId(), turnId, operation.segmentId(), operation.id(), "SUCCEEDED",
+                operation.inputChars(), durationMs, null, null);
     }
 
     @Transactional
     public void markAudioFailed(long turnId, int ordinal, String failureCode)
     {
         Instant now = Instant.now();
-        jdbcTemplate.update("update s_operation set status = 'FAILED', result_summary = json_set(coalesce(result_summary,json_object()),'$.failureCode', ?), updated_at = ?, finished_at = ? where turn_id = ? and ordinal = ? and operation_type = 'TTS' and status in ('QUEUED','RUNNING')",
-                failureCode, now, now, turnId, ordinal);
+        String prior = jdbcTemplate.query("select status from s_operation where turn_id=? and ordinal=? and operation_type='TTS' for update",
+            rs -> rs.next() ? rs.getString(1) : null, turnId, ordinal);
+        if (!"QUEUED".equals(prior) && !"RUNNING".equals(prior)) return;
+        String terminal = "TTS_NOT_SUBMITTED".equals(failureCode) ? "CANCELLED" : "FAILED";
+        int changed = jdbcTemplate.update("update s_operation set status = ?, result_summary = json_set(coalesce(result_summary,json_object()),'$.failureCode', ?), updated_at = ?, finished_at = ? where turn_id = ? and ordinal = ? and operation_type = 'TTS' and status = 'RUNNING'",
+                terminal, failureCode, now, now, turnId, ordinal);
+        if ("QUEUED".equals(prior)) changed = jdbcTemplate.update("update s_operation set status='FAILED',error_code=?,updated_at=?,finished_at=? where turn_id=? and ordinal=? and operation_type='TTS' and status='QUEUED'",
+            failureCode, now, now, turnId, ordinal);
+        if (changed != 1) return;
         Operation operation = jdbcTemplate.query("select id,input_char_count,json_unquote(json_extract(result_summary,'$.segmentId')) from s_operation where turn_id=? and ordinal=? and operation_type='TTS'",
             rs -> rs.next() ? new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)) : null, turnId, ordinal);
-        if (operation != null) callOutbox(accountForTurn(turnId), turnId, operation.segmentId(), operation.id(), "FAILED", operation.inputChars(), null, failureCode, null);
+        if (operation != null && "RUNNING".equals(prior)) callOutbox(accountForTurn(turnId), turnId, operation.segmentId(), operation.id(), terminal, operation.inputChars(), null, failureCode, null);
     }
 
     public void playback(long turnId, int ordinal, PlaybackState state)
@@ -97,9 +180,20 @@ public class PersistentRuntimeStore
                 playback, Instant.now(), playback, Instant.now(), turnId, ordinal);
     }
 
+    @Transactional
     public void stop(long turnId, String reason)
     {
         Instant now = Instant.now();
+        List<Operation> running = jdbcTemplate.query("select id,input_char_count,json_unquote(json_extract(result_summary,'$.segmentId')) " +
+            "from s_operation where turn_id=? and operation_type='TTS' and status='RUNNING' for update",
+            (rs, row) -> new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)), turnId);
+        jdbcTemplate.update("update s_operation set status='CANCELLED',finished_at=?,updated_at=? where turn_id=? " +
+            "and operation_type='TTS' and status='QUEUED'", now, now, turnId);
+        jdbcTemplate.update("update s_operation set status='UNKNOWN',error_code='TURN_INTERRUPTED'," +
+            "finished_at=?,updated_at=? where turn_id=? and operation_type='TTS' and status='RUNNING'", now, now, turnId);
+        for (Operation operation : running)
+            callOutbox(accountForTurn(turnId), turnId, operation.segmentId(), operation.id(), "UNKNOWN",
+                operation.inputChars(), null, "TURN_INTERRUPTED", null);
         jdbcTemplate.update("update s_operation set playback_status = 'STOPPED', updated_at = ?, finished_at = ? where turn_id = ? and operation_type = 'TTS' and playback_status not in ('ENDED','FAILED','SKIPPED','STOPPED')",
                 now, now, turnId);
         jdbcTemplate.update("update s_turn set status = 'INTERRUPTED', " +
@@ -118,9 +212,20 @@ public class PersistentRuntimeStore
         jdbcTemplate.update("update s_session set active_turn_id=null,updated_at=?,revision=revision+1 where active_turn_id=?", now, turnId);
     }
 
+    @Transactional
     public void fail(long turnId)
     {
         Instant now = Instant.now();
+        List<Operation> running = jdbcTemplate.query("select id,input_char_count,json_unquote(json_extract(result_summary,'$.segmentId')) " +
+            "from s_operation where turn_id=? and operation_type='TTS' and status='RUNNING' for update",
+            (rs, row) -> new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)), turnId);
+        jdbcTemplate.update("update s_operation set status='CANCELLED',finished_at=?,updated_at=? where turn_id=? " +
+            "and operation_type='TTS' and status='QUEUED'", now, now, turnId);
+        jdbcTemplate.update("update s_operation set status='UNKNOWN',error_code='TURN_FAILED',finished_at=?,updated_at=? " +
+            "where turn_id=? and operation_type='TTS' and status='RUNNING'", now, now, turnId);
+        for (Operation operation : running)
+            callOutbox(accountForTurn(turnId), turnId, operation.segmentId(), operation.id(), "UNKNOWN",
+                operation.inputChars(), null, "TURN_FAILED", null);
         jdbcTemplate.update("update s_turn set status = 'FAILED', audio_status = 'FAILED', playback_status = 'FAILED', ended_at = ?, updated_at = ? where id = ? and status = 'RUNNING'",
                 now, now, turnId);
         jdbcTemplate.update("update s_session set active_turn_id=null,updated_at=?,revision=revision+1 where active_turn_id=?", now, turnId);
@@ -128,8 +233,8 @@ public class PersistentRuntimeStore
 
     public void scheduleCleanup(TemporaryAudioReference audio)
     {
-        jdbcTemplate.update("update s_temp_object set status = 'DELETE_PENDING', next_delete_at = coalesce(next_delete_at, ?), updated_at = ? where storage_provider = ? and bucket = ? and object_key = ? and status in ('UPLOADING','ACTIVE')",
-                Instant.now(), Instant.now(), audio.storageProvider(), audio.bucket(), audio.objectKey());
+        jdbcTemplate.update("update s_temp_object set status = 'DELETE_PENDING', next_delete_at = coalesce(next_delete_at, utc_timestamp(3)), updated_at = utc_timestamp(3) where storage_provider = ? and bucket = ? and object_key = ? and status in ('UPLOADING','ACTIVE')",
+            audio.storageProvider(), audio.bucket(), audio.objectKey());
     }
 
     @Transactional
@@ -196,7 +301,7 @@ public class PersistentRuntimeStore
     public TemporaryAudioReference readableAudio(RuntimePrincipal principal, String mediaId)
     {
         TemporaryAudioReference audio = jdbcTemplate.query("select o.storage_provider,o.bucket,o.object_key,o.expires_at from s_temp_object o join s_session s on s.id=o.session_id "
-                + "where o.session_id = ? and o.account_id = ? and o.media_id = ? and o.purpose = 'TTS_AUDIO' and o.status = 'ACTIVE' and o.expires_at > utc_timestamp(3) and s.status='ACTIVE' and o.turn_id=s.active_turn_id",
+                + "where o.session_id = ? and o.account_id = ? and o.media_id = ? and o.purpose = 'TTS_AUDIO' and o.status = 'ACTIVE' and o.expires_at > now(3) and s.status='ACTIVE' and o.turn_id=s.active_turn_id",
             rs -> rs.next() ? new TemporaryAudioReference(mediaId, rs.getString(1), rs.getString(2), rs.getString(3), rs.getTimestamp(4).toInstant()) : null,
             principal.sessionId(), principal.accountId(), mediaId);
         if (audio == null) throw new RuntimeProblem(HttpStatus.NOT_FOUND, "MEDIA_NOT_FOUND", "Audio is unavailable.");
@@ -212,8 +317,8 @@ public class PersistentRuntimeStore
     public List<TemporaryAudioReference> cleanupCandidates(int limit)
     {
         return jdbcTemplate.query("select media_id,storage_provider,bucket,object_key,expires_at from s_temp_object where "
-                + "(status = 'DELETE_PENDING' and (next_delete_at is null or next_delete_at <= utc_timestamp(3))) "
-                + "or (status = 'ACTIVE' and expires_at <= utc_timestamp(3)) order by updated_at asc limit ?",
+                + "(status = 'DELETE_PENDING' and (delete_attempts = 0 or next_delete_at is null or next_delete_at <= utc_timestamp(3))) "
+                + "or (status = 'ACTIVE' and expires_at <= now(3)) order by updated_at asc limit ?",
             (rs, row) -> new TemporaryAudioReference(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getTimestamp(5).toInstant()), limit);
     }
 
@@ -290,9 +395,15 @@ public class PersistentRuntimeStore
     {
         if (segmentId == null || segmentId.isBlank()) return;
         String eventId = UUID.randomUUID().toString().replace("-", "");
-        jdbcTemplate.update("insert into s_outbox (id,created_at,updated_at,account_id,event_id,event_type,aggregate_type,aggregate_id,schema_version,trace_id,payload,status,attempt_count,next_run_at) values (uuid_short(),utc_timestamp(3),utc_timestamp(3),?,?,?,?,?,1,?,json_object('eventId',?,'operationKey',?,'accountId',?,'capability','TTS','status',?,'turnId',cast(? as char),'usage',json_object('inputChars',?,'audioDurationMs',?,'usageAvailable',?),'costSource','UNKNOWN','errorCode',?,'providerRequestId',?),'PENDING',0,utc_timestamp(3))",
+        long[] owner = jdbcTemplate.query("select s.application_id,t.session_id from s_turn t join s_session s on s.id=t.session_id " +
+            "where t.id=? and t.account_id=?", rs -> rs.next() ? new long[] { rs.getLong(1), rs.getLong(2) } : null,
+            turnId, accountId);
+        if (owner == null) throw new IllegalStateException("TTS turn owner is unavailable");
+        Long quotaId = jdbcTemplate.query("select quota_reservation_id from s_operation where id=?",
+            rs -> rs.next() && rs.getObject(1) != null ? rs.getLong(1) : null, operationId);
+        jdbcTemplate.update("insert into s_outbox (id,created_at,updated_at,account_id,event_id,event_type,aggregate_type,aggregate_id,schema_version,trace_id,payload,status,attempt_count,next_run_at) values (uuid_short(),utc_timestamp(3),utc_timestamp(3),?,?,?,?,?,1,?,json_object('eventId',?,'operationKey',?,'accountId',?,'applicationId',?,'sessionId',?,'quotaReservationId',?,'capability','TTS','status',?,'turnId',?,'usage',json_object('inputChars',?,'audioDurationMs',?,'usageAvailable',?),'costSource','UNKNOWN','errorCode',?,'providerRequestId',?),'PENDING',0,utc_timestamp(3))",
             accountId, eventId, "CALL_FACT_RECORDED", "TTS_OPERATION", Long.toString(operationId), eventId, eventId,
-            "tts:" + turnId + ":" + segmentId, accountId, status, turnId, inputChars, audioDurationMs,
+            "tts:" + turnId + ":" + segmentId, accountId, owner[0], owner[1], quotaId, status, turnId, inputChars, audioDurationMs,
             "SUCCEEDED".equals(status), errorCode, providerRequestId);
     }
 

@@ -128,7 +128,7 @@ public class OperationsService
         String from, String to, Integer pageNum, Integer pageSize)
     {
         Query query = query(accountId, status, null, from, to, pageNum, pageSize, false);
-        if (capability != null && !capability.isBlank()) { require(capability, List.of("GENERATION","TTS","LLM","TOOL")); query = query.add(" and c.capability=?", capability); }
+        if (capability != null && !capability.isBlank()) { require(capability, List.of("GENERATION","TTS","LLM","ASR","TOOL")); query = query.add(" and c.capability=?", capability); }
         if (sessionId != null && !sessionId.isBlank()) query = query.add(" and c.session_id=?", positive(sessionId));
         if (taskId != null && !taskId.isBlank()) query = query.add(" and c.operation_key in (select concat('generation:',a.id) from p_generation_attempt a where a.task_id=?)", positive(taskId));
         String where = " where 1=1" + query.where();
@@ -194,8 +194,8 @@ public class OperationsService
         if (old == null)
         {
             long id = nextId();
-            jdbc.update("insert into p_call_record (id,created_at,updated_at,account_id,application_id,session_id,turn_id,operation_key,capability,billing_owner,provider_request_id,status,input_tokens,output_tokens,input_chars,image_count,audio_duration_ms,usage_available,cost_amount,currency,cost_source,error_code,finished_at,expires_at) values (?,utc_timestamp(3),utc_timestamp(3),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,case when ? in ('SUCCEEDED','FAILED','UNKNOWN','CANCELLED') then utc_timestamp(3) else null end,null)",
-                id, event.accountId(), event.applicationId(), event.sessionId(), event.turnId(), event.operationKey(),
+            jdbc.update("insert into p_call_record (id,created_at,updated_at,account_id,application_id,session_id,turn_id,quota_reservation_id,operation_key,capability,billing_owner,provider_request_id,status,input_tokens,output_tokens,input_chars,image_count,audio_duration_ms,usage_available,cost_amount,currency,cost_source,error_code,finished_at,expires_at) values (?,utc_timestamp(3),utc_timestamp(3),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,case when ? in ('SUCCEEDED','FAILED','UNKNOWN','CANCELLED') then utc_timestamp(3) else null end,null)",
+                id, event.accountId(), event.applicationId(), event.sessionId(), event.turnId(), event.quotaReservationId(), event.operationKey(),
                 event.capability(), billingOwner(event.capability()), event.providerRequestId(), event.status(),
                 event.usage().inputTokens(), event.usage().outputTokens(), event.usage().inputChars(),
                 event.usage().imageCount(), event.usage().audioDurationMs(), bool(event.usage().usageAvailable()),
@@ -215,8 +215,8 @@ public class OperationsService
             before.currency == null ? "UNKNOWN" : before.currency,
             after.currency == null ? "UNKNOWN" : after.currency);
         daily(before, -1, currencyChanged);
-        jdbc.update("update p_call_record set status=?,provider_request_id=coalesce(?,provider_request_id),input_tokens=coalesce(?,input_tokens),output_tokens=coalesce(?,output_tokens),input_chars=coalesce(?,input_chars),image_count=coalesce(?,image_count),audio_duration_ms=coalesce(?,audio_duration_ms),usage_available=?,cost_amount=coalesce(?,cost_amount),currency=coalesce(?,currency),cost_source=?,error_code=coalesce(?,error_code),finished_at=case when ? in ('SUCCEEDED','FAILED','UNKNOWN','CANCELLED') then coalesce(finished_at,utc_timestamp(3)) else finished_at end,expires_at=null,updated_at=utc_timestamp(3) where id=?",
-            after.status, event.providerRequestId(), event.usage().inputTokens(), event.usage().outputTokens(),
+        jdbc.update("update p_call_record set status=?,provider_request_id=coalesce(?,provider_request_id),quota_reservation_id=coalesce(?,quota_reservation_id),input_tokens=coalesce(?,input_tokens),output_tokens=coalesce(?,output_tokens),input_chars=coalesce(?,input_chars),image_count=coalesce(?,image_count),audio_duration_ms=coalesce(?,audio_duration_ms),usage_available=?,cost_amount=coalesce(?,cost_amount),currency=coalesce(?,currency),cost_source=?,error_code=coalesce(?,error_code),finished_at=case when ? in ('SUCCEEDED','FAILED','UNKNOWN','CANCELLED') then coalesce(finished_at,utc_timestamp(3)) else finished_at end,expires_at=null,updated_at=utc_timestamp(3) where id=?",
+            after.status, event.providerRequestId(), event.quotaReservationId(), event.usage().inputTokens(), event.usage().outputTokens(),
             event.usage().inputChars(), event.usage().imageCount(), event.usage().audioDurationMs(),
             bool(event.usage().usageAvailable()), event.costAmount(), event.currency(), event.costSource(),
             event.errorCode(), after.status, before.id);
@@ -231,6 +231,28 @@ public class OperationsService
         long unknown = "UNKNOWN".equals(value.status) ? sign : 0;
         long cancelled = "CANCELLED".equals(value.status) ? sign : 0;
         long known = value.usageAvailable ? sign : 0, knownCost = value.costAmount == null ? 0 : sign;
+        if (sign < 0)
+        {
+            // MySQL checks the candidate INSERT row before ON DUPLICATE KEY UPDATE.
+            // Negative usage deltas must update the existing bucket directly.
+            int changed = jdbc.update("update p_usage_daily set request_count=request_count+?," +
+                "success_count=success_count+?,failure_count=failure_count+?,unknown_count=unknown_count+?," +
+                "input_tokens=input_tokens+?,output_tokens=output_tokens+?,input_chars=input_chars+?," +
+                "image_count=image_count+?,audio_duration_ms=audio_duration_ms+?," +
+                "known_usage_count=known_usage_count+?,known_cost_count=known_cost_count+?," +
+                "cost_amount=cost_amount+?,cancelled_count=cancelled_count+?,updated_at=utc_timestamp(3) " +
+                "where account_id=? and application_scope_id=? and usage_date=? and capability=? " +
+                "and billing_owner=? and currency=?",
+                request ? sign : 0L, success, failure, unknown,
+                nullable(value.inputTokens, sign), nullable(value.outputTokens, sign),
+                nullable(value.inputChars, sign), nullable(value.imageCount, sign),
+                nullable(value.audioDurationMs, sign), known, knownCost,
+                value.costAmount == null ? BigDecimal.ZERO : value.costAmount.multiply(BigDecimal.valueOf(sign)),
+                cancelled, value.accountId, value.applicationId == null ? 0L : value.applicationId,
+                java.sql.Date.valueOf(value.usageDate), value.capability, billingOwner(value.capability), currency);
+            if (changed != 1) throw new IllegalStateException("Existing usage bucket is unavailable");
+            return;
+        }
         jdbc.update("insert into p_usage_daily (id,created_at,updated_at,account_id,application_scope_id,usage_date,capability,billing_owner,request_count,success_count,failure_count,unknown_count,input_tokens,output_tokens,input_chars,image_count,audio_duration_ms,known_usage_count,known_cost_count,cost_amount,currency,expires_at,cancelled_count) values (uuid_short(),utc_timestamp(3),utc_timestamp(3),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,null,?) on duplicate key update request_count=request_count+values(request_count),success_count=success_count+values(success_count),failure_count=failure_count+values(failure_count),unknown_count=unknown_count+values(unknown_count),input_tokens=input_tokens+values(input_tokens),output_tokens=output_tokens+values(output_tokens),input_chars=input_chars+values(input_chars),image_count=image_count+values(image_count),audio_duration_ms=audio_duration_ms+values(audio_duration_ms),known_usage_count=known_usage_count+values(known_usage_count),known_cost_count=known_cost_count+values(known_cost_count),cost_amount=cost_amount+values(cost_amount),cancelled_count=cancelled_count+values(cancelled_count),updated_at=utc_timestamp(3)",
             value.accountId, value.applicationId == null ? 0L : value.applicationId, java.sql.Date.valueOf(value.usageDate), value.capability,
             billingOwner(value.capability), request ? sign : 0L, success, failure, unknown,
@@ -257,7 +279,7 @@ public class OperationsService
     private static boolean asBoolean(Object value) { return Boolean.TRUE.equals(value) || value instanceof Number number && number.intValue() != 0; }
     private static List<Object> append(List<Object> args,Object... tail) { List<Object> result=new ArrayList<>(args); java.util.Collections.addAll(result,tail); return result; }
     private static void assertTransition(String old,String next) { if (old.equals(next) || "STARTED".equals(old) || ("UNKNOWN".equals(old) && List.of("SUCCEEDED","FAILED","CANCELLED").contains(next))) return; throw problem(HttpStatus.CONFLICT,"调用终态需要人工核对，不能回退已确认事实"); }
-    private static void validateEvent(CallFactEvent e) { if(e==null||!token(e.eventId(),64)||!token(e.operationKey(),128)||e.accountId()==null||e.accountId()<=0)throw problem(HttpStatus.BAD_REQUEST,"调用事件标识无效"); require(e.capability(),List.of("GENERATION","TTS","LLM","TOOL")); require(e.status(),List.of("STARTED","SUCCEEDED","FAILED","UNKNOWN","CANCELLED")); if(e.usage()==null)throw problem(HttpStatus.BAD_REQUEST,"调用用量字段缺失"); if(e.usage().inputTokens()!=null&&e.usage().inputTokens()<0||e.usage().outputTokens()!=null&&e.usage().outputTokens()<0||e.usage().inputChars()!=null&&e.usage().inputChars()<0||e.usage().imageCount()!=null&&e.usage().imageCount()<0||e.usage().audioDurationMs()!=null&&e.usage().audioDurationMs()<0||e.costAmount()!=null&&e.costAmount().signum()<0)throw problem(HttpStatus.BAD_REQUEST,"调用用量不能为负数"); require(e.costSource(),List.of("UNKNOWN","PROVIDER","CONSOLE","ESTIMATED")); if(e.currency()!=null&&!e.currency().matches("[A-Z]{3}"))throw problem(HttpStatus.BAD_REQUEST,"币种无效"); }
+    private static void validateEvent(CallFactEvent e) { if(e==null||!token(e.eventId(),64)||!token(e.operationKey(),128)||e.accountId()==null||e.accountId()<=0)throw problem(HttpStatus.BAD_REQUEST,"调用事件标识无效"); require(e.capability(),List.of("GENERATION","TTS","LLM","ASR","TOOL")); require(e.status(),List.of("STARTED","SUCCEEDED","FAILED","UNKNOWN","CANCELLED")); if(e.quotaReservationId()!=null&&e.quotaReservationId()<=0)throw problem(HttpStatus.BAD_REQUEST,"额度预占标识无效"); if(e.usage()==null)throw problem(HttpStatus.BAD_REQUEST,"调用用量字段缺失"); if(e.usage().inputTokens()!=null&&e.usage().inputTokens()<0||e.usage().outputTokens()!=null&&e.usage().outputTokens()<0||e.usage().inputChars()!=null&&e.usage().inputChars()<0||e.usage().imageCount()!=null&&e.usage().imageCount()<0||e.usage().audioDurationMs()!=null&&e.usage().audioDurationMs()<0||e.costAmount()!=null&&e.costAmount().signum()<0)throw problem(HttpStatus.BAD_REQUEST,"调用用量不能为负数"); require(e.costSource(),List.of("UNKNOWN","PROVIDER","CONSOLE","ESTIMATED")); if(e.currency()!=null&&!e.currency().matches("[A-Z]{3}"))throw problem(HttpStatus.BAD_REQUEST,"币种无效"); }
     private static boolean token(String value,int max){return value!=null&&value.matches("[A-Za-z0-9:._-]{1,"+max+"}");}
     private static void requireReason(String value,int max){if(value==null||value.isBlank()||value.trim().length()>max)throw problem(HttpStatus.BAD_REQUEST,"核对依据长度无效");}
     private static void requireKey(String value){if(value==null||!value.matches("[\\x21-\\x7e]{1,64}"))throw problem(HttpStatus.BAD_REQUEST,"Idempotency-Key 无效");}

@@ -63,6 +63,10 @@ export default defineConfig(({ mode, command }) => {
           target: baseUrl,
           changeOrigin: true
         },
+        '/api/v1/runtime/asr': {
+          target: baseUrl,
+          changeOrigin: true
+        },
         '/dev-api': {
           target: baseUrl,
           changeOrigin: true,

@@ -63,6 +63,7 @@ public class RelayTtsRuntimeAdapter implements TtsRuntimeAdapter
                     .header("X-Request-Id", requestId).header(HttpHeaders.ACCEPT, MediaType.valueOf("audio/wav").toString())
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                     .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(requestBody(work, requestId, config)))).build();
+            completionSink.beforeExternal(work);
             HttpResponse<byte[]> response = client.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
                     .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             String returnedRequestId = response.headers().firstValue("X-Request-Id").orElse("");

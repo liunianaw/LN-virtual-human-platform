@@ -51,6 +51,26 @@ public class BusinessSystemClient
             new RelayBinding(accountId, applicationId, sessionId, relayVersionId, "LLM", externalUserId, turnId));
     }
 
+    public JsonNode resolveAsrRelay(long accountId, long applicationId, long sessionId, long relayVersionId,
+        String externalUserId)
+    {
+        return post("/internal/v1/relay-services/resolve",
+            new RelayBinding(accountId, applicationId, sessionId, relayVersionId, "ASR", externalUserId, null));
+    }
+
+    public long reserveTts(long accountId, long applicationId, String businessId, long units)
+    {
+        JsonNode response = post("/internal/v1/tts-quota/reserve", new TtsQuota(accountId, applicationId, businessId, units, null));
+        if (!response.hasNonNull("reservationId"))
+            throw new RuntimeProblem(HttpStatus.BAD_GATEWAY, "TTS_QUOTA_INVALID", "TTS quota response is invalid.");
+        long id = number(response, "reservationId");
+        if (id < 0) throw new RuntimeProblem(HttpStatus.BAD_GATEWAY, "TTS_QUOTA_INVALID", "TTS quota response is invalid.");
+        return id;
+    }
+
+    public void finishTts(long accountId, String businessId, String outcome)
+    { post("/internal/v1/tts-quota/finish", new TtsQuota(accountId, 0, businessId, 0, outcome)); }
+
     public JsonNode resolveSkill(long accountId, long applicationId, long sessionId, long skillVersionId)
     {
         return post("/internal/v1/skills/resolve",
@@ -138,4 +158,5 @@ public class BusinessSystemClient
     private record RelayBinding(long accountId, long applicationId, long sessionId, long relayVersionId,
         String capability, String externalUserId, Long turnId) { }
     private record SkillBinding(long accountId, long applicationId, long sessionId, long skillVersionId) { }
+    private record TtsQuota(long accountId, long applicationId, String businessId, long units, String outcome) { }
 }

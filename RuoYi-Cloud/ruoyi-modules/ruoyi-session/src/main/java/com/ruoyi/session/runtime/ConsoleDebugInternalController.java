@@ -47,7 +47,7 @@ public class ConsoleDebugInternalController
                 body.providerVoiceRef(), body.relayVersionRef(), body.officialServiceId(), body.officialServiceRevision());
         return grants.mint(new ConsoleDebugGrantService.MintRequest(body.accountId(), body.applicationId(), body.sessionId(),
                 body.configVersionId(), body.issuerConsoleRef(), Instant.ofEpochMilli(body.expiresAtEpochMs()), voice,
-                body.mode()));
+                body.mode(), body.asrEnabled()));
     }
 
     @DeleteMapping("/{sessionId}")
@@ -64,6 +64,6 @@ public class ConsoleDebugInternalController
     public record CreateBody(long accountId, long applicationId, long configVersionId, String requestId) { }
     public record MintBody(long accountId, long applicationId, long sessionId, long configVersionId, String issuerConsoleRef,
             long expiresAtEpochMs, long voiceVersionId, String providerKind, String providerVoiceRef, String relayVersionRef,
-            Long officialServiceId, Long officialServiceRevision, String mode) { }
+            Long officialServiceId, Long officialServiceRevision, String mode, boolean asrEnabled) { }
     public record CloseBody(long accountId) { }
 }

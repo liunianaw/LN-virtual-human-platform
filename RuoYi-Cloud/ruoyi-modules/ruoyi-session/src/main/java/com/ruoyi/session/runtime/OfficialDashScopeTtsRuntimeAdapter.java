@@ -5,6 +5,8 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
@@ -17,6 +19,8 @@ import java.util.concurrent.TimeoutException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /** Official Beijing DashScope realtime TTS. The API key is read only from the process environment. */
@@ -24,6 +28,7 @@ import org.springframework.stereotype.Component;
 public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
 {
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Logger LOG = LoggerFactory.getLogger(OfficialDashScopeTtsRuntimeAdapter.class);
     private final VoiceRuntimeProperties properties;
     private final TtsAdapterSupport support;
     private final OfficialServiceResolver resolver;
@@ -48,27 +53,33 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
 
     private void synthesize(TtsSynthesisWork work, TtsCompletionSink completionSink)
     {
+        String stage = "resolve";
+        AudioListener listener = null;
         try
         {
             OfficialServiceResolver.Resolved config = resolver.resolve(work.voice());
             Duration timeout = properties.getOfficial().getTimeout();
-            AudioListener listener = new AudioListener(work.text(), configuredVoice(work), properties.getMaxAudioBytes());
+            listener = new AudioListener(work.text(), configuredVoice(work), properties.getMaxAudioBytes());
+            completionSink.beforeExternal(work);
+            stage = "connect";
             WebSocket socket = client.newWebSocketBuilder().header("Authorization", "Bearer " + config.credential())
                     .header("User-Agent", "LN-Session/1").buildAsync(endpoint(config.endpoint(), config.model()), listener)
                     .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             try
             {
-                byte[] audio = listener.await(timeout);
+                stage = "receive";
+                byte[] audio = pcmToWav(listener.await(timeout), properties.getMaxAudioBytes());
+                stage = "store";
                 support.complete(work, completionSink, audio);
             }
             finally
             {
-                socket.sendText(event("session.finish"), true);
                 socket.sendClose(WebSocket.NORMAL_CLOSURE, "complete");
             }
         }
         catch (TimeoutException exception)
         {
+            LOG.warn("Official TTS timed out at stage={} providerStage={}", stage, listener == null ? "none" : listener.stage());
             support.fail(work, completionSink, "OFFICIAL_TTS_TIMEOUT");
         }
         catch (InterruptedException exception)
@@ -78,12 +89,34 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
         }
         catch (ExecutionException | IllegalArgumentException exception)
         {
+            LOG.warn("Official TTS failed at stage={} providerStage={} cause={}", stage,
+                    listener == null ? "none" : listener.stage(), safeCause(exception));
             support.fail(work, completionSink, "OFFICIAL_TTS_FAILED");
         }
         catch (RuntimeException exception)
         {
+            LOG.warn("Official TTS failed at stage={} providerStage={} cause={}", stage,
+                    listener == null ? "none" : listener.stage(), safeCause(exception));
             support.fail(work, completionSink, "OFFICIAL_TTS_FAILED");
         }
+    }
+
+    private static String safeCause(Exception exception)
+    {
+        Throwable cause = exception instanceof ExecutionException && exception.getCause() != null ? exception.getCause() : exception;
+        return cause.getClass().getSimpleName();
+    }
+
+    private static byte[] pcmToWav(byte[] pcm, long maximumBytes)
+    {
+        if (pcm.length == 0 || (pcm.length & 1) != 0 || pcm.length + 44L > maximumBytes)
+            throw new IllegalArgumentException("Provider PCM length is invalid");
+        ByteBuffer wav = ByteBuffer.allocate(pcm.length + 44).order(ByteOrder.LITTLE_ENDIAN);
+        wav.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(pcm.length + 36);
+        wav.put("WAVEfmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16);
+        wav.putShort((short) 1).putShort((short) 1).putInt(24000).putInt(48000).putShort((short) 2).putShort((short) 16);
+        wav.put("data".getBytes(StandardCharsets.US_ASCII)).putInt(pcm.length).put(pcm);
+        return wav.array();
     }
 
     private URI endpoint(String configuredEndpoint, String model)
@@ -147,6 +180,9 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
         private final StringBuilder frames = new StringBuilder();
         private final ByteArrayOutputStream audio = new ByteArrayOutputStream();
         private volatile WebSocket socket;
+        private volatile String stage = "open";
+        private boolean audioDone;
+        private boolean responseDone;
 
         private AudioListener(String text, String voice, long maxAudioBytes)
         {
@@ -189,16 +225,19 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
             String type = message.path("type").asText();
             if ("session.created".equals(type))
             {
+                stage = "session.created";
                 socket.sendText(event("session.update", java.util.Map.of("session", java.util.Map.of("voice", voice, "mode", "commit",
-                        "language_type", "Chinese", "response_format", "wav", "sample_rate", 24000))), true);
+                        "language_type", "Chinese", "response_format", "pcm", "sample_rate", 24000))), true);
             }
             else if ("session.updated".equals(type))
             {
+                stage = "session.updated";
                 socket.sendText(event("input_text_buffer.append", java.util.Map.of("text", text)), true);
                 socket.sendText(event("input_text_buffer.commit"), true);
             }
             else if ("response.audio.delta".equals(type))
             {
+                stage = "response.audio.delta";
                 JsonNode delta = message.get("delta");
                 if (delta == null || !delta.isTextual())
                 {
@@ -213,12 +252,54 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
             }
             else if ("response.audio.done".equals(type))
             {
-                completed.complete(audio.toByteArray());
+                stage = "response.audio.done";
+                audioDone = true;
             }
-            else if ("error".equals(type) || ("response.done".equals(type) && !"completed".equals(message.path("response").path("status").asText())))
+            else if ("response.done".equals(type))
             {
+                if (!"completed".equals(message.path("response").path("status").asText()) || !audioDone)
+                {
+                    stage = "provider.error";
+                    completed.completeExceptionally(new IllegalArgumentException("Provider did not finish TTS audio"));
+                }
+                else
+                {
+                    stage = "response.done";
+                    responseDone = true;
+                    socket.sendText(event("session.finish"), true);
+                }
+            }
+            else if ("session.finished".equals(type))
+            {
+                stage = "session.finished";
+                if (responseDone && audioDone) completed.complete(audio.toByteArray());
+                else completed.completeExceptionally(new IllegalArgumentException("Provider finished without TTS audio"));
+            }
+            else if ("error".equals(type))
+            {
+                stage = "provider.error";
                 completed.completeExceptionally(new IllegalArgumentException("Provider rejected the TTS request"));
             }
+        }
+
+        @Override
+        public void onError(WebSocket webSocket, Throwable error)
+        {
+            stage = "socket.error";
+            completed.completeExceptionally(error);
+        }
+
+        @Override
+        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason)
+        {
+            stage = "socket.closed";
+            completed.completeExceptionally(new IllegalStateException("Provider closed before audio completed"));
+            return CompletableFuture.completedFuture(null);
+        }
+
+        private String stage()
+        {
+            return stage;
         }
 
         private byte[] await(Duration timeout) throws InterruptedException, ExecutionException, TimeoutException

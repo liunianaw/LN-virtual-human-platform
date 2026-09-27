@@ -41,7 +41,9 @@ public class SessionCallFactOutboxPublisher
                 .header("Authorization", "Bearer " + bearer).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(event.payload())).build();
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() / 100 != 2) throw new IllegalStateException("call-fact ingress rejected event");
+            // AjaxResult can carry a business error in an HTTP 200 response.
+            if (response.statusCode() / 100 != 2 || json.readTree(response.body()).path("code").asInt(-1) != 200)
+                throw new IllegalStateException("call-fact ingress rejected event");
             jdbc.update("update s_outbox set status='SENT',published_at=utc_timestamp(3),lease_expires_at=null,updated_at=utc_timestamp(3) where id=? and status='SENDING'", event.id());
         }
         catch (Exception ignored)

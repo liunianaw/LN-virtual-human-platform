@@ -2,20 +2,20 @@
 
 前置说明书：[编写与执行规范](../../../执行计划书编写与执行规范.md) · [项目整体说明书](../../../项目整体说明书.md) · [需求](../../../项目需求说明书.md) · [数据库](../../../数据库设计说明书.md) · [架构](../../../项目架构说明书.md) · [平台内共享契约](platform-console-shared-contract.md) · [开发者接入接口草案](developer-integration-interface-contract.md)
 
-日期：2026-09-23。版本：1.0。确认状态：用户于 2026-09-25 分别授权实施 DEV-01～DEV-07，并于 2026-09-26 授权实施 DEV-08；DEV-09～11 仍须按各自接口契约与计划确认后实施。
+日期：2026-09-23。版本：1.0。确认状态：用户于 2026-09-25 分别授权实施 DEV-01～DEV-07，于 2026-09-26 授权实施 DEV-08，并于 2026-09-27 授权实施 DEV-09；DEV-10～11 仍须按各自接口契约与计划确认后实施。
 
 ## 1. 当前状态
 
 | 项目 | 当前事实 |
 |---|---|
 | 平台内能力 | 账号、角色资产、官方声音、SPEAK_ONLY 应用、DEBUG Session、正式角色包读取、WSS、分段播报、停止和临时音频清理已有实现，可作为开发者接入的基础内核。平台内能力的真实验收结论以各原计划为准。 |
-| Application | DEV-05 已扩展 CHAT/SPEAK_ONLY 的固定配置、Relay/Skill/Context、官方 Voice 与引用；本机 `test` Application 已发布 CHAT 配置并通过 DEV-08 DEBUG/BUSINESS 对话。Context 与 ASR 仍属 DEV-10/09。 |
-| Session | DEV-06/07 BUSINESS API、Token v2、运行 HTTP、ticket/WSS、续权与单活已在本机主要终点通过；DEV-08 session V6 已迁移，真实 CHAT/LLM/Tool 的 DEBUG 与 BUSINESS 终点通过。BUSINESS TTS/ASR/Context 随 DEV-09/10 开通。 |
-| SDK | `avatar-sdk` 的无 Vue `SessionClient` 已通过 DEV-07 浏览器角色、WSS 与单活验证；DEV-08 `chat(text)` 的流式协议由真实 WSS 验收，平台 CHAT 调试页已通过真实浏览器角色绘制、发送和文本显示。录音、Context 和高亮仍归 DEV-09/10。 |
+| Application | DEV-05 已扩展 CHAT/SPEAK_ONLY 的固定配置、Relay/Skill/Context、官方 Voice 与引用；本机 `test` Application 已发布 CHAT 配置并通过 DEV-08 DEBUG/BUSINESS 对话与 DEV-09 ASR/官方 TTS。Context 仍属 DEV-10。 |
+| Session | DEV-06/07 BUSINESS API、Token v2、运行 HTTP、ticket/WSS、续权与单活已在本机主要终点通过；DEV-08 session V6 已迁移，真实 CHAT/LLM/Tool 的 DEBUG 与 BUSINESS 终点通过；DEV-09 BUSINESS/DEBUG ASR、官方 TTS、CHAT 分句和独立 speak 已通过本机真实终点。Context 随 DEV-10 开通。 |
+| SDK | `avatar-sdk` 的无 Vue `SessionClient` 已通过 DEV-07 浏览器角色、WSS 与单活验证；DEV-08 `chat(text)` 流式协议已通过真实 WSS；DEV-09 录音 API 已构建，平台 CHAT 调试页的浏览器录音、文本确认、两段播放与自动播放恢复已通过。Context 和高亮仍归 DEV-10。 |
 | Relay、Skills、凭证、Webhook、用量 | V1 基础表与 Flyway V16～V20 已执行；本机真实 LLM Relay、Prompt Skill、HTTP 查询 Tool 及结果裁剪通过，LLM/Tool 事实已进入 `p_call_record` 与 `p_usage_daily`。Webhook 与后续模块的完整用量仍待各模块验收。 |
 | 可复用验收项目 | 用户要求保留并继续扩展 `examples/integration-demo/backend`；本机测试 Application、Relay、Skills、HTTPS `/dev08/` 入口与 DPAPI 凭证继续保留，启动和配置记录见该目录 README。 |
-| 交付范围 | DEV-01～05 已按各自阶段交付；DEV-08 代码、session V6、契约与记录当前在工作树待交付。本地 `logs/`、运行密钥与诊断资料不纳入 Git。 |
-| 下一步 | DEV-08 的真实流式、多轮、Prompt Skill、Tool 身份/结果、停止/替换、超时/越权、停用、DEBUG/BUSINESS WSS、浏览器调试及调用事实已在本机通过；测试配置继续保留。DEV-09 ASR/官方 TTS、DEV-10 Context 与 DEV-11 Webhook 仍按各自授权实施，跨模块完整贯通需对应模块完成后复验。DEV-07 的自然到期、真实多次断网等长时边界仍单列，不以 DEV-08 结果替代。 |
+| 交付范围 | DEV-01～05 已按各自阶段交付；DEV-08/09 代码、契约与记录当前在工作树待提交，session V6 已在本机迁移。本地 `logs/`、运行密钥与诊断资料不纳入 Git。 |
+| 下一步 | DEV-09 的语音模块与临时音频实际清理均已在本机通过，模块完成。早期三笔 TTS 预占仍为 `REVIEW_REQUIRED`，由 DEV-11 的对账流程核定；DEV-10 Context 与 DEV-11 Webhook 仍按各自授权实施，跨模块完整贯通需对应模块完成后复验。DEV-07 的自然到期、真实多次断网等长时边界仍单列。 |
 
 ## 2. 目标与边界
 
@@ -315,6 +315,10 @@
 
 ### 7.10 DEV-09 ASR、TTS 与独立播报
 
+2026-09-27 完成记录：SDK 录音开始/结束/取消、ASR multipart、固定 ASR Relay、独立 ASR 操作与事实、BUSINESS 独立 speak、CHAT 文字完成后的官方 Voice 逐句合成、逐段额度预占/结算、顺序播放回执、stop 与迟到音频隔离均已实现。system/session 聚焦构建和 5 个运行测试、Vue 类型检查、SDK 构建、Relay 6 个测试通过；现有 session V6 已迁移，本模块无新增 Flyway。运行时 system/session/auth/gateway/media API 健康检查 200。使用本机持续验收项目，在用户授权的 10 元总上限内完成四次真实 ASR、官方 TTS 独立播报、CHAT 两句、stop 后迟到合成，以及真实 Chrome 调试页录音、确认、两段媒体播放和模拟自动播放受阻后恢复。ASR 调用事实为成功且不绑定 turn；CHAT 的两段 ordinal 为 0、1，播放结束后 turn 才完成；停止轮无可读音频，迟到成功合成仍结算并记录成功事实。
+
+验收中修复了 MySQL 日汇总负数候选 INSERT 触发 CHECK、调用事实投递器把 HTTP 200 的业务错误误判为成功、官方 TTS PCM/WAV 封装及过早关闭 WebSocket、Vite ASR 代理、DEBUG Token 的固定 ASR Scope、页面过早显示播放完成。用户提供的百炼导出表显示修复前 TTS 400 均为 `ClientDisconnect`，ASR 为 200；改为等待 `response.done`、发送 `session.finish` 并收到 `session.finished` 后，用户确认最新 TTS 为 200。早期三笔未确认 TTS 预占共 14 字仍保留 `REVIEW_REQUIRED`，以及修复前一笔停止轮调用事实 `UNKNOWN`，留待 DEV-11 对账，不擅自核销。最终审查发现已播放的临时音频仍停在 `DELETE_PENDING`：MySQL 本地时间比 UTC 快 8 小时，旧调度时间按本地时间写入却按 UTC 比较。修复后 session 重新构建并启动，12 条待删记录均转为 `DELETED`，12 个对应 WAV 文件均已删除；模块验收通过。实际厂商账单以控制台为准。
+
 实施内容：
 
 - SDK 提供录音开始/结束/取消、浏览器权限和格式事件；完整录音上传 session，由固定 ASR Relay 识别。
@@ -325,7 +329,9 @@
 
 静态退出：录音/音频不进日志和长期库；TTS 只使用固定的官方 Voice，Relay TTS 分支不可达；实际播放驱动 speaking；迟到段不可读/不可播；额度与逐段调用事实幂等且长期保留。
 
-用户终点：手动录音识别、文本确认、对话分句播报、纯 speak、自动播放恢复和 stop 可用；合成失败时当前 SDK 仍显示已收到文本并给出事件，平台不保存正文。真实 ASR/TTS 调用需另行确认费用上限。
+用户终点：手动录音识别、文本确认、对话分句播报、纯 speak、自动播放恢复和 stop 已在本机通过；合成失败时当前 SDK 仍显示已收到文本并给出事件，平台不保存正文。本轮真实 ASR/TTS 已由用户授权，费用上限 10 元。
+
+补充清理验收：`s_temp_object.expires_at` 由 Java 时间写入本地时区的 SQL `DATETIME`，因此媒体可读性与过期扫描改用数据库本地 `now(3)` 比较；待删调度使用数据库 UTC 写入，首次待删不受旧本地时间值阻塞。session Maven 打包与 `SpeakOnlyRuntimeServiceTest` 4 项通过，重启后 system/session/auth/gateway/media API 健康检查均为 200；只读查询确认 12 条历史 `DELETE_PENDING` 全部转为 `DELETED`，对应目录中剩余文件数为 0。停止轮媒体不可读已在本轮真实终点验证；未另外发起付费调用。
 
 ### 7.11 DEV-10 页面感知与高亮
 
@@ -435,3 +441,4 @@
 | 2026-09-26 | DEV-07 本机真实验收与联动修复 | 浏览器与 BUSINESS 核心终点通过；时间边界及后续音频联动待验 | 本机 Chrome 中可信后端仅在进程内保存 Application Secret，业务页仅获取 15 分钟 Token；真实创建两个业务用户 Session，跨用户读取 404。同一 Session 两页 ticket/WSS 首帧认证的连接代数 1→2，旧页收到 `connection.replaced`/4009，另一业务用户连接保持；正式 Avatar 8 个动作图集经 COS 签名 URL 和 SHA-256 校验加载，画布绘制非透明像素，`wave`、stop→`idle` 通过。强制续权收到 `connection.reauthorized`；受控断开 3001 后自动重连、代数 4→5。Secret 重置后旧 Secret 新申请被拒 401，既有短期 Token 仍读会话 200；管理员禁用后新业务命令与运行 HTTP 被拒，既有 WSS 可心跳。真实退出初次因 outbox 字符集比较返回 500，修复后重启补偿使 3 个 Session 变为 DELETED、outbox SENT、9 条引用 RELEASED；新增 Session 创建 200、跨用户 404、同步 DELETE 200/DELETED。另修复 Application 可选能力空值校验、Session/Application 可用性 SQL 括号、角色帧字段投影和 Token 时间毫秒精度。用户授权在当前 COS 桶新增仅 `http://127.0.0.1` 的 GET/HEAD CORS 规则；云端保存成功。system/session Maven package 成功，重启后健康检查均 200；未启动媒体 Worker、未调用图片/语音供应商。最新测试 Secret 和应用已禁用，测试 Session 均关闭，临时 `p_account_limit` 行已删除。 | DEV-07 的短期 Token 自然到期、真实多次断网和迟到业务音频需在对应运行条件下继续观察；DEV-08/09 再验 chat/官方 TTS 副作用。COS 本机 Origin 规则保留供本机开发。 |
 | 2026-09-27 | DEV-08 本机完整链路验收与可复用项目 | 模块自身主要终点完成；DEV-09/10 联动待验 | 用户授权本机真实验收、Qwen 总费用上限 10 元，并要求保留测试项目。`test` Application 发布 CHAT 配置，注册独立 LLM Relay、Prompt Skill 与只读查询 Tool；服务器仅新增 `/dev08/` Nginx include，经 SSH 反向隧道接本机 Flask，原站根路径和新健康检查均为 200。DEBUG 与 BUSINESS 短期授权经 Gateway ticket/WSS 的真实流式、多轮记忆、Prompt 标记和 Tool 查询通过；Tool 只公开 `name/stock`。stop 和替换的轮次中断、在途 UNKNOWN、未绑定 Tool 不提交外部操作、Tool 超时 UNKNOWN、跨用户 404、应用停用 403 并恢复 ACTIVE 已实测。`s_outbox` 调用事实进入 `p_call_record/p_usage_daily`；本轮实际模型平台用量输入 1273/输出 84 token，先前直连/适配器输入 198/输出 25 token，远低于 10 元上限。真实 Chrome 调试页显示正式角色、连接 WSS 并显示无费用流式探针；修复后台登录 Redis key 校验、DEBUG grant 毫秒时间精度、DEBUG Session ID 的浏览器数字精度、CHAT 角色包可用性和伪成功响应、Vite 本机 WS 代理。system/session Maven 打包、聚焦测试、Vue typecheck 与 Relay 5 项测试通过。复用配置、启动方式、凭证位置与截图见 `examples/integration-demo/backend/README.md`，Application/Relay/Skills/HTTPS 入口和测试账号限额保留，临时浏览器 DEBUG Session 已关闭。 | DEV-09 官方 TTS/ASR、DEV-10 Context 和 DEV-11 Webhook 按各自计划验收；长时自然到期及真实多次断网仍按 DEV-07 边界单列。 |
 | 2026-09-27 | DEV-08 SDK 浏览器补验 | BUSINESS 浏览器文本终点通过 | 真实 Chrome 从保留测试项目加载 `avatar-sdk/dist`，以短期 BUSINESS Token 使用无 Vue `SessionClient.chat()` 发送零费用 `DEV08_FAST_TEST`；按序收到 `connection.ready`、`request.ack`、`turn.started`、`text.delta` 和 `turn.completed`，文本为“测试流”，无页面异常。该短期 Session 已关闭；脚本 `examples/integration-demo/backend/accept_dev08_sdk.py` 与项目配置保留供后续模块复用。 | 后续在 DEV-09/10 继续扩展同一验收项目，避免重复搭建凭证和入口。 |
+| 2026-09-27 | DEV-09 ASR、TTS 与独立播报 | 模块完成；DEV-11 对账另行处理 | 按 7.10 实现 SDK 录音与 ASR、CHAT 官方 Voice 分句播报、BUSINESS 独立 speak、额度和调用事实；真实 ASR 四次、TTS 独立/两句/stop、Chrome 录音与自动播放恢复通过。百炼旧 TTS 400 的 ClientDisconnect 已修复，用户确认新请求 200。修复临时音频的本地时间/UTC 比较后，session 打包、4 项聚焦测试、服务健康检查通过；12 条 `DELETE_PENDING` 变为 `DELETED`，12 个 WAV 文件均被删除。原有 Vue typecheck、SDK build 与 Relay 6 项检查通过；本轮清理复验未增加付费调用。 | 历史三笔 14 字 `REVIEW_REQUIRED` 及一笔停止轮 `UNKNOWN` 由 DEV-11 核对；DEV-10 Context 与跨模块完整贯通另行验收。 |

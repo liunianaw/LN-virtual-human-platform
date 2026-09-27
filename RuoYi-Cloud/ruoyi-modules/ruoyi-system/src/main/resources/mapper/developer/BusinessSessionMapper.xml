@@ -14,7 +14,7 @@
     where a.account_id=#{accountId} and a.id=#{applicationId} and a.purpose='USER'
   </select>
   <select id="chatConfig" resultType="map">
-    select c.id configId,c.llm_relay_version_id llmRelayVersionId,c.llm_model_id model,
+    select c.id configId,c.llm_relay_version_id llmRelayVersionId,c.asr_relay_version_id asrRelayVersionId,c.llm_model_id model,
       c.system_prompt systemPrompt,c.llm_parameters parameters,c.llm_capabilities capabilities,
       c.runtime_limits runtimeLimits
     from p_app_config c join p_resource_reference ref on ref.account_id=c.account_id

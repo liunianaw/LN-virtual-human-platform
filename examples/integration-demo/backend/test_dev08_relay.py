@@ -47,6 +47,7 @@ class DemoRelayTest(unittest.TestCase):
         self.assertEqual(401, self.client.get("/ln-relay/v1/capabilities").status_code)
         capability = self.client.get("/ln-relay/v1/capabilities", headers=self.headers)
         self.assertTrue(capability.json["capabilities"]["llm"])
+        self.assertTrue(capability.json["capabilities"]["asr"])
         headers = {
             "Authorization": "Bearer tool-token",
             "X-LN-External-User-Id-B64": base64.urlsafe_b64encode(b"user-1").decode().rstrip("="),
@@ -112,6 +113,28 @@ class DemoRelayTest(unittest.TestCase):
                 "/ln-relay/v1/chat/completions", json=self.request(9), headers=self.headers
             ).status_code)
             self.assertEqual(dev08_relay.MAX_PROVIDER_CALLS, upstream.call_count)
+
+    def test_asr_multipart_and_budget(self):
+        def fake_urlopen(request, timeout):
+            payload = json.loads(request.data)
+            self.assertEqual("qwen3-asr-flash", payload["model"])
+            self.assertTrue(payload["messages"][0]["content"][0]["input_audio"]["data"].startswith("data:audio/wav;base64,"))
+            return io.BytesIO(b'{"choices":[{"finish_reason":"stop","message":{"content":"hello","annotations":[{"language":"en"}]}}],"id":"asr-1","usage":{"seconds":2}}')
+
+        def multipart(user="user-1"):
+            return {"requestId": "req-1", "applicationId": "123", "sessionId": "456",
+                    "externalUserId": user, "audio": (io.BytesIO(b"RIFFtest"), "sample.wav", "audio/wav")}
+
+        with patch.object(dev08_relay, "urlopen", side_effect=fake_urlopen) as upstream:
+            self.assertEqual(400, self.client.post("/ln-relay/v1/audio/transcriptions",
+                                               data=multipart("other"), headers=self.headers).status_code)
+            for _ in range(dev08_relay.MAX_ASR_CALLS):
+                response = self.client.post("/ln-relay/v1/audio/transcriptions",
+                                            data=multipart(), headers=self.headers)
+                self.assertEqual({"text": "hello", "language": "en", "providerRequestId": "asr-1", "durationMs": 2000}, response.json)
+            self.assertEqual(429, self.client.post("/ln-relay/v1/audio/transcriptions",
+                                               data=multipart(), headers=self.headers).status_code)
+            self.assertEqual(dev08_relay.MAX_ASR_CALLS, upstream.call_count)
 
 
 if __name__ == "__main__":
