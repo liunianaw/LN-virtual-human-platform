@@ -41,6 +41,22 @@ public class BusinessSystemClient
     public void release(long accountId, long applicationId, long configId, long sessionId, String operationId)
     { post("references/release", new Reference(accountId, applicationId, configId, sessionId, operationId)); }
 
+    public JsonNode chatConfig(long accountId, long applicationId, long configId, long sessionId)
+    { return post("chat-config", new Reference(accountId, applicationId, configId, sessionId, "")); }
+
+    public JsonNode resolveRelay(long accountId, long applicationId, long sessionId, long relayVersionId,
+        String externalUserId, long turnId)
+    {
+        return post("/internal/v1/relay-services/resolve",
+            new RelayBinding(accountId, applicationId, sessionId, relayVersionId, "LLM", externalUserId, turnId));
+    }
+
+    public JsonNode resolveSkill(long accountId, long applicationId, long sessionId, long skillVersionId)
+    {
+        return post("/internal/v1/skills/resolve",
+            new SkillBinding(accountId, applicationId, sessionId, skillVersionId));
+    }
+
     private JsonNode post(String path, Object body)
     {
         String base = System.getenv("LN_SESSION_TO_SYSTEM_URL");
@@ -49,7 +65,7 @@ public class BusinessSystemClient
             throw new RuntimeProblem(HttpStatus.SERVICE_UNAVAILABLE, "BUSINESS_AUTH_NOT_CONFIGURED", "Business Session authorization is unavailable.");
         try
         {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(base + "/internal/v1/business-sessions/" + path))
+            HttpRequest request = HttpRequest.newBuilder(URI.create(base + (path.startsWith("/") ? path : "/internal/v1/business-sessions/" + path)))
                 .timeout(Duration.ofSeconds(8)).header("Authorization", "Bearer " + bearer).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body))).build();
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
@@ -119,4 +135,7 @@ public class BusinessSystemClient
     }
     private record Authenticate(String secret, String scope, Long configId) { }
     private record Reference(long accountId, long applicationId, long configId, long sessionId, String operationId) { }
+    private record RelayBinding(long accountId, long applicationId, long sessionId, long relayVersionId,
+        String capability, String externalUserId, Long turnId) { }
+    private record SkillBinding(long accountId, long applicationId, long sessionId, long skillVersionId) { }
 }

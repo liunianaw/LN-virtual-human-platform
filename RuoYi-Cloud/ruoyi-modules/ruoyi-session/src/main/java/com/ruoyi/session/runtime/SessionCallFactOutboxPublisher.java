@@ -27,7 +27,7 @@ public class SessionCallFactOutboxPublisher
     public void publishOne()
     {
         Event event = transactions.execute(status -> {
-            Event candidate = jdbc.query("select id,event_id,payload from s_outbox where event_type='CALL_FACT_RECORDED' and status in ('PENDING','SENDING') and (next_run_at is null or next_run_at<=utc_timestamp(3)) order by created_at,id limit 1 for update",
+            Event candidate = jdbc.query("select id,event_id,payload from s_outbox where event_type='CALL_FACT_RECORDED' and ((status='PENDING' and (next_run_at is null or next_run_at<=utc_timestamp(3))) or (status='SENDING' and (lease_expires_at is null or lease_expires_at<=utc_timestamp(3)))) order by created_at,id limit 1 for update",
                 rs -> rs.next() ? new Event(rs.getLong(1), rs.getString(2), rs.getString(3)) : null);
             if (candidate != null) jdbc.update("update s_outbox set status='SENDING',lease_expires_at=date_add(utc_timestamp(3),interval 30 second),attempt_count=attempt_count+1,updated_at=utc_timestamp(3) where id=?", candidate.id());
             return candidate;

@@ -19,16 +19,20 @@ public class BusinessSessionService
     private final SpeakOnlyRuntimeService runtime;
     private final BusinessCredentialStore credentials;
     private final com.ruoyi.session.runtime.RuntimeEventPublisher events;
+    private final org.springframework.context.ApplicationEventPublisher publisher;
 
     public BusinessSessionService(BusinessSystemClient system, BusinessSessionStore store, RuntimeTokenCodec tokens,
         SpeakOnlyRuntimeService runtime, BusinessCredentialStore credentials,
-        com.ruoyi.session.runtime.RuntimeEventPublisher events)
+        com.ruoyi.session.runtime.RuntimeEventPublisher events,
+        org.springframework.context.ApplicationEventPublisher publisher)
     { this.system = system; this.store = store; this.tokens = tokens; this.runtime = runtime;
-      this.credentials = credentials; this.events = events; }
+      this.credentials = credentials; this.events = events; this.publisher = publisher; }
 
     public View create(String secret, String externalUserId, String idempotencyKey, String queryCredential)
     {
         validUser(externalUserId);
+        if (externalUserId.startsWith("__ln_debug__:"))
+            throw problem(HttpStatus.BAD_REQUEST, "EXTERNAL_USER_INVALID");
         validKey(idempotencyKey);
         BusinessSystemClient.Snapshot snapshot = system.authenticate(secret, "sessions:create", null);
         byte[] requestHash = credentials.fingerprint(queryCredential);
@@ -154,10 +158,13 @@ public class BusinessSessionService
         }
     }
 
+    public record SessionClosed(long sessionId) { }
+
     private void end(BusinessSessionStore.Session row)
     {
         BusinessSessionStore.Session closing = store.beginClose(row);
         if ("DELETED".equals(closing.status())) return;
+        publisher.publishEvent(new SessionClosed(row.id()));
         runtime.revokeSession(row.id());
         events.revokeSession(row.id());
         credentials.remove(row.id());

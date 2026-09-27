@@ -18,13 +18,16 @@ public class ConsoleDebugInternalController
     private final ConsoleDebugGrantService grants;
     private final SpeakOnlyRuntimeService runtime;
     private final RuntimeEventPublisher events;
+    private final IChatRuntimeService chat;
 
-    public ConsoleDebugInternalController(InternalBearerGuard guard, ConsoleDebugGrantService grants, SpeakOnlyRuntimeService runtime, RuntimeEventPublisher events)
+    public ConsoleDebugInternalController(InternalBearerGuard guard, ConsoleDebugGrantService grants,
+        SpeakOnlyRuntimeService runtime, RuntimeEventPublisher events, IChatRuntimeService chat)
     {
         this.guard = guard;
         this.grants = grants;
         this.runtime = runtime;
         this.events = events;
+        this.chat = chat;
     }
 
     @PostMapping
@@ -43,7 +46,8 @@ public class ConsoleDebugInternalController
         VoiceRuntimeBinding voice = new VoiceRuntimeBinding(body.voiceVersionId(), TtsProviderKind.valueOf(body.providerKind()),
                 body.providerVoiceRef(), body.relayVersionRef(), body.officialServiceId(), body.officialServiceRevision());
         return grants.mint(new ConsoleDebugGrantService.MintRequest(body.accountId(), body.applicationId(), body.sessionId(),
-                body.configVersionId(), body.issuerConsoleRef(), Instant.ofEpochMilli(body.expiresAtEpochMs()), voice));
+                body.configVersionId(), body.issuerConsoleRef(), Instant.ofEpochMilli(body.expiresAtEpochMs()), voice,
+                body.mode()));
     }
 
     @DeleteMapping("/{sessionId}")
@@ -51,14 +55,15 @@ public class ConsoleDebugInternalController
         @RequestBody CloseBody body)
     {
         guard.requireSystem(authorization);
-        runtime.revokeSession(sessionId);
         grants.close(body.accountId(), sessionId);
+        runtime.revokeSession(sessionId);
+        chat.cancelPrior(sessionId, Long.MAX_VALUE);
         events.revokeSession(sessionId);
     }
 
     public record CreateBody(long accountId, long applicationId, long configVersionId, String requestId) { }
     public record MintBody(long accountId, long applicationId, long sessionId, long configVersionId, String issuerConsoleRef,
             long expiresAtEpochMs, long voiceVersionId, String providerKind, String providerVoiceRef, String relayVersionRef,
-            Long officialServiceId, Long officialServiceRevision) { }
+            Long officialServiceId, Long officialServiceRevision, String mode) { }
     public record CloseBody(long accountId) { }
 }

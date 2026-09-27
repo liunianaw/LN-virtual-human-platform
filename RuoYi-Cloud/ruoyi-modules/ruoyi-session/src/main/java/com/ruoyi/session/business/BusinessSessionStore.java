@@ -21,7 +21,9 @@ public class BusinessSessionStore
 {
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
-    public BusinessSessionStore(JdbcTemplate jdbc, ObjectMapper json) { this.jdbc = jdbc; this.json = json; }
+    private final com.ruoyi.session.runtime.ChatTurnStore chat;
+    public BusinessSessionStore(JdbcTemplate jdbc, ObjectMapper json, com.ruoyi.session.runtime.ChatTurnStore chat)
+    { this.jdbc = jdbc; this.json = json; this.chat = chat; }
 
     @Transactional
     public Preparation prepare(long accountId, long applicationId, long configId, String externalUserId, String key, byte[] requestHash)
@@ -139,6 +141,7 @@ public class BusinessSessionStore
             "audio_status=if(audio_status='RUNNING','INTERRUPTED',audio_status),playback_status=if(playback_status in ('WAITING','PLAYING'),'STOPPED',playback_status)," +
             "cancel_reason='REVOKED',ended_at=coalesce(ended_at,?),updated_at=? where session_id=? and status='RUNNING'",
             now, now, row.id());
+        chat.unknownInFlight(row.id(), "SESSION_REVOKED");
         jdbc.update("update s_operation set status=if(status in ('QUEUED','RUNNING'),'CANCELLED',status)," +
             "playback_status=if(playback_status in ('WAITING','STARTED'),'STOPPED',playback_status)," +
             "finished_at=coalesce(finished_at,?),updated_at=? where session_id=? and (status in ('QUEUED','RUNNING') or playback_status in ('WAITING','STARTED'))",

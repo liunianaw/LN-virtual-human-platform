@@ -7,5 +7,10 @@ public record CallFactEvent(String eventId, String operationKey, Long accountId,
     Long applicationId, Long sessionId, Long turnId, String providerRequestId, Usage usage,
     BigDecimal costAmount, String currency, String costSource, String errorCode)
 {
-    public record Usage(Long inputChars, Long imageCount, Long audioDurationMs, Boolean usageAvailable) { }
+    public record Usage(Long inputChars, Long imageCount, Long audioDurationMs, Boolean usageAvailable,
+        Long inputTokens, Long outputTokens)
+    {
+        public Usage(Long inputChars, Long imageCount, Long audioDurationMs, Boolean usageAvailable)
+        { this(inputChars, imageCount, audioDurationMs, usageAvailable, null, null); }
+    }
 }

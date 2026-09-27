@@ -29,6 +29,10 @@ public class BusinessSessionInternalController
     public Map<String, Object> check(@RequestHeader(HttpHeaders.AUTHORIZATION) String bearer, @RequestBody ReferenceBody body)
     { guard.requireSession(bearer); return authorization.check(body.accountId(), body.applicationId(), body.configId()); }
 
+    @PostMapping("/chat-config")
+    public Map<String, Object> chatConfig(@RequestHeader(HttpHeaders.AUTHORIZATION) String bearer, @RequestBody ReferenceBody body)
+    { guard.requireSession(bearer); return authorization.chatConfig(body.accountId(), body.applicationId(), body.configId(), body.sessionId()); }
+
     @PostMapping("/references/reserve")
     public Map<String, Object> reserve(@RequestHeader(HttpHeaders.AUTHORIZATION) String bearer, @RequestBody ReferenceBody body)
     { guard.requireSession(bearer); return authorization.reserve(body.accountId(), body.applicationId(), body.configId(), body.sessionId(), body.operationId()); }

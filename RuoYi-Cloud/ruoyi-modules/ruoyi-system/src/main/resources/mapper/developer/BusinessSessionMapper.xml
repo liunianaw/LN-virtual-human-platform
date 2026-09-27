@@ -13,6 +13,23 @@
     left join p_voice_version vv on vv.id=c.voice_version_id and vv.service_type='OFFICIAL'
     where a.account_id=#{accountId} and a.id=#{applicationId} and a.purpose='USER'
   </select>
+  <select id="chatConfig" resultType="map">
+    select c.id configId,c.llm_relay_version_id llmRelayVersionId,c.llm_model_id model,
+      c.system_prompt systemPrompt,c.llm_parameters parameters,c.llm_capabilities capabilities,
+      c.runtime_limits runtimeLimits
+    from p_app_config c join p_resource_reference ref on ref.account_id=c.account_id
+      and ref.holder_type='SESSION' and ref.holder_id=#{sessionId} and ref.resource_type='APP_CONFIG'
+      and ref.resource_id=c.id and ref.state='CONFIRMED'
+    where c.id=#{configId} and c.account_id=#{accountId} and c.application_id=#{applicationId} and c.mode='CHAT'
+  </select>
+  <select id="chatSkills" resultType="long">
+    select binding.skill_version_id from p_app_skill binding
+    join p_resource_reference ref on ref.account_id=binding.account_id and ref.holder_type='SESSION'
+      and ref.holder_id=#{sessionId} and ref.resource_type='SKILL_VERSION'
+      and ref.resource_id=binding.skill_version_id and ref.state='CONFIRMED'
+    where binding.account_id=#{accountId} and binding.app_config_id=#{configId} and binding.enabled=1
+    order by binding.sort_order,binding.id
+  </select>
   <select id="currentForUpdate" resultType="map">
     select a.current_config_id currentConfigId,a.status,a.admin_disabled adminDisabled
     from p_application a where a.account_id=#{accountId} and a.id=#{applicationId} and a.purpose='USER' for update

@@ -6,7 +6,8 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
-import com.ruoyi.common.security.service.TokenService;
+import com.ruoyi.common.core.constant.CacheConstants;
+import com.ruoyi.common.redis.service.RedisService;
 import com.ruoyi.system.api.model.LoginUser;
 
 /** Process-local mapping intentionally makes old DEBUG grants fail closed after a system restart. */
@@ -14,9 +15,9 @@ import com.ruoyi.system.api.model.LoginUser;
 public class ConsoleLoginRegistry
 {
     private final ConcurrentHashMap<String, Registration> registrations = new ConcurrentHashMap<>();
-    private final TokenService tokenService;
+    private final RedisService redisService;
 
-    public ConsoleLoginRegistry(TokenService tokenService) { this.tokenService = tokenService; }
+    public ConsoleLoginRegistry(RedisService redisService) { this.redisService = redisService; }
 
     public String register(LoginUser loginUser)
     {
@@ -31,8 +32,10 @@ public class ConsoleLoginRegistry
     {
         Registration registration = registrations.get(reference);
         if (registration == null || registration.accountId() != accountId || !registration.expiresAt().isAfter(Instant.now())) return false;
-        LoginUser current = tokenService.getLoginUser(registration.consoleToken());
+        // LoginUser.token is the Redis session key, not the browser JWT.
+        LoginUser current = redisService.getCacheObject(CacheConstants.LOGIN_TOKEN_KEY + registration.consoleToken());
         return current != null && current.getUserid() != null && current.getUserid() == accountId
+                && registration.consoleToken().equals(current.getToken())
                 && current.getExpireTime() != null && current.getExpireTime() >= System.currentTimeMillis();
     }
 

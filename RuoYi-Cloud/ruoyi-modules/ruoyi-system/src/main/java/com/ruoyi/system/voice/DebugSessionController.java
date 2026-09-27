@@ -22,11 +22,14 @@ public class DebugSessionController
 
     @RequiresPermissions("platform:application:debug")
     @PostMapping("/applications/{applicationId}/debug-sessions")
-    public DebugSessionService.DebugSession create(@PathVariable long applicationId,
+    public java.util.Map<String, String> create(@PathVariable long applicationId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey)
     {
         LoginUser login = requireLogin();
-        return sessions.create(login.getUserid(), login, applicationId, idempotencyKey);
+        DebugSessionService.DebugSession session = sessions.create(login.getUserid(), login, applicationId, idempotencyKey);
+        return java.util.Map.of("sessionId", Long.toString(session.sessionId()),
+            "applicationId", Long.toString(session.applicationId()),
+            "configVersionId", Long.toString(session.configVersionId()));
     }
 
     @PostMapping("/debug-sessions/{sessionId}/tokens")

@@ -33,7 +33,10 @@ public class SystemRuntimeClient
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build();
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) throw new RuntimeProblem(HttpStatus.CONFLICT, "AVATAR_PACKAGE_UNAVAILABLE", "The configured Avatar package is unavailable.");
-            return json.readValue(response.body(), new TypeReference<Map<String, Object>>() { });
+            Map<String, Object> result = json.readValue(response.body(), new TypeReference<Map<String, Object>>() { });
+            if (!"LN_AVATAR".equals(result.get("packageType")) || !result.containsKey("baseImage") || !result.containsKey("actions"))
+                throw new RuntimeProblem(HttpStatus.CONFLICT, "AVATAR_PACKAGE_UNAVAILABLE", "The configured Avatar package is unavailable.");
+            return result;
         }
         catch (InterruptedException error) { Thread.currentThread().interrupt(); throw new RuntimeProblem(HttpStatus.SERVICE_UNAVAILABLE, "AVATAR_PACKAGE_UNAVAILABLE", "Runtime package access was interrupted."); }
         catch (IOException | IllegalArgumentException error) { throw new RuntimeProblem(HttpStatus.SERVICE_UNAVAILABLE, "AVATAR_PACKAGE_UNAVAILABLE", "Runtime package access is unavailable."); }

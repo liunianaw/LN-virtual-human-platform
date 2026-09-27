@@ -30,16 +30,27 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
     private final BusinessSessionService business;
     private final TtsRuntimeAdapterRegistry adapters;
     private final RuntimeEventPublisher events;
+    private final IChatRuntimeService chat;
+    private final ChatTurnStore chatStore;
     private final ObjectMapper json;
     private final RuntimeLimits limits;
 
     public RuntimeWebSocketConfiguration(RuntimeConnectionTicketService tickets, RuntimeAuthorization access,
         RuntimeConnectionEpochs epochs, PersistentRuntimeStore store, SpeakOnlyRuntimeService runtime,
         BusinessSessionService business, TtsRuntimeAdapterRegistry adapters, RuntimeEventPublisher events,
-        ObjectMapper json, RuntimeLimits limits)
+        ObjectMapper json, RuntimeLimits limits, IChatRuntimeService chat, ChatTurnStore chatStore)
     {
         this.tickets = tickets; this.access = access; this.epochs = epochs; this.store = store;
         this.runtime = runtime; this.business = business; this.adapters = adapters; this.events = events; this.json = json; this.limits = limits;
+        this.chat = chat; this.chatStore = chatStore;
+    }
+
+    @org.springframework.context.annotation.Bean
+    public org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean runtimeWebSocketContainer()
+    {
+        var container = new org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean();
+        container.setMaxTextMessageBufferSize(32768);
+        return container;
     }
 
     @Override
@@ -90,7 +101,7 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             String turnId = null;
             try
             {
-                if (message.getPayloadLength() > 16384) throw problem("PROTOCOL_ERROR");
+                if (message.getPayloadLength() > 32768) throw problem("PROTOCOL_ERROR");
                 JsonNode node = json.readTree(message.getPayload());
                 if (node == null || node.path("v").asInt(-1) != 1 || !node.path("data").isObject()) throw problem("PROTOCOL_ERROR");
                 requestId = node.path("requestId").asText();
@@ -119,6 +130,7 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
                 switch (node.path("type").asText())
                 {
                     case "speech.create" -> speech(session, fresh, epoch, node);
+                    case "chat.create" -> chat(session, fresh, epoch, node);
                     case "turn.stop" -> stop(session, fresh, epoch, node);
                     case "playback.report" -> playback(session, fresh, epoch, node);
                     default -> throw problem("CAPABILITY_NOT_ALLOWED");
@@ -144,7 +156,11 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             RuntimePrincipal principal = grant.principal();
             long epoch = (long) session.getAttributes().get("connectionEpoch");
             try { runtime.disconnect(principal, epoch); }
-            finally { events.unregister(principal.sessionId(), session); }
+            finally
+            {
+                try { chat.cancelSession(principal.sessionId(), epoch); }
+                finally { events.unregister(principal.sessionId(), session); }
+            }
         }
 
         private void authenticate(WebSocketSession session, JsonNode node) throws IOException
@@ -157,15 +173,17 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             if (!"CONNECT".equals(consumed.purpose()) || consumed.expectedEpoch() != null) throw problem("TICKET_INVALID");
             RuntimeAuthorization.Grant grant = consumed.grant();
             RuntimePrincipal principal = grant.principal();
-            long epoch = store.openConnection(principal);
+            long epoch = chatStore.openConnection(principal);
             epochs.advance(principal, epoch);
             runtime.replaceConnection(principal, epoch);
+            chat.cancelPrior(principal.sessionId(), epoch);
             session.getAttributes().put("runtimeGrant", grant);
             session.getAttributes().put("connectionEpoch", epoch);
             if (!events.register(principal, epoch, session)) { session.close(new CloseStatus(4009, "replaced")); return; }
             send(session, event("connection.ready", principal, epoch, null, node.path("requestId").asText(),
                 Map.of("connectionEpoch", Long.toString(epoch), "effectiveScopes", principal.scopes(),
-                    "capabilities", "CONSOLE_DEBUG".equals(grant.source())
+                    "capabilities", principal.scopes().contains("chat:write") ? List.of("chat.create", "turn.stop")
+                        : "CONSOLE_DEBUG".equals(grant.source())
                         ? List.of("speech.create", "turn.stop", "playback.report") : List.of("turn.stop"),
                     "effectiveLimits", limits.current(), "expiresAt", grant.expiresAt().toString())));
         }
@@ -189,7 +207,8 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
         private void speech(WebSocketSession session, RuntimeAuthorization.Grant grant, long epoch, JsonNode node) throws IOException
         {
             RuntimePrincipal principal = grant.principal();
-            if ("BUSINESS_KEY".equals(grant.source())) throw problem("CAPABILITY_NOT_ALLOWED");
+            if ("BUSINESS_KEY".equals(grant.source()) || principal.scopes().contains("chat:write"))
+                throw problem("CAPABILITY_NOT_ALLOWED");
             principal.requireSpeakScope();
             String requestId = node.path("requestId").asText();
             SpeakOnlyRuntimeService.SpeechStarted started = runtime.start(principal, requestId, node.path("data").path("text").asText(), epoch);
@@ -200,15 +219,34 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             dispatch(principal, started.initialWork());
         }
 
+        private void chat(WebSocketSession session, RuntimeAuthorization.Grant grant, long epoch, JsonNode node) throws IOException
+        {
+            String requestId = node.path("requestId").asText();
+            IChatRuntimeService.Started started = chat.start(grant, epoch, requestId,
+                node.path("data").path("text").asText());
+            if ("BUSINESS_KEY".equals(grant.source())) business.successfulActivity(grant.principal().sessionId());
+            send(session, event("request.ack", grant.principal(), epoch, Long.toString(started.turnId()), requestId,
+                Map.of("requestId", requestId, "turnId", Long.toString(started.turnId()), "status", "ACCEPTED")));
+            send(session, event("turn.started", grant.principal(), epoch, Long.toString(started.turnId()), requestId,
+                Map.of("mode", "CHAT")));
+            chat.launch(started.turnId());
+        }
+
         private void stop(WebSocketSession session, RuntimeAuthorization.Grant grant, long epoch, JsonNode node) throws IOException
         {
             RuntimePrincipal principal = grant.principal();
             principal.requireSpeakScope();
             String turnId = node.path("turnId").asText();
             String reason = node.path("data").path("reason").asText();
-            if (!reason.matches("[\\x20-\\x7e]{1,100}") || !turnId.matches("[1-9][0-9]*"))
+            if (!reason.matches("[\\x20-\\x7e]{1,100}") || !turnId.matches("[1-9][0-9]{0,18}"))
                 throw problem("INVALID_ARGUMENT");
-            SpeakOnlyRuntimeService.StopResult stopped = runtime.stop(principal, turnId);
+            long parsedTurnId;
+            try { parsedTurnId = Long.parseLong(turnId); }
+            catch (NumberFormatException error) { throw problem("INVALID_ARGUMENT"); }
+            boolean chatTurn = chatStore.chatTurn(principal, parsedTurnId);
+            SpeakOnlyRuntimeService.StopResult stopped = chatTurn
+                ? new SpeakOnlyRuntimeService.StopResult(turnId, !chat.stop(principal, parsedTurnId, "USER_STOP"))
+                : runtime.stop(principal, turnId);
             if ("BUSINESS_KEY".equals(grant.source())) business.successfulActivity(principal.sessionId());
             Map<String, Object> state = new java.util.LinkedHashMap<>(store.turnState(principal, stopped.turnId()));
             state.put("alreadyStopped", stopped.alreadyStopped());

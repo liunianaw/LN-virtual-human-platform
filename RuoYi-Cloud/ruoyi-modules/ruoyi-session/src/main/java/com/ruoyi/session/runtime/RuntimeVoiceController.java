@@ -24,11 +24,13 @@ public class RuntimeVoiceController
     private final TemporaryWavStorage audioStorage;
     private final SystemRuntimeClient system;
     private final RuntimeLimits limits;
+    private final IChatRuntimeService chat;
+    private final ChatTurnStore chatStore;
 
     public RuntimeVoiceController(RuntimeAuthorization access, TtsRuntimeAdapterRegistry adapters,
             SpeakOnlyRuntimeService runtime, RuntimeConnectionTicketService tickets, PersistentRuntimeStore store,
             TemporaryWavStorage audioStorage, SystemRuntimeClient system, RuntimeLimits limits,
-            RuntimeConnectionEpochs epochs)
+            RuntimeConnectionEpochs epochs, IChatRuntimeService chat, ChatTurnStore chatStore)
     {
         this.access = access;
         this.adapters = adapters;
@@ -38,6 +40,8 @@ public class RuntimeVoiceController
         this.audioStorage = audioStorage;
         this.system = system;
         this.limits = limits;
+        this.chat = chat;
+        this.chatStore = chatStore;
         this.epochs = epochs;
     }
 
@@ -62,7 +66,9 @@ public class RuntimeVoiceController
         RuntimeAuthorization.Grant grant = access.authenticate(authorization);
         java.util.Map<String, Object> state = store.sessionState(grant.principal());
         state.put("effectiveLimits", limits.current());
-        state.put("capabilities", "CONSOLE_DEBUG".equals(grant.source())
+        state.put("capabilities", grant.principal().scopes().contains("chat:write")
+            ? java.util.List.of("chat.create", "turn.stop")
+            : "CONSOLE_DEBUG".equals(grant.source())
             ? java.util.List.of("speech.create", "turn.stop", "playback.report") : java.util.List.of("turn.stop"));
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(RuntimeEnvelope.ok(state));
     }
@@ -92,6 +98,8 @@ public class RuntimeVoiceController
     {
         RuntimePrincipal principal = debugOnly(authorization, connectionEpoch);
         principal.requireSpeakScope();
+        if (principal.scopes().contains("chat:write"))
+            throw new RuntimeProblem(org.springframework.http.HttpStatus.FORBIDDEN, "CAPABILITY_NOT_ALLOWED", "CHAT does not use this speech endpoint.");
         TtsRuntimeAdapter adapter = adapters.requireAdapter(principal.voice());
         SpeakOnlyRuntimeService.SpeechStarted started = runtime.start(principal, request.requestId(), request.text(), epoch(connectionEpoch));
         dispatch(adapter, started.initialWork());
@@ -105,7 +113,17 @@ public class RuntimeVoiceController
         RuntimePrincipal principal = access.authenticate(authorization).principal();
         principal.requireSpeakScope();
         requireCurrentConnection(principal, connectionEpoch);
-        SpeakOnlyRuntimeService.StopResult stopped = runtime.stop(principal, request.turnId());
+        if (request == null || request.turnId() == null || !request.turnId().matches("[1-9][0-9]{0,18}"))
+            throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", "Turn ID is invalid.");
+        long turnId;
+        try { turnId = Long.parseLong(request.turnId()); }
+        catch (NumberFormatException error)
+        { throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", "Turn ID is invalid."); }
+        boolean chatTurn = chatStore.chatTurn(principal, turnId);
+        SpeakOnlyRuntimeService.StopResult stopped = chatTurn
+            ? new SpeakOnlyRuntimeService.StopResult(request.turnId(),
+                !chat.stop(principal, turnId, "USER_STOP"))
+            : runtime.stop(principal, request.turnId());
         return RuntimeEnvelope.ok(new StopResponse(stopped.turnId(), stopped.alreadyStopped()));
     }
 

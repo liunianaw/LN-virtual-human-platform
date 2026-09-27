@@ -93,7 +93,11 @@ export class SessionClient {
 
   chat(text: string): string {
     if (!text.trim()) throw new SessionClientError("INVALID_ARGUMENT", "Chat text is required.");
-    return this.command("chat.create", { text });
+    const requestId = this.command("chat.create", { text });
+    for (const pending of this.pendingSpeech) this.stopOnAck.set(pending, "REPLACED");
+    if (this.activeTurn) this.stopLocal();
+    this.pendingSpeech.add(requestId);
+    return requestId;
   }
 
   speak(text: string): string {

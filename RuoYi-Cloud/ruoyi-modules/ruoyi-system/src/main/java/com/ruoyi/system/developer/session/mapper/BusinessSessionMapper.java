@@ -8,6 +8,10 @@ public interface BusinessSessionMapper
 {
     Map<String, Object> snapshot(@Param("accountId") long accountId, @Param("applicationId") long applicationId,
         @Param("configId") Long configId);
+    Map<String, Object> chatConfig(@Param("accountId") long accountId, @Param("applicationId") long applicationId,
+        @Param("configId") long configId, @Param("sessionId") long sessionId);
+    List<Long> chatSkills(@Param("accountId") long accountId, @Param("configId") long configId,
+        @Param("sessionId") long sessionId);
     Map<String, Object> currentForUpdate(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
     List<Map<String, Object>> resources(@Param("configId") long configId);
     Integer maxSessionsForUpdate(@Param("accountId") long accountId);

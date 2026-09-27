@@ -1,6 +1,6 @@
 # 开发者接入接口与授权过程协议（待确认草案）
 
-日期：2026-09-25。状态：DEV-01～07 接口族已随各模块实施固定；DEV-08～11 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
+日期：2026-09-26。状态：DEV-01～08 接口族已随各模块实施固定；DEV-09～11 仍待定稿。本文约定开发者接入模块的接口和跨服务行为。
 
 依据：[开发者接入执行计划](2026-09-23-developer-integration-modules.md)、[项目需求](../../../项目需求说明书.md)、[数据库设计](../../../数据库设计说明书.md)、[项目架构](../../../项目架构说明书.md)、[平台内共享契约](platform-console-shared-contract.md)、[接口设计说明书01](../../../接口设计说明书01.md)。
 
@@ -78,7 +78,7 @@ Management Key 的资源 Scope 见下表；Application Secret 只允许 `session
 
 `VersionInput={baseUrl,protocolVersion:"1",capabilities:{llm,asr,image?,tool?,cancel?},endpoints?,timeoutMs,maxResponseBytes}`；至少一个 LLM/ASR 为 true，image/tool 只能附属于 LLM，绝不允许 TTS。端点若提供，必须与固定 `GET /capabilities`、`POST /chat/completions`、`POST /audio/transcriptions`、`POST /requests/{requestId}/cancel` 一致；未提供时服务端保存固定相对路径。baseUrl 仅 HTTPS 主机及可选安全路径，不允许账号密码、查询、片段或非 443 端口。连接时重新解析 DNS，拒绝所有非公网目标，连接固定到已验证 IP，验证原主机 TLS 证书且不跟随重定向。
 
-LN_RELAY/1 调用头固定为 `Authorization: Bearer {Relay Token}`、`X-LN-Protocol-Version: 1`、`X-Request-Id: {稳定操作号}`；开发者后端在此身份下自行注入厂商 Key。LLM 的 `POST /chat/completions` JSON 为 `{requestId,applicationId,sessionId,turnId,externalUserId,model,messages,tools,parameters,stream:true}`，`externalUserId` 仅来自已鉴权 BUSINESS principal；响应为 SSE `text.delta`、`tool_call.delta`、`response.completed` 或 `error`。前两个事件只含本次请求的顺序片段，平台仅在终态 `response.completed` 的完整 Tool 参数经授权、Schema 检查后执行；终态可带 `usage:{inputTokens?,outputTokens?},providerRequestId?`，未知值为 null，不猜测为零。流提前断开时本次操作为失败或不确定，已生成文字不自动重放。
+LN_RELAY/1 调用头固定为 `Authorization: Bearer {Relay Token}`、`X-LN-Protocol-Version: 1`、`X-Request-Id: {稳定操作号}`；开发者后端在此身份下自行注入厂商 Key。LLM 的 `POST /chat/completions` JSON 为 `{requestId,applicationId,sessionId,turnId,externalUserId,model,messages,tools,parameters,stream:true}`，`externalUserId` 在 BUSINESS 中来自已鉴权 principal；CHAT DEBUG 使用 `__ln_debug__:{sessionId}` 保留身份，新的 BUSINESS Session 禁止使用该前缀，以隔离开发者 Relay 的跨轮记忆；响应为 SSE `text.delta`、`tool_call.delta`、`response.completed` 或 `error`。前两个事件只含本次请求的顺序片段，平台仅在终态 `response.completed` 的完整 Tool 参数经授权、Schema 检查后执行；终态可带 `usage:{inputTokens?,outputTokens?},providerRequestId?`，未知值为 null，不猜测为零。流提前断开时本次操作为失败或不确定，已生成文字不自动重放。
 
 ASR 的 `POST /audio/transcriptions` 为完整录音 multipart，字段 `audio,requestId,applicationId,sessionId,externalUserId,language?`；返回 `{text,language?,durationMs?,usage?,providerRequestId?}`，不会隐式继续发起 LLM。尽力取消为 `POST /requests/{requestId}/cancel`，返回 `state=CANCELLED/ALREADY_FINISHED/NOT_SUPPORTED/UNKNOWN`；取消不能承诺上游免费。错误 JSON 仅安全 `code,message,retryable,requestId`，不得透出厂商响应正文或 Key。此协议供 DEV-08/09 的实际流式 LLM 与录音 ASR 编排使用；DEV-03 的连接测试只做无计费握手。
 
@@ -133,7 +133,7 @@ DEV-06 的 BUSINESS Session 接口于 2026-09-25 随用户授权实施本模块�
 
 #### DEV-06 请求、响应与事件 Schema（2026-09-25）
 
-所有请求使用 `Authorization: Bearer lna_...`。system 按 `sessions:create/read/grant/end/revoke` Scope 验证当前 Secret、账号和应用；session 再匹配固定 `(accountId,applicationId,externalUserId,sessionId)`。`externalUserId` 只由可信开发者后端声明，区分大小写，非空且最多 191 字符，不接受控制字符。JSON 中的 ID 为十进制字符串。写入的 `Idempotency-Key` 为 1～64 个可见 ASCII 字符；结束可用 `If-Match: <revision>`。同键异参返回 409。
+所有请求使用 `Authorization: Bearer lna_...`。system 按 `sessions:create/read/grant/end/revoke` Scope 验证当前 Secret、账号和应用；session 再匹配固定 `(accountId,applicationId,externalUserId,sessionId)`。`externalUserId` 只由可信开发者后端声明，区分大小写，非空且最多 191 字符，不接受控制字符；新 BUSINESS Session 不接受 `__ln_debug__:` 保留前缀。JSON 中的 ID 为十进制字符串。写入的 `Idempotency-Key` 为 1～64 个可见 ASCII 字符；结束可用 `If-Match: <revision>`。同键异参返回 409。
 
 | 方法 | 请求 | 成功响应 | 主要失败 |
 |---|---|---|---|
@@ -173,6 +173,16 @@ WSS 信封沿用[平台内共享契约 C4.2～C4.3](platform-console-shared-cont
 
 部署须设置 `LN_PUBLIC_RUNTIME_WS_URL` 为公网 `wss://.../api/v1/realtime`；仅 loopback 本地开发可用 `ws://`。Gateway 与 session 同用 `LN_RUNTIME_ALLOWED_ORIGINS` 的明确页面来源列表，正式环境只接受 HTTPS 来源；没有配置时不开放跨源调用。Gateway 仅将 runtime 短期 Token 与 WSS 首帧票据交 session 验证，不按后台 JWT 解析，也不放行其他 API 路由。
 
+#### DEV-08 CHAT、LLM 流与 HTTP Tool Schema（2026-09-26）
+
+`chat.create` 是已连接 WSS 命令，`data={text:string}`（非空，最多 4096 字符），要求当前 grant 的 `chat:write`、CHAT 固定配置和当前连接代数。服务端先写 `s_turn`（`include_in_history=0`，只有摘要/状态/输入哈希），再依次发 `request.ack {requestId,turnId,status:"ACCEPTED"}`、`turn.started {mode:"CHAT"}`；随后 `text.delta {text}` 按序递增，终态 `turn.completed {textStatus:"COMPLETED"}` 或 `turn.failed {code}`。新消息替换旧轮；`turn.stop` 与 HTTP stop 只停止指定当前 turn。断线或新连接不重放正文。SDK 的 `chat(text)` 返回请求 ID，`on` 订阅流式事件；停止发生在 ack 前时，SDK 收到 turn ID 后补发 stop。后台登录可为 CHAT 应用创建 DEBUG Session，grant 限于固定配置并含 `chat:write`，调试页只在点击发送后发起 Relay 请求。
+
+Session 服务通过受保护内部身份读取固定 CHAT 配置及已确认 SESSION 引用，每次新 LLM/Tool 外部操作重新核对当前账号、应用、授权、Relay/Skill 状态和公网 DNS；系统返回经过验证的 `pinnedAddress`，运行端固定连接该 IP，并用原域名做 TLS 主机验证。禁止重定向、私网目标和未经声明的端点。Relay `POST /chat/completions` 请求固定为 `{requestId,applicationId,sessionId,turnId,externalUserId,model,messages,tools,parameters,stream:true}`；`externalUserId` 在 BUSINESS 中只取持久的已鉴权 principal，DEBUG 中使用从当前已鉴权 Session ID 构造的保留身份，平台只传固定 System Prompt、启用 Prompt Skill、本轮用户输入及本轮 Tool 结果，不附旧轮历史。请求与响应均有字节上限，不自动重试模型或 Tool 业务请求。
+
+LN_RELAY/1 的 SSE 每个事件使用单行 JSON `data:`，可有 `event:` 指定类型，事件以空行结束；类型为 `text.delta {text}`、`tool_call.delta {id,name?,arguments?}`、`response.completed {usage?:{inputTokens?,outputTokens?},providerRequestId?}`、`error`。Tool 参数片段只能在 `response.completed` 后作为完整 JSON 对象解析；模型提议的名称必须属于固定应用配置。每轮 Tool 总次数默认 10、显式限值至多 20，并且每个 Tool 仍受其 `maxCallsPerTurn` 限制。Tool 输入和输出只允许发布时确定的标量 Schema；服务端注入身份头 `X-LN-External-User-Id-B64`、`X-LN-Application-Id`、`X-LN-Session-Id`，需要业务查询凭证时从短期加密 Redis 读取并以 `X-LN-Query-Credential-B64` 传递，`-B64` 为 UTF-8 Base64URL 无填充。开发者 Tool 服务负责实际只读和业务身份授权；平台不从 GET/POST 推断无副作用。成功 Tool 结果按输出 Schema 过滤后只送回本轮模型，浏览器的 `tool.result` 仅含 `frontendFields`；失败送模型稳定错误码，不编造业务结果。
+
+每次 LLM/Tool 在外部提交前写 `s_operation` 和同事务 `CALL_FACT_RECORDED` Outbox；被绑定、Schema、次数或凭证预检拒绝的模型 Tool 提议只作为失败结果回给模型，不建立外部调用事实；终态再写事实、可获取 token 用量，并转发到 `p_call_record/p_usage_daily`，归属为 `DEVELOPER`。停止、退出或在途连接关闭不能证明上游未计费，在途事实标为 `UNKNOWN`，留待 DEV-11 核对。请求正文、Tool 参数与原始结果只在有界当前轮内存中，不进入数据库、Outbox 或日志。DEV-08 的 session V6 增量迁移解除 V1 的 CHAT 历史标记约束；原 V1 文件不改。真实 Relay/Tool 网络、费用和用户终点须独立验收。
+
 ## 3. 一个应用配置凭证、会话授权与重置
 
 1. 开发者在后台为每个 Application 分别配置一个有效 Application Secret，保存在自己的可信后端；同一账号的多个 Application 不共用 Secret。重新发布某应用的配置版本不自动换该应用的 Secret；平台在每次后端接入时检查目标应用当前可用状态。开发者后端验证业务用户后，以目标应用的 Secret 创建当前运行 Session 并取得浏览器短期授权。短期授权在有效期内可用于该 Session 的多次请求，不按每次 chat/speak 重新签发。`Idempotency-Key` 是写操作去重标识，WSS ticket 仅用于一次连接认证，二者不是开发者要管理的应用 Token。
@@ -205,7 +215,7 @@ WSS 信封沿用[平台内共享契约 C4.2～C4.3](platform-console-shared-cont
 
 ## 5. 网络、计额及模块交接
 
-- LLM/ASR Relay 沿用接口01第 12 节中不冲突的 `LN_RELAY/1` 固定相对路径及 `GET /capabilities` 无计费握手；TTS 路径不用于开发者 Application。LLM 请求不包含平台历史消息。每轮由平台发送固定 System Prompt、已启用 Prompt Skills、当前用户输入和本轮 Context；同一轮 Tool 后续调用可附本轮临时 Tool 消息。平台从已验证的 BUSINESS principal 向所属开发者 Relay 传递 `externalUserId`，并带 `applicationId/sessionId/turnId`，使开发者能跨新的 Session 关联自己维护的多轮记忆；浏览器和模型不得覆盖此身份。每次模型操作仍使用稳定 requestId 防止重复计费。平台不保证开发者 Relay 的保存与删除。WSS 信封、Webhook 签名沿用接口01第 9、13.2 节中不冲突的字段，`messageId` 和历史回放字段除外；音频由官方 TTS 固定路径提供。实现时将所消费的请求/响应 Schema 固定在本协议或机器可校验的同源文件，不再引用旧路由或历史查询。
+- LLM/ASR Relay 沿用接口01第 12 节中不冲突的 `LN_RELAY/1` 固定相对路径及 `GET /capabilities` 无计费握手；TTS 路径不用于开发者 Application。LLM 请求不包含平台历史消息。每轮由平台发送固定 System Prompt、已启用 Prompt Skills、当前用户输入和本轮 Context；同一轮 Tool 后续调用可附本轮临时 Tool 消息。平台从已验证的 BUSINESS principal 向所属开发者 Relay 传递 `externalUserId`；CHAT DEBUG 使用保留的 Session 身份，并带 `applicationId/sessionId/turnId`，使开发者能跨新的 Session 关联自己维护的多轮记忆；浏览器和模型不得覆盖此身份。每次模型操作仍使用稳定 requestId 防止重复计费。平台不保证开发者 Relay 的保存与删除。WSS 信封、Webhook 签名沿用接口01第 9、13.2 节中不冲突的字段，`messageId` 和历史回放字段除外；音频由官方 TTS 固定路径提供。实现时将所消费的请求/响应 Schema 固定在本协议或机器可校验的同源文件，不再引用旧路由或历史查询。
 - Relay、Tool 和 Webhook 的开发者配置 URL 均只允许 HTTPS；拒绝本机、环回、私网、链路本地、元数据及平台内部目标。每次实际连接重新解析并验证，连接必须使用已验证目标；禁止重定向，防止校验后 DNS 改变或跳转进入内网。连接探测不调用付费模型。
 - DEV-02/06/08/09/10 在产生任务、Session、turn、外部调用或临时对象时同步执行对应的并发、额度或存储准入与释放；每次调用提交前在所属服务库写独立事实/Outbox，结果到达后更新，长期保留。`p_call_record` 经可靠事件最终一致，不把跨库延迟解释成 Session 结束才记日志。DEV-11 负责统一查询、汇总、补偿和 Webhook 投递，不能等它完成才开始阻止超限请求。留存迁移需清空旧调用到期值、调整日汇总非空到期列、Avatar 任务及 Webhook delivery 的到期字段与清理任务，并保证业务记录与其必要父记录不被删除；临时素材/音频仍按原生命周期清理。
 - DEV-05 交付配置编辑、发布、版本、引用与授权；CHAT、ASR、Skill、Context 的真实调试操作分别随 DEV-08～10 实现并验收。DEV-02 仅交付官方 Voice 目录；DEV-03 不再交付私有 Voice。

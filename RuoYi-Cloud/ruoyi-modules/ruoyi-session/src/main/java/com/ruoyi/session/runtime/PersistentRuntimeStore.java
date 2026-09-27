@@ -102,7 +102,11 @@ public class PersistentRuntimeStore
         Instant now = Instant.now();
         jdbcTemplate.update("update s_operation set playback_status = 'STOPPED', updated_at = ?, finished_at = ? where turn_id = ? and operation_type = 'TTS' and playback_status not in ('ENDED','FAILED','SKIPPED','STOPPED')",
                 now, now, turnId);
-        jdbcTemplate.update("update s_turn set status = 'INTERRUPTED', audio_status = case when audio_status = 'COMPLETED' then 'COMPLETED' else 'INTERRUPTED' end, playback_status = case when playback_status in ('COMPLETED','FAILED') then playback_status else 'STOPPED' end, cancel_reason = ?, ended_at = coalesce(ended_at, ?), updated_at = ? where id = ? and status = 'RUNNING'",
+        jdbcTemplate.update("update s_turn set status = 'INTERRUPTED', " +
+            "text_status = case when turn_type = 'CHAT' and text_status = 'RUNNING' then 'INTERRUPTED' else text_status end, " +
+            "audio_status = case when turn_type = 'CHAT' and audio_status = 'NOT_REQUESTED' then audio_status when audio_status = 'COMPLETED' then 'COMPLETED' else 'INTERRUPTED' end, " +
+            "playback_status = case when turn_type = 'CHAT' and playback_status = 'NOT_REQUESTED' then playback_status when playback_status in ('COMPLETED','FAILED') then playback_status else 'STOPPED' end, " +
+            "cancel_reason = ?, ended_at = coalesce(ended_at, ?), updated_at = ? where id = ? and status = 'RUNNING'",
                 reason, now, now, turnId);
         jdbcTemplate.update("update s_session set active_turn_id=null,updated_at=?,revision=revision+1 where active_turn_id=?", now, turnId);
     }

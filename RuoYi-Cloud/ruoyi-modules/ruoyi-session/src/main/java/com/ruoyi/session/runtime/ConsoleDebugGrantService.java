@@ -17,12 +17,15 @@ public class ConsoleDebugGrantService
     private final JdbcTemplate jdbcTemplate;
     private final RuntimeTokenCodec tokenCodec;
     private final com.fasterxml.jackson.databind.ObjectMapper json;
+    private final ChatTurnStore chat;
 
-    public ConsoleDebugGrantService(JdbcTemplate jdbcTemplate, RuntimeTokenCodec tokenCodec, com.fasterxml.jackson.databind.ObjectMapper json)
+    public ConsoleDebugGrantService(JdbcTemplate jdbcTemplate, RuntimeTokenCodec tokenCodec,
+        com.fasterxml.jackson.databind.ObjectMapper json, ChatTurnStore chat)
     {
         this.jdbcTemplate = jdbcTemplate;
         this.tokenCodec = tokenCodec;
         this.json = json;
+        this.chat = chat;
     }
 
     @Transactional
@@ -59,15 +62,19 @@ public class ConsoleDebugGrantService
                 request.sessionId(), request.accountId(), request.applicationId(), request.configVersionId());
         if (session == null) throw new RuntimeProblem(org.springframework.http.HttpStatus.CONFLICT, "SESSION_NOT_READY", "The DEBUG Session is not active.");
         String tokenId = UUID.randomUUID().toString().replace("-", "");
-        Instant expiresAt = request.expiresAt().isBefore(Instant.now().plus(15, ChronoUnit.MINUTES)) ? request.expiresAt() : Instant.now().plus(15, ChronoUnit.MINUTES);
+        Instant issuedAt = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        Instant expiresAt = request.expiresAt().isBefore(issuedAt.plus(15, ChronoUnit.MINUTES))
+            ? request.expiresAt().truncatedTo(ChronoUnit.MILLIS) : issuedAt.plus(15, ChronoUnit.MINUTES);
         String binding;
         try { binding = json.writeValueAsString(request.voice()); }
         catch (Exception error) { throw new IllegalStateException(error); }
         String version = tokenCodec.currentKeyVersion();
-        Instant issuedAt = Instant.now();
-        jdbcTemplate.update("insert into s_session_grant (id,created_at,updated_at,account_id,session_id,principal_id,application_id,grant_source,issuer_console_ref,token_id,scopes,account_epoch,application_epoch,principal_epoch,session_epoch,status,expires_at,signing_key_version,runtime_binding) values (?,?,?,?,?,?,?,'CONSOLE_DEBUG',unhex(?),?,json_array('session:read','avatar:read','speak:write'),1,?,?,?, 'ACTIVE',?,?,cast(? as json))",
+        String scopes = "CHAT".equals(request.mode())
+            ? "[\"session:read\",\"avatar:read\",\"speak:write\",\"chat:write\"]"
+            : "[\"session:read\",\"avatar:read\",\"speak:write\"]";
+        jdbcTemplate.update("insert into s_session_grant (id,created_at,updated_at,account_id,session_id,principal_id,application_id,grant_source,issuer_console_ref,token_id,scopes,account_epoch,application_epoch,principal_epoch,session_epoch,status,expires_at,signing_key_version,runtime_binding) values (?,?,?,?,?,?,?,'CONSOLE_DEBUG',unhex(?),?,cast(? as json),1,?,?,?, 'ACTIVE',?,?,cast(? as json))",
                 nextId(), issuedAt, issuedAt, request.accountId(), session.sessionId(), session.principalId(), request.applicationId(),
-                request.issuerConsoleRef(), tokenId, request.configVersionId(), session.principalEpoch(), session.sessionEpoch(), expiresAt, version, binding);
+                request.issuerConsoleRef(), tokenId, scopes, request.configVersionId(), session.principalEpoch(), session.sessionEpoch(), expiresAt, version, binding);
         RuntimeTokenCodec.V2Claims claims = new RuntimeTokenCodec.V2Claims(version, tokenId, request.accountId(),
                 request.applicationId(), session.sessionId(), request.configVersionId(), "CONSOLE_DEBUG", issuedAt, expiresAt);
         return new IssuedToken(tokenCodec.encodeV2(claims), expiresAt);
@@ -80,6 +87,10 @@ public class ConsoleDebugGrantService
         Integer changed = jdbcTemplate.queryForObject("select count(1) from s_session where id = ? and account_id = ? and status = 'ACTIVE' for update",
             Integer.class, sessionId, accountId);
         if (changed == null || changed != 1) throw new RuntimeProblem(org.springframework.http.HttpStatus.NOT_FOUND, "SESSION_NOT_FOUND", "DEBUG Session is unavailable.");
+        chat.unknownInFlight(sessionId, "SESSION_REVOKED");
+        jdbcTemplate.update("update s_turn set status='INTERRUPTED',text_status=if(text_status='RUNNING','INTERRUPTED',text_status)," +
+            "cancel_reason='REVOKED',ended_at=coalesce(ended_at,?),updated_at=? where session_id=? and status='RUNNING'",
+            now, now, sessionId);
         jdbcTemplate.update("update s_session_grant set status = 'REVOKED',updated_at = ? where session_id = ? and status = 'ACTIVE'", now, sessionId);
         jdbcTemplate.update("update s_session set status = 'DELETED',auth_epoch = auth_epoch + 1,active_turn_id = null,updated_at = ?,revision = revision + 1 where id = ?", now, sessionId);
     }
@@ -106,7 +117,8 @@ public class ConsoleDebugGrantService
     {
         if (request == null || request.accountId() <= 0 || request.applicationId() <= 0 || request.sessionId() <= 0
                 || request.configVersionId() <= 0 || blank(request.issuerConsoleRef()) || request.issuerConsoleRef().length() != 64
-                || request.expiresAt() == null || !request.expiresAt().isAfter(Instant.now()) || request.voice() == null)
+                || request.expiresAt() == null || !request.expiresAt().isAfter(Instant.now()) || request.voice() == null
+                || !java.util.Set.of("CHAT", "SPEAK_ONLY").contains(request.mode()))
             throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", "Invalid DEBUG Token request.");
         try { HexFormat.of().parseHex(request.issuerConsoleRef()); }
         catch (IllegalArgumentException e) { throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", "Invalid console login reference."); }
@@ -117,7 +129,7 @@ public class ConsoleDebugGrantService
     private record SessionRow(long sessionId, long principalId, long sessionEpoch, long principalEpoch) { }
     public record CreateRequest(long accountId, long applicationId, long configVersionId, String requestId) { }
     public record MintRequest(long accountId, long applicationId, long sessionId, long configVersionId, String issuerConsoleRef,
-            Instant expiresAt, VoiceRuntimeBinding voice) { }
+            Instant expiresAt, VoiceRuntimeBinding voice, String mode) { }
     public record DebugSession(long sessionId, long applicationId, long configVersionId) { }
     public record IssuedToken(String token, Instant expiresAt) { }
 }

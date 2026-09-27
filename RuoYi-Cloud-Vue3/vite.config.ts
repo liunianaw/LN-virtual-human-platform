@@ -54,6 +54,15 @@ export default defineConfig(({ mode, command }) => {
       fs: { allow: [path.resolve(__dirname, '..')] },
       proxy: {
         // https://cn.vitejs.dev/config/#server-proxy
+        '/api/v1/realtime': {
+          target: baseUrl,
+          changeOrigin: true,
+          ws: true
+        },
+        '/api/v1/runtime/media': {
+          target: baseUrl,
+          changeOrigin: true
+        },
         '/dev-api': {
           target: baseUrl,
           changeOrigin: true,

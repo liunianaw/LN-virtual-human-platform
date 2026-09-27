@@ -34,6 +34,17 @@ public class BusinessSessionAuthorization
     public Map<String, Object> check(long accountId, long applicationId, long configId)
     { return required(accountId, applicationId, configId, true); }
 
+    public Map<String, Object> chatConfig(long accountId, long applicationId, long configId, long sessionId)
+    {
+        if (sessionId <= 0 || !"CHAT".equals(required(accountId, applicationId, configId, true).get("mode")))
+            throw new ServiceException("CHAT configuration unavailable", 403);
+        Map<String, Object> config = mapper.chatConfig(accountId, applicationId, configId, sessionId);
+        if (config == null) throw new ServiceException("Session configuration reference is unconfirmed", 403);
+        Map<String, Object> result = new LinkedHashMap<>(config);
+        result.put("skillVersionIds", mapper.chatSkills(accountId, configId, sessionId));
+        return result;
+    }
+
     @Transactional
     public Map<String, Object> reserve(long accountId, long applicationId, long configId, long sessionId, String operationId)
     {
