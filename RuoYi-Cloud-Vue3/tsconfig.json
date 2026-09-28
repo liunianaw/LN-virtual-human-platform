@@ -7,7 +7,8 @@
     "baseUrl": "./",
     "paths": {
       "@/*": ["src/*"],
-      "@ln-avatar/sdk": ["../avatar-sdk/src/index.ts"]
+      "@ln-avatar/sdk": ["../avatar-sdk/src/index.ts"],
+      "@ln-avatar/sdk/context": ["../avatar-sdk/src/context.ts"]
     },
 
     // 严格性和类型检查相关配置

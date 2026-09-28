@@ -16,10 +16,11 @@
   <select id="chatConfig" resultType="map">
     select c.id configId,c.llm_relay_version_id llmRelayVersionId,c.asr_relay_version_id asrRelayVersionId,c.llm_model_id model,
       c.system_prompt systemPrompt,c.llm_parameters parameters,c.llm_capabilities capabilities,
-      c.runtime_limits runtimeLimits
+      c.runtime_limits runtimeLimits,c.context_policy contextPolicy,a.current_policy currentPolicy
     from p_app_config c join p_resource_reference ref on ref.account_id=c.account_id
       and ref.holder_type='SESSION' and ref.holder_id=#{sessionId} and ref.resource_type='APP_CONFIG'
       and ref.resource_id=c.id and ref.state='CONFIRMED'
+    join p_application a on a.id=c.application_id and a.account_id=c.account_id
     where c.id=#{configId} and c.account_id=#{accountId} and c.application_id=#{applicationId} and c.mode='CHAT'
   </select>
   <select id="chatSkills" resultType="long">

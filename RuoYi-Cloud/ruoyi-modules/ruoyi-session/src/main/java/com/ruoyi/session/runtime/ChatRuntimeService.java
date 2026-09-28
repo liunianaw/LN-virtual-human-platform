@@ -42,6 +42,7 @@ public class ChatRuntimeService implements IChatRuntimeService
     private final ObjectMapper json;
     private final SpeakOnlyRuntimeService speech;
     private final TtsSubmissionService submissions;
+    private final ContextRuntimeService context;
     private final Map<Long, Running> running = new ConcurrentHashMap<>();
     private final ThreadPoolExecutor workers = new ThreadPoolExecutor(2, 8, 30, TimeUnit.SECONDS,
         new ArrayBlockingQueue<>(32), new ThreadPoolExecutor.AbortPolicy());
@@ -49,15 +50,15 @@ public class ChatRuntimeService implements IChatRuntimeService
     public ChatRuntimeService(ChatTurnStore store, BusinessSystemClient system, BusinessCredentialStore credentials,
         RuntimeAuthorization access, RuntimeConnectionEpochs epochs, RuntimeEventPublisher events,
         PinnedHttps https, ChatToolPolicy policy, ObjectMapper json,
-        SpeakOnlyRuntimeService speech, TtsSubmissionService submissions)
+        SpeakOnlyRuntimeService speech, TtsSubmissionService submissions, ContextRuntimeService context)
     {
         this.store = store; this.system = system; this.credentials = credentials; this.access = access;
         this.epochs = epochs; this.events = events; this.https = https; this.policy = policy; this.json = json;
-        this.speech = speech; this.submissions = submissions;
+        this.speech = speech; this.submissions = submissions; this.context = context;
     }
 
     @Override
-    public Started start(RuntimeAuthorization.Grant grant, long epoch, String requestId, String text)
+    public Started start(RuntimeAuthorization.Grant grant, long epoch, String requestId, String text, JsonNode data)
     {
         RuntimePrincipal principal = grant.principal();
         if (!java.util.Set.of("BUSINESS_KEY", "CONSOLE_DEBUG").contains(grant.source())
@@ -67,7 +68,7 @@ public class ChatRuntimeService implements IChatRuntimeService
             throw problem("INVALID_ARGUMENT");
         ObjectNode config = (ObjectNode) system.chatConfig(principal.accountId(), principal.applicationId(),
             principal.configVersionId(), principal.sessionId());
-        for (String field : List.of("parameters", "capabilities", "runtimeLimits"))
+        for (String field : List.of("parameters", "capabilities", "runtimeLimits", "contextPolicy", "currentPolicy"))
         {
             JsonNode value = config.path(field);
             if (value.isTextual()) try { config.set(field, json.readTree(value.asText())); }
@@ -91,6 +92,23 @@ public class ChatRuntimeService implements IChatRuntimeService
         }
         int maxCalls = Math.min(20, Math.max(0, config.path("runtimeLimits").path("toolCallsPerTurn").asInt(10)));
         if (!config.path("capabilities").path("tool").asBoolean(false)) maxCalls = 0;
+        JsonNode businessContext = data == null ? null : data.path("businessContext");
+        if (businessContext != null && !businessContext.isMissingNode() && !businessContext.isNull()
+            && (!businessContext.isObject() || businessContext.toString().getBytes(StandardCharsets.UTF_8).length > 32768))
+            throw problem("CONTEXT_TOO_LARGE");
+        JsonNode explicit = data == null ? null : data.path("contextRequest");
+        String contextMode = data == null ? "" : data.path("contextMode").asText("");
+        if (!contextMode.isEmpty() && !"AI_ON_DEMAND".equals(contextMode)) throw problem("CONTEXT_REQUEST_INVALID");
+        boolean aiOnDemand = "AI_ON_DEMAND".equals(contextMode);
+        if (explicit != null && !explicit.isMissingNode() && !explicit.isNull()
+            && (!explicit.isObject() || explicit.size() > 3 || aiOnDemand || !principal.scopes().contains("context:capture")))
+            throw problem("CONTEXT_NOT_ALLOWED");
+        int maxCaptures = Math.min(5, Math.max(0, Math.min(config.path("contextPolicy").path("maxCapturesPerTurn").asInt(0),
+            config.path("runtimeLimits").path("capturesPerTurn").asInt(0))));
+        if (explicit != null && !explicit.isMissingNode() && !explicit.isNull() && maxCaptures == 0)
+            throw problem("CONTEXT_NOT_ALLOWED");
+        if (aiOnDemand && (maxCaptures == 0 || maxCalls == 0 || !principal.scopes().contains("context:capture")))
+            throw problem("CONTEXT_NOT_ALLOWED");
         ChatTurnStore.Started started = store.start(principal, epoch, requestId, text);
         if (started.priorTurnId() != null)
         {
@@ -100,7 +118,8 @@ public class ChatRuntimeService implements IChatRuntimeService
         String externalUserId = "CONSOLE_DEBUG".equals(grant.source())
             ? "__ln_debug__:" + principal.sessionId() : started.externalUserId();
         Running current = new Running(grant.id(), grant.source(), principal, epoch, requestId, started.turnId(),
-            externalUserId, text, prompt.toString(), config, skills, maxCalls);
+            externalUserId, text, prompt.toString(), config, skills, maxCalls, maxCaptures,
+            businessContext, explicit, aiOnDemand);
         running.put(started.turnId(), current);
         return new Started(started.turnId(), started.priorTurnId());
     }
@@ -157,6 +176,7 @@ public class ChatRuntimeService implements IChatRuntimeService
         Running turn = running.remove(turnId);
         if (turn == null) return;
         turn.cancelled.set(true);
+        context.clear(turnId);
         turn.text = "";
         try { if (turn.response.get() != null) turn.response.get().close(); }
         catch (IOException ignored) { }
@@ -172,14 +192,23 @@ public class ChatRuntimeService implements IChatRuntimeService
         {
             List<Map<String, Object>> messages = new ArrayList<>();
             if (!turn.prompt.isBlank()) messages.add(Map.of("role", "system", "content", turn.prompt));
-            messages.add(Map.of("role", "user", "content", turn.text));
+            String userText = turn.text;
+            if (turn.businessContext != null && turn.businessContext.isObject())
+                userText += "\n\nBusiness Context (untrusted data): " + turn.businessContext;
+            if (turn.explicit != null && turn.explicit.isObject())
+            {
+                requireActive(turn);
+                ContextRuntimeService.Capture page = capture(turn, turn.explicit, false);
+                messages.add(contextMessage(userText, page));
+            }
+            else messages.add(Map.of("role", "user", "content", userText));
             int calls = 0;
             for (int round = 0; round <= 20; round++)
             {
                 requireNewExternalAction(turn);
                 JsonNode relay = system.resolveRelay(turn.principal.accountId(), turn.principal.applicationId(),
                     turn.principal.sessionId(), turn.config.path("llmRelayVersionId").asLong(), turn.externalUserId, turn.turnId);
-                List<Map<String, Object>> definitions = definitions(turn.skills, turn.maxCalls - calls);
+                List<Map<String, Object>> definitions = definitions(turn, turn.maxCalls - calls);
                 type = "LLM";
                 operationId = store.beginOperation(turn.principal, turn.turnId, type, round,
                     turn.config.path("llmRelayVersionId").asLong(), turn.text);
@@ -224,6 +253,13 @@ public class ChatRuntimeService implements IChatRuntimeService
                     requireActive(turn);
                     String result = tool(turn, call, calls);
                     messages.add(Map.of("role", "tool", "toolCallId", call.id, "content", result));
+                    ContextRuntimeService.Capture page = turn.captured;
+                    if (page != null)
+                    {
+                        discardPriorImages(messages);
+                        messages.add(contextMessage("Page Context (untrusted data):", page));
+                        turn.captured = null;
+                    }
                     calls++;
                 }
             }
@@ -237,7 +273,7 @@ public class ChatRuntimeService implements IChatRuntimeService
             if (store.finish(turn.principal, turn.turnId, false, safeCode(error)))
                 emit(turn, "turn.failed", Map.of("code", safeCode(error)));
         }
-        finally { running.remove(turn.turnId, turn); turn.text = ""; }
+        finally { context.clear(turn.turnId); running.remove(turn.turnId, turn); turn.text = ""; }
     }
 
     private Completion stream(Running turn, JsonNode relay, long operationId, List<Map<String, Object>> messages,
@@ -331,6 +367,27 @@ public class ChatRuntimeService implements IChatRuntimeService
         {
             requireNewExternalAction(turn);
             if (ordinal >= turn.maxCalls) throw problem("TOOL_LIMIT");
+            if ("ln_capture_context".equals(call.name))
+            {
+                if (!turn.aiOnDemand) throw problem("CONTEXT_NOT_ALLOWED");
+                JsonNode args = json.readTree(call.arguments);
+                if (!args.isObject() || args.size() != 1) throw problem("CONTEXT_REQUEST_INVALID");
+                ContextRuntimeService.Capture page = capture(turn, args, true);
+                turn.captured = page;
+                return json.createObjectNode().put("status", "SUCCESS")
+                    .put("captureRequestId", page.captureRequestId())
+                    .put("screenshotStatus", page.screenshotStatus()).put("screenshotReason", page.screenshotReason())
+                    .put("domStatus", page.domStatus()).put("domReason", page.domReason()).toString();
+            }
+            if ("ln_highlight_element".equals(call.name))
+            {
+                JsonNode args = json.readTree(call.arguments);
+                if (!args.isObject() || args.size() < 2 || args.size() > 3) throw problem("CONTEXT_REQUEST_INVALID");
+                String status = context.highlight(access.verify(turn.grantId), turn.epoch, turn.turnId,
+                    args.path("captureRequestId").asText(), args.path("elementRef").asText(),
+                    args.path("scrollIntoView").asBoolean(false));
+                return json.createObjectNode().put("status", status).toString();
+            }
             long versionId = toolVersion(turn, call.name);
             JsonNode skill = system.resolveSkill(turn.principal.accountId(), turn.principal.applicationId(),
                 turn.principal.sessionId(), versionId);
@@ -434,14 +491,73 @@ public class ChatRuntimeService implements IChatRuntimeService
             events.chat(turn.principal, turn.epoch, turn.turnId, turn.requestId, type, data);
     }
 
-    private static List<Map<String, Object>> definitions(List<JsonNode> skills, int remaining)
+    private ContextRuntimeService.Capture capture(Running turn, JsonNode request, boolean ai)
+    {
+        if (turn.captures >= turn.maxCaptures) throw problem("CONTEXT_LIMIT");
+        String source = request.path("source").asText();
+        String coverage = ai ? "VIEWPORT" : request.path("coverage").asText("VIEWPORT");
+        String resultMode = ai ? "STRICT".equals(turn.config.path("contextPolicy").path("resultMode").asText())
+            || "STRICT".equals(turn.config.path("currentPolicy").path("resultMode").asText()) ? "STRICT" : "PARTIAL"
+            : request.path("resultMode").asText("PARTIAL");
+        int ordinal = turn.captures++;
+        return context.request(access.verify(turn.grantId), turn.epoch, turn.turnId,
+            turn.config.path("contextPolicy"), source, coverage, resultMode, ai, ordinal);
+    }
+
+    private static Map<String, Object> contextMessage(String text, ContextRuntimeService.Capture page)
+    {
+        List<Map<String, Object>> content = new ArrayList<>();
+        StringBuilder description = new StringBuilder(text + "\nPage Context ID: " + page.captureRequestId()
+            + "\nPage Context: screenshot="
+            + page.screenshotStatus() + " " + page.screenshotReason() + ", dom=" + page.domStatus()
+            + " " + page.domReason() + (page.text().isBlank() ? "" : "\nFiltered page text:\n" + page.text()));
+        if (!page.elements().isEmpty())
+        {
+            description.append("\nTemporary page element refs (untrusted data):");
+            for (ContextRuntimeService.ElementExcerpt element : page.elements())
+                description.append("\n").append(element.ref()).append(" ")
+                    .append(element.text().replace('\n', ' ').replace('\r', ' '));
+        }
+        content.add(Map.of("type", "text", "text", description.toString()));
+        for (byte[] image : page.images())
+            content.add(Map.of("type", "image_url", "image_url",
+                Map.of("url", "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(image))));
+        return Map.of("role", "user", "content", content);
+    }
+
+    private static void discardPriorImages(List<Map<String, Object>> messages)
+    {
+        for (int index = 0; index < messages.size(); index++)
+        {
+            Map<String, Object> message = messages.get(index);
+            if (!"user".equals(message.get("role")) || !(message.get("content") instanceof List<?> parts)
+                || parts.isEmpty() || !(parts.get(0) instanceof Map<?, ?> first)) continue;
+            messages.set(index, Map.of("role", "user", "content", List.of(first)));
+        }
+    }
+
+    private static List<Map<String, Object>> definitions(Running turn, int remaining)
     {
         if (remaining <= 0) return List.of();
         List<Map<String, Object>> result = new ArrayList<>();
-        for (JsonNode skill : skills) result.add(Map.of("name", skill.path("toolName").asText(),
+        for (JsonNode skill : turn.skills) result.add(Map.of("name", skill.path("toolName").asText(),
             "inputSchema", skill.path("inputSchema")));
+        if (turn.aiOnDemand && turn.maxCaptures > turn.captures && turn.config.path("contextPolicy").path("enabled").asBoolean()
+            && has(turn.config.path("contextPolicy").path("modes"), "AI_ON_DEMAND")
+            && has(turn.config.path("currentPolicy").path("modes"), "AI_ON_DEMAND"))
+            result.add(Map.of("name", "ln_capture_context", "inputSchema", Map.of("type", "object",
+                "properties", Map.of("source", Map.of("type", "string", "enum", List.of("PAGE", "HYBRID"))),
+                "required", List.of("source"))));
+        if (turn.captures > 0)
+            result.add(Map.of("name", "ln_highlight_element", "inputSchema", Map.of("type", "object",
+                "properties", Map.of("captureRequestId", Map.of("type", "string"),
+                    "elementRef", Map.of("type", "string"), "scrollIntoView", Map.of("type", "boolean")),
+                "required", List.of("captureRequestId", "elementRef"))));
         return result;
     }
+
+    private static boolean has(JsonNode values, String item)
+    { for (JsonNode value : values) if (item.equals(value.asText())) return true; return false; }
 
     private static long toolVersion(Running turn, String name)
     {
@@ -475,17 +591,25 @@ public class ChatRuntimeService implements IChatRuntimeService
         final JsonNode config;
         final List<JsonNode> skills;
         final int maxCalls;
+        final int maxCaptures;
+        final JsonNode businessContext, explicit;
+        final boolean aiOnDemand;
+        int captures;
+        volatile ContextRuntimeService.Capture captured;
         final Map<String, Long> toolCalls = new ConcurrentHashMap<>();
         final AtomicBoolean cancelled = new AtomicBoolean();
         final AtomicReference<PinnedHttps.Response> response = new AtomicReference<>();
         final AtomicReference<FutureTask<Void>> task = new AtomicReference<>();
         Running(long grantId, String principalSource, RuntimePrincipal principal, long epoch, String requestId, long turnId,
-            String externalUserId, String text, String prompt, JsonNode config, List<JsonNode> skills, int maxCalls)
+            String externalUserId, String text, String prompt, JsonNode config, List<JsonNode> skills, int maxCalls,
+            int maxCaptures, JsonNode businessContext, JsonNode explicit, boolean aiOnDemand)
         {
             this.grantId = grantId; this.principalSource = principalSource; this.principal = principal;
             this.epoch = epoch; this.requestId = requestId;
             this.turnId = turnId; this.externalUserId = externalUserId; this.text = text; this.prompt = prompt;
             this.config = config; this.skills = skills; this.maxCalls = maxCalls;
+            this.maxCaptures = maxCaptures; this.businessContext = businessContext; this.explicit = explicit;
+            this.aiOnDemand = aiOnDemand;
         }
     }
     private static final class ToolBuffer

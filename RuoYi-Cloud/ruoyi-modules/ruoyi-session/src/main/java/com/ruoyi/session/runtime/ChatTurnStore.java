@@ -206,19 +206,21 @@ public class ChatTurnStore
     {
         java.util.List<InterruptedOp> pending = jdbc.query(
             "select o.id,o.operation_type,s.account_id,s.application_id,s.id from s_operation o " +
-                "join s_session s on s.id=o.session_id where o.session_id=? and o.operation_type in ('LLM','TOOL') " +
+                 "join s_session s on s.id=o.session_id where o.session_id=? and o.operation_type in ('LLM','TOOL','CONTEXT') " +
                 "and o.status='RUNNING' for update",
             (rs, index) -> new InterruptedOp(rs.getLong(1), rs.getString(2), rs.getLong(3),
                 rs.getLong(4), rs.getLong(5)), sessionId);
-        jdbc.update("update s_operation set status='UNKNOWN',error_code=?,finished_at=utc_timestamp(3)," +
-            "updated_at=utc_timestamp(3) where session_id=? and operation_type in ('LLM','TOOL') and status='RUNNING'",
+        jdbc.update("update s_operation set status=case when operation_type='CONTEXT' then 'CANCELLED' else 'UNKNOWN' end," +
+            "error_code=?,finished_at=utc_timestamp(3),updated_at=utc_timestamp(3) " +
+            "where session_id=? and operation_type in ('LLM','TOOL','CONTEXT') and status='RUNNING'",
             reason, sessionId);
         for (InterruptedOp operation : pending)
         {
             Long turnId = jdbc.queryForObject("select turn_id from s_operation where id=?", Long.class, operation.id());
             if (turnId != null)
                 fact(operation.accountId(), operation.applicationId(), operation.sessionId(), turnId,
-                    operation.id(), operation.type(), "UNKNOWN", reason, null, null, null);
+                     operation.id(), operation.type(), "CONTEXT".equals(operation.type()) ? "CANCELLED" : "UNKNOWN",
+                     reason, null, null, null);
         }
     }
 
@@ -235,11 +237,13 @@ public class ChatTurnStore
                 "join s_session s on s.id=o.session_id where o.turn_id=? and o.status='RUNNING'",
             (rs, index) -> new InterruptedOp(rs.getLong(1), rs.getString(2), rs.getLong(3),
                 rs.getLong(4), rs.getLong(5)), turnId);
-        jdbc.update("update s_operation set status='UNKNOWN',error_code='TURN_INTERRUPTED'," +
+        jdbc.update("update s_operation set status=case when operation_type='CONTEXT' then 'CANCELLED' else 'UNKNOWN' end," +
+            "error_code='TURN_INTERRUPTED'," +
             "finished_at=utc_timestamp(3),updated_at=utc_timestamp(3) where turn_id=? and status='RUNNING'", turnId);
         for (InterruptedOp operation : pending)
             fact(operation.accountId(), operation.applicationId(), operation.sessionId(), turnId,
-                operation.id(), operation.type(), "UNKNOWN", "TURN_INTERRUPTED", null, null, null);
+                operation.id(), operation.type(), "CONTEXT".equals(operation.type()) ? "CANCELLED" : "UNKNOWN",
+                "TURN_INTERRUPTED", null, null, null);
     }
 
     private void fact(RuntimePrincipal principal, long turnId, long operationId, String type, String status,

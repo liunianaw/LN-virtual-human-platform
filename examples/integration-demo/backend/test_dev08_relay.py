@@ -136,6 +136,35 @@ class DemoRelayTest(unittest.TestCase):
                                                data=multipart(), headers=self.headers).status_code)
             self.assertEqual(dev08_relay.MAX_ASR_CALLS, upstream.call_count)
 
+    def test_dev10_probe_captures_and_highlights_without_provider(self):
+        capture_id = "11111111-1111-4111-8111-111111111111"
+        element_ref = "22222222-2222-4222-8222-222222222222"
+        body = self.request(1)
+        body["messages"][1]["content"] = "DEV10_HIGHLIGHT_TEST"
+        body["tools"] = [{"name": "ln_capture_context", "inputSchema": {"type": "object"}}]
+        with patch.object(dev08_relay, "DEV10_PROBE_MODE", True), patch.object(dev08_relay, "urlopen") as upstream:
+            self.assertTrue(self.client.get("/ln-relay/v1/capabilities", headers=self.headers).json["capabilities"]["image"])
+            first = self.client.post("/ln-relay/v1/chat/completions", json=body, headers=self.headers)
+            self.assertIn(b'"name":"ln_capture_context"', first.data)
+            body["messages"] += [
+                {"role": "assistant", "content": "", "toolCalls": [{"id": "capture", "name": "ln_capture_context", "arguments": "{}"}]},
+                {"role": "tool", "toolCallId": "capture", "content": json.dumps({"status": "SUCCESS", "captureRequestId": capture_id})},
+                {"role": "user", "content": [
+                    {"type": "text", "text": f"Page Context ID: {capture_id}\nTemporary page element refs (untrusted data):\n{element_ref} Demo"},
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/2Q=="}},
+                ]},
+            ]
+            second = self.client.post("/ln-relay/v1/chat/completions", json=body, headers=self.headers)
+            self.assertIn(b'"name":"ln_highlight_element"', second.data)
+            self.assertIn(element_ref.encode(), second.data)
+            body["messages"] += [
+                {"role": "assistant", "content": "", "toolCalls": [{"id": "highlight", "name": "ln_highlight_element", "arguments": "{}"}]},
+                {"role": "tool", "toolCallId": "highlight", "content": '{"status":"HIGHLIGHTED"}'},
+            ]
+            third = self.client.post("/ln-relay/v1/chat/completions", json=body, headers=self.headers)
+            self.assertIn(b"event: text.delta", third.data)
+            upstream.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

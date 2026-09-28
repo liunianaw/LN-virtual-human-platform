@@ -27,12 +27,13 @@ public class RuntimeVoiceController
     private final IChatRuntimeService chat;
     private final ChatTurnStore chatStore;
     private final AsrRuntimeService asr;
+    private final ContextRuntimeService context;
 
     public RuntimeVoiceController(RuntimeAuthorization access, TtsSubmissionService submissions,
             SpeakOnlyRuntimeService runtime, RuntimeConnectionTicketService tickets, PersistentRuntimeStore store,
             TemporaryWavStorage audioStorage, SystemRuntimeClient system, RuntimeLimits limits,
             RuntimeConnectionEpochs epochs, IChatRuntimeService chat, ChatTurnStore chatStore,
-            AsrRuntimeService asr)
+             AsrRuntimeService asr, ContextRuntimeService context)
     {
         this.access = access;
         this.submissions = submissions;
@@ -46,6 +47,7 @@ public class RuntimeVoiceController
         this.chatStore = chatStore;
         this.epochs = epochs;
         this.asr = asr;
+        this.context = context;
     }
 
     @PostMapping("/connection-tickets")
@@ -69,9 +71,11 @@ public class RuntimeVoiceController
         RuntimeAuthorization.Grant grant = access.authenticate(authorization);
         java.util.Map<String, Object> state = store.sessionState(grant.principal());
         state.put("effectiveLimits", limits.current());
-        state.put("capabilities", grant.principal().scopes().contains("chat:write")
-            ? java.util.List.of("chat.create", "speech.create", "turn.stop", "playback.report")
-            : java.util.List.of("speech.create", "turn.stop", "playback.report"));
+        java.util.List<String> capabilities = new java.util.ArrayList<>(
+            java.util.List.of("speech.create", "turn.stop", "playback.report"));
+        if (grant.principal().scopes().contains("chat:write")) capabilities.add("chat.create");
+        if (grant.principal().scopes().contains("context:capture")) capabilities.add("guidance.result");
+        state.put("capabilities", capabilities);
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(RuntimeEnvelope.ok(state));
     }
 
@@ -106,6 +110,24 @@ public class RuntimeVoiceController
             throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "RECORDING_SIZE_INVALID", "Recording size is invalid.");
         AsrRuntimeService.Result result = asr.transcribe(grant, requestId, audio.getContentType(), audio.getBytes(), language);
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(RuntimeEnvelope.ok(result));
+    }
+
+    @PostMapping(value = "/context-captures", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<RuntimeEnvelope<java.util.Map<String, Object>>> contextCapture(
+        @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
+        @RequestHeader("X-Connection-Epoch") String connectionEpoch,
+        jakarta.servlet.http.HttpServletRequest request) throws java.io.IOException
+    {
+        RuntimeAuthorization.Grant grant = access.authenticate(authorization);
+        if (!(request instanceof org.springframework.web.multipart.MultipartHttpServletRequest multipart))
+            throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "CONTEXT_METADATA_INVALID", "Context upload is invalid.");
+        org.springframework.web.multipart.MultipartFile metadata = multipart.getFile("metadata");
+        if (metadata == null) throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST,
+            "CONTEXT_METADATA_INVALID", "Context metadata is required.");
+        java.util.Map<String, org.springframework.web.multipart.MultipartFile> images = new java.util.HashMap<>(multipart.getFileMap());
+        images.remove("metadata");
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
+            .body(RuntimeEnvelope.ok(context.upload(grant, epoch(connectionEpoch), metadata.getBytes(), images)));
     }
 
     @PostMapping("/debug/speech")

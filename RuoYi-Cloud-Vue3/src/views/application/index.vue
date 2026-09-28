@@ -21,7 +21,7 @@
         <el-form-item label="模型能力"><el-checkbox v-model="config.image">图片</el-checkbox><el-checkbox v-model="config.tool">Tool</el-checkbox></el-form-item>
         <el-form-item label="Skills"><el-select v-model="config.skillVersionIds" multiple filterable clearable class="full"><el-option v-for="item in choices.skills" :key="item.versionId" :value="item.versionId" :label="`${item.name} · ${item.skillType}${item.toolName ? ' · ' + item.toolName : ''}`" /></el-select></el-form-item>
         <el-form-item label="Context 策略"><el-input v-model="config.contextPolicyJson" type="textarea" :rows="7" placeholder='{"enabled":false}' /><div class="hint">默认关闭；启用时需配置来源、采集范围、DOM 排除、次数和高亮规则。</div><el-button link @click="loadContextExample">加载安全示例</el-button></el-form-item>
-        <el-form-item label="运行上限"><el-input-number v-model="config.toolCallsPerTurn" :min="0" :max="20" /> <span class="hint">每轮 Tool 次数</span></el-form-item>
+        <el-form-item label="运行上限"><el-input-number v-model="config.toolCallsPerTurn" :min="0" :max="20" /> <span class="hint">每轮 Tool 次数</span><el-input-number v-model="config.capturesPerTurn" :min="0" :max="20" /> <span class="hint">每轮采集次数</span></el-form-item>
       </template>
     </el-form><el-empty v-if="!choices.voices.length" description="暂无已发布官方声音，等待管理员发布后再配置应用。" /><el-button type="primary" :disabled="detail.status !== 'ACTIVE' || !!detail.adminDisabled || !config.avatarVersionId || !config.voiceVersionId || (config.mode === 'CHAT' && (!config.llmRelayVersionId || !config.llmModelId.trim()))" @click="publish">发布新配置版本</el-button><el-divider>Application Secret</el-divider><el-alert title="只在可信后端保存。创建或重置后只显示一次；重置不提前撤销已签发的浏览器授权。" type="warning" :closable="false" /><el-button class="secret-action" :disabled="detail.status !== 'ACTIVE' || !!detail.adminDisabled" @click="resetSecret">{{ secrets.some((item: AccessKeySummary) => item.status === 'ACTIVE') ? '重置 Secret' : '创建 Secret' }}</el-button><el-table :data="secrets"><el-table-column prop="name" label="名称" /><el-table-column prop="displaySuffix" label="末尾" width="100" /><el-table-column prop="status" label="状态" width="110" /><el-table-column label="操作" width="130"><template #default="{ row }"><el-button link :disabled="row.status !== 'ACTIVE'" @click="changeSecret(row, 'disable')">停用</el-button><el-button link :disabled="row.status === 'DELETED'" @click="changeSecret(row, 'delete')">删除</el-button></template></el-table-column></el-table><el-divider>历史版本</el-divider><el-table :data="detail.versions"><el-table-column prop="versionNo" label="版本" width="90" /><el-table-column prop="avatarVersionId" label="角色版本" /><el-table-column prop="voiceVersionId" label="声音版本" /><el-table-column prop="mode" label="模式" /></el-table></template></el-drawer>
     <el-dialog v-model="secretOpen" title="立即保存 Application Secret" width="580px" @closed="issuedSecret = ''"><el-alert title="关闭后无法再次查看；响应丢失时请重新重置。" type="warning" :closable="false" /><el-input class="secret-action" :model-value="issuedSecret" readonly /><template #footer><el-button @click="copySecret">复制</el-button><el-button type="primary" @click="secretOpen = false">已保存</el-button></template></el-dialog>
@@ -48,7 +48,7 @@ const config = reactive({
   llmRelayVersionId: '', asrRelayVersionId: '', llmModelId: '', systemPrompt: '',
   temperature: 0.7, maxOutputTokens: 1024, image: false, tool: false,
   skillVersionIds: [] as string[], contextPolicyJson: '{"enabled":false}',
-  toolCallsPerTurn: 4
+  toolCallsPerTurn: 4, capturesPerTurn: 2
 })
 function objectValue(value: unknown): Record<string, unknown> {
   if (typeof value === 'string') { try { value = JSON.parse(value) } catch { return {} } }
@@ -61,9 +61,8 @@ const llmRelays = computed(() => choices.relays.filter((item: ApplicationChoices
 const asrRelays = computed(() => choices.relays.filter((item: ApplicationChoices['relays'][number]) => relaySupports(item, 'asr')))
 function loadContextExample() {
   config.contextPolicyJson = JSON.stringify({
-    enabled: true, modes: ['EXPLICIT'], sources: ['ELEMENT'],
-    captureScope: { allow: ['#app'], deny: [], allowViewport: false },
-    targets: [{ key: 'main', selector: '#app' }],
+    enabled: true, modes: ['EXPLICIT'], sources: ['HYBRID'],
+    captureScope: { allow: ['#app'], deny: [], allowViewport: true },
     dom: { allow: ['#app'], deny: [], excludePassword: true },
     fullPageEnabled: false, resultMode: 'PARTIAL', highlightMode: 'EVENT_ONLY', maxCapturesPerTurn: 2
   }, null, 2)
@@ -91,6 +90,7 @@ function openDetail(row: ApplicationSummary, adoptedAvatarVersionId = '') {
     config.skillVersionIds = (current?.skills || []).filter(item => item.enabled).map(item => item.skillVersionId)
     config.contextPolicyJson = JSON.stringify(current?.contextPolicy ? objectValue(current.contextPolicy) : { enabled: false }, null, 2)
     config.toolCallsPerTurn = Number(limits.toolCallsPerTurn ?? 4)
+    config.capturesPerTurn = Number(limits.capturesPerTurn ?? 2)
     detailOpen.value = true
   })
 }
@@ -117,7 +117,7 @@ function publish() {
     input.llmParameters = { temperature: config.temperature, maxOutputTokens: config.maxOutputTokens }
     input.llmCapabilities = { image: config.image, tool: config.tool }
     input.skills = config.skillVersionIds.map((skillVersionId: string, sortOrder: number) => ({ skillVersionId, enabled: true, sortOrder }))
-    input.runtimeLimits = { toolCallsPerTurn: config.toolCallsPerTurn }
+    input.runtimeLimits = { toolCallsPerTurn: config.toolCallsPerTurn, capturesPerTurn: config.capturesPerTurn }
   } else input.contextPolicy = { enabled: false }
   publishApplicationConfig(detail.value.applicationId, detail.value.revision, input).then(() => {
     ElMessage.success('已发布固定配置版本。'); openDetail(detail.value!)

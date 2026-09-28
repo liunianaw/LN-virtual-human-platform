@@ -65,10 +65,13 @@ public class DebugSessionService
         Long asrRelayVersionId = "CHAT".equals(binding.mode()) ? jdbc.queryForObject(
             "select asr_relay_version_id from p_app_config where id=? and account_id=?",
             Long.class, binding.configVersionId(), accountId) : null;
+        Integer contextEnabled = "CHAT".equals(binding.mode()) ? jdbc.queryForObject(
+            "select case when json_unquote(json_extract(c.context_policy,'$.enabled'))='true' and json_unquote(json_extract(a.current_policy,'$.enabled'))='true' then 1 else 0 end from p_app_config c join p_application a on a.id=c.application_id where c.id=? and c.account_id=? and a.id=?",
+            Integer.class, binding.configVersionId(), accountId, registration.applicationId()) : 0;
         return sessionClient.mint(new SessionDebugClient.MintBody(accountId, registration.applicationId(), sessionId, binding.configVersionId(),
                 registration.issuerConsoleRef(), expiresAt.toEpochMilli(), binding.voiceVersionId(), binding.providerKind(),
                 binding.providerVoiceRef(), binding.relayVersionRef(), binding.officialServiceId(), binding.officialServiceRevision(),
-                binding.mode(), asrRelayVersionId != null && asrRelayVersionId > 0));
+                binding.mode(), asrRelayVersionId != null && asrRelayVersionId > 0, contextEnabled != null && contextEnabled == 1));
     }
 
     public void close(long accountId, LoginUser login, long sessionId)

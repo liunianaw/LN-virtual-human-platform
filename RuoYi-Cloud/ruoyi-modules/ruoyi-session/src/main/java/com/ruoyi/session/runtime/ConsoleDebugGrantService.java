@@ -3,6 +3,8 @@ package com.ruoyi.session.runtime;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -69,11 +71,16 @@ public class ConsoleDebugGrantService
         try { binding = json.writeValueAsString(request.voice()); }
         catch (Exception error) { throw new IllegalStateException(error); }
         String version = tokenCodec.currentKeyVersion();
-        String scopes = "CHAT".equals(request.mode())
-            ? request.asrEnabled()
-                ? "[\"session:read\",\"avatar:read\",\"speak:write\",\"chat:write\",\"asr:write\"]"
-                : "[\"session:read\",\"avatar:read\",\"speak:write\",\"chat:write\"]"
-            : "[\"session:read\",\"avatar:read\",\"speak:write\"]";
+        List<String> grantedScopes = new ArrayList<>(List.of("session:read", "avatar:read", "speak:write"));
+        if ("CHAT".equals(request.mode()))
+        {
+            grantedScopes.add("chat:write");
+            if (request.asrEnabled()) grantedScopes.add("asr:write");
+            if (request.contextEnabled()) grantedScopes.add("context:capture");
+        }
+        String scopes;
+        try { scopes = json.writeValueAsString(grantedScopes); }
+        catch (Exception error) { throw new IllegalStateException(error); }
         jdbcTemplate.update("insert into s_session_grant (id,created_at,updated_at,account_id,session_id,principal_id,application_id,grant_source,issuer_console_ref,token_id,scopes,account_epoch,application_epoch,principal_epoch,session_epoch,status,expires_at,signing_key_version,runtime_binding) values (?,?,?,?,?,?,?,'CONSOLE_DEBUG',unhex(?),?,cast(? as json),1,?,?,?, 'ACTIVE',?,?,cast(? as json))",
                 nextId(), issuedAt, issuedAt, request.accountId(), session.sessionId(), session.principalId(), request.applicationId(),
                 request.issuerConsoleRef(), tokenId, scopes, request.configVersionId(), session.principalEpoch(), session.sessionEpoch(), expiresAt, version, binding);
@@ -131,7 +138,7 @@ public class ConsoleDebugGrantService
     private record SessionRow(long sessionId, long principalId, long sessionEpoch, long principalEpoch) { }
     public record CreateRequest(long accountId, long applicationId, long configVersionId, String requestId) { }
     public record MintRequest(long accountId, long applicationId, long sessionId, long configVersionId, String issuerConsoleRef,
-            Instant expiresAt, VoiceRuntimeBinding voice, String mode, boolean asrEnabled) { }
+            Instant expiresAt, VoiceRuntimeBinding voice, String mode, boolean asrEnabled, boolean contextEnabled) { }
     public record DebugSession(long sessionId, long applicationId, long configVersionId) { }
     public record IssuedToken(String token, Instant expiresAt) { }
 }

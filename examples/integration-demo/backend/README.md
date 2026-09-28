@@ -53,6 +53,8 @@
 
 DEV-09 复用上述 `test` Application、BUSINESS Session 与 HTTPS Relay。`dev08_relay.py` 在已认证后接受 `DEV09_SENTENCES_TEST`，零 LLM 费用返回“你好。测试完毕。”供官方 TTS 两段验收；ASR 转发真实 `qwen3-asr-flash`，单 Relay 进程最多两次真实 ASR 请求，重启计数会重置。`accept_dev09_ws.py` 使用 `DEV09_BUSINESS_TOKEN` 验证 BUSINESS 独立播报、CHAT 两段顺序媒体和 `DEV09_MODE=STOP` 的迟到音频隔离；`DEV09_SPEECH_TEXT` 与 `DEV09_EXPECTED_SEGMENTS` 可收窄测试。`accept_dev09_page.py` 使用 `DEV09_ADMIN_JWT`、`DEV09_MICROPHONE_WAV`、`DEV09_SCREENSHOT` 验证真实 Chrome 中的录音、识别确认及两段播放；`DEV09_BLOCK_AUTOPLAY=1` 且不设置麦克风文件时，模拟首次播放受阻和点击恢复。测试语音只放在忽略目录，测试后删除；不要提交 Token、音频、截图或本机日志。
 
+DEV-10 的无费用探针需在启动 Relay 前设置 `LN_DEV10_PROBE_MODE=1`；此时能力探测额外声明 `image:true`，仅供新建的测试 Relay 版本和测试 Application 配置使用，既有 Relay 版本不会自动改变。启用 Page/Hybrid、图片和 Tool 能力后，可在 CHAT 调试页选择显式/AI 按需，发送 `DEV10_PAGE_TEST`、`DEV10_HYBRID_TEST` 或 `DEV10_HIGHLIGHT_TEST`；Relay 只按已认证请求返回固定的采集/高亮 Tool 建议及收到的图片/结果计数，不调用付费模型。非探针请求携带图片时拒绝 `IMAGE_PROBE_ONLY`；此模式不证明 `qwen-flash` 的真实图片识别能力。验证实际识别前须另配支持图片的模型 Relay 和费用授权。当前 DEV-10 尚未执行服务、浏览器或模型终点验收。
+
 ## 已通过的验收与费用边界
 
 - Flyway session V6 已迁移；system/session/auth/gateway/media API 健康检查为 200。Relay、Tool 的平台无费用连接检查通过；公网 `/dev08/health` 与原站根路径均为 200。

@@ -22,6 +22,7 @@ MAX_PROVIDER_CALLS = 8
 MAX_OUTPUT_TOKENS = 256
 MAX_INPUT_BYTES = 65536
 MAX_ASR_CALLS = 2
+DEV10_PROBE_MODE = os.environ.get("LN_DEV10_PROBE_MODE") == "1"
 PROVIDER_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 
 
@@ -102,7 +103,8 @@ def create_app(settings: Settings | None = None) -> Flask:
         if not relay_authenticated():
             return jsonify({"code": "UNAUTHORIZED"}), 401
         return jsonify({"protocol": "LN_RELAY", "protocolVersion": "1",
-                        "capabilities": {"llm": True, "asr": True, "tool": True, "cancel": False},
+                        "capabilities": {"llm": True, "asr": True, "tool": True,
+                                         "image": DEV10_PROBE_MODE, "cancel": False},
                         "asr": {"inputMimeTypes": ["audio/webm", "audio/mp4", "audio/ogg", "audio/wav"]}})
 
     @app.post("/ln-relay/v1/audio/transcriptions")
@@ -202,10 +204,43 @@ def create_app(settings: Settings | None = None) -> Flask:
         with lock:
             previous = [part for turn in history.get(user, []) for part in turn]
         full = current[:1] + previous + current[1:] if current and current[0]["role"] == "system" else previous + current
-        if len(json.dumps(full, ensure_ascii=False).encode("utf-8")) > MAX_INPUT_BYTES:
+        user_text = "\n".join(str(part.get("text", "")) for message in current if message["role"] == "user"
+                              for part in (message.get("content") if isinstance(message.get("content"), list)
+                                           else [{"text": message.get("content", "")}] )
+                              if isinstance(part, dict) and part.get("type", "text") == "text")
+        probe = re.search(r"DEV10_(PAGE|HYBRID|HIGHLIGHT)_TEST", user_text) if DEV10_PROBE_MODE else None
+        if len(json.dumps(full, ensure_ascii=False).encode("utf-8")) > (2_097_152 if probe else MAX_INPUT_BYTES):
             return jsonify({"code": "REQUEST_TOO_LARGE"}), 413
+        if not probe and any(isinstance(message.get("content"), list) for message in current):
+            return jsonify({"code": "IMAGE_PROBE_ONLY"}), 400
         with lock:
             latest_turn[user] = turn_id
+        if probe:
+            def context_probe():
+                tool_results = [message for message in current if message["role"] == "tool"]
+                if not tool_results and any(tool["function"]["name"] == "ln_capture_context" for tool in definitions):
+                    source = "PAGE" if probe.group(1) == "PAGE" else "HYBRID"
+                    yield event("tool_call.delta", id="dev10_capture", name="ln_capture_context",
+                                arguments=json.dumps({"source": source}))
+                elif probe.group(1) == "HIGHLIGHT" and not any(
+                    call.get("function", {}).get("name") == "ln_highlight_element"
+                    for message in current if message["role"] == "assistant"
+                    for call in message.get("tool_calls", [])):
+                    match = re.search(r"Temporary page element refs.*?\n([a-fA-F0-9-]{36}) ", user_text, re.S)
+                    capture = re.search(r"Page Context ID: ([a-fA-F0-9-]{36})", user_text)
+                    if match and capture:
+                        yield event("tool_call.delta", id="dev10_highlight", name="ln_highlight_element",
+                                    arguments=json.dumps({"captureRequestId": capture.group(1),
+                                                          "elementRef": match.group(1), "scrollIntoView": False}))
+                    else:
+                        yield event("text.delta", text="没有可高亮的元素引用。")
+                else:
+                    image_count = sum(1 for message in current if isinstance(message.get("content"), list)
+                                      for part in message["content"] if part.get("type") == "image_url")
+                    yield event("text.delta", text=f"DEV-10 探针收到 {image_count} 张页面图片；{len(tool_results)} 次工具结果。")
+                yield event("response.completed", usage={"inputTokens": 0, "outputTokens": 0})
+            return Response(stream_with_context(context_probe()), content_type="text/event-stream; charset=utf-8",
+                            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
         # Deterministic manual probes for stop/replacement; they never call the paid provider.
         last_user = next((m.get("content") for m in reversed(current) if m["role"] == "user"), "")
         if last_user in ("DEV08_SLOW_TEST", "DEV08_FAST_TEST", "DEV08_TOOL_TIMEOUT_TEST", "DEV08_TOOL_DENIED_TEST", "DEV09_SENTENCES_TEST"):

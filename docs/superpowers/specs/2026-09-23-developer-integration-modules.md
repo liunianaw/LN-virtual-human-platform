@@ -2,20 +2,20 @@
 
 前置说明书：[编写与执行规范](../../../执行计划书编写与执行规范.md) · [项目整体说明书](../../../项目整体说明书.md) · [需求](../../../项目需求说明书.md) · [数据库](../../../数据库设计说明书.md) · [架构](../../../项目架构说明书.md) · [平台内共享契约](platform-console-shared-contract.md) · [开发者接入接口草案](developer-integration-interface-contract.md)
 
-日期：2026-09-23。版本：1.0。确认状态：用户于 2026-09-25 分别授权实施 DEV-01～DEV-07，于 2026-09-26 授权实施 DEV-08，并于 2026-09-27 授权实施 DEV-09；DEV-10～11 仍须按各自接口契约与计划确认后实施。
+日期：2026-09-23。版本：1.0。确认状态：用户于 2026-09-25 分别授权实施 DEV-01～DEV-07，于 2026-09-26 授权实施 DEV-08，并于 2026-09-27 授权实施 DEV-09；用户于 2026-09-27 要求删除 Element 模式并实施 DEV-10；DEV-11 须另行确认。
 
 ## 1. 当前状态
 
 | 项目 | 当前事实 |
 |---|---|
 | 平台内能力 | 账号、角色资产、官方声音、SPEAK_ONLY 应用、DEBUG Session、正式角色包读取、WSS、分段播报、停止和临时音频清理已有实现，可作为开发者接入的基础内核。平台内能力的真实验收结论以各原计划为准。 |
-| Application | DEV-05 已扩展 CHAT/SPEAK_ONLY 的固定配置、Relay/Skill/Context、官方 Voice 与引用；本机 `test` Application 已发布 CHAT 配置并通过 DEV-08 DEBUG/BUSINESS 对话与 DEV-09 ASR/官方 TTS。Context 仍属 DEV-10。 |
-| Session | DEV-06/07 BUSINESS API、Token v2、运行 HTTP、ticket/WSS、续权与单活已在本机主要终点通过；DEV-08 session V6 已迁移，真实 CHAT/LLM/Tool 的 DEBUG 与 BUSINESS 终点通过；DEV-09 BUSINESS/DEBUG ASR、官方 TTS、CHAT 分句和独立 speak 已通过本机真实终点。Context 随 DEV-10 开通。 |
-| SDK | `avatar-sdk` 的无 Vue `SessionClient` 已通过 DEV-07 浏览器角色、WSS 与单活验证；DEV-08 `chat(text)` 流式协议已通过真实 WSS；DEV-09 录音 API 已构建，平台 CHAT 调试页的浏览器录音、文本确认、两段播放与自动播放恢复已通过。Context 和高亮仍归 DEV-10。 |
+| Application | DEV-05 已扩展 CHAT/SPEAK_ONLY 的固定配置、Relay/Skill/Context、官方 Voice 与引用；本机 `test` Application 已发布 CHAT 配置并通过 DEV-08 DEBUG/BUSINESS 对话与 DEV-09 ASR/官方 TTS。DEV-10 Context 已静态实现，用户终点待验。 |
+| Session | DEV-06/07 BUSINESS API、Token v2、运行 HTTP、ticket/WSS、续权与单活已在本机主要终点通过；DEV-08 session V6 已迁移，真实 CHAT/LLM/Tool 的 DEBUG 与 BUSINESS 终点通过；DEV-09 BUSINESS/DEBUG ASR、官方 TTS、CHAT 分句和独立 speak 已通过本机真实终点。DEV-10 Context 运行链路已静态接通，真实终点待验。 |
+| SDK | `avatar-sdk` 的无 Vue `SessionClient` 已通过 DEV-07 浏览器角色、WSS 与单活验证；DEV-08 `chat(text)` 流式协议已通过真实 WSS；DEV-09 录音 API 已构建，平台 CHAT 调试页的浏览器录音、文本确认、两段播放与自动播放恢复已通过。Context 和高亮已在 DEV-10 静态实现，浏览器终点待验。 |
 | Relay、Skills、凭证、Webhook、用量 | V1 基础表与 Flyway V16～V20 已执行；本机真实 LLM Relay、Prompt Skill、HTTP 查询 Tool 及结果裁剪通过，LLM/Tool 事实已进入 `p_call_record` 与 `p_usage_daily`。Webhook 与后续模块的完整用量仍待各模块验收。 |
 | 可复用验收项目 | 用户要求保留并继续扩展 `examples/integration-demo/backend`；本机测试 Application、Relay、Skills、HTTPS `/dev08/` 入口与 DPAPI 凭证继续保留，启动和配置记录见该目录 README。 |
 | 交付范围 | DEV-01～05 已按各自阶段交付；DEV-08/09 代码、契约与记录当前在工作树待提交，session V6 已在本机迁移。本地 `logs/`、运行密钥与诊断资料不纳入 Git。 |
-| 下一步 | DEV-09 的语音模块与临时音频实际清理均已在本机通过，模块完成。早期三笔 TTS 预占仍为 `REVIEW_REQUIRED`，由 DEV-11 的对账流程核定；DEV-10 Context 与 DEV-11 Webhook 仍按各自授权实施，跨模块完整贯通需对应模块完成后复验。DEV-07 的自然到期、真实多次断网等长时边界仍单列。 |
+| 下一步 | DEV-09 的语音模块与临时音频实际清理均已在本机通过，模块完成。早期三笔 TTS 预占仍为 `REVIEW_REQUIRED`，由 DEV-11 的对账流程核定；DEV-10 Context 已获授权并静态实现、用户终点待验；DEV-11 Webhook 仍待授权实施，跨模块完整贯通需对应模块完成后复验。DEV-07 的自然到期、真实多次断网等长时边界仍单列。 |
 
 ## 2. 目标与边界
 
@@ -190,7 +190,7 @@
 | DEV-07 SDK 与实时连接 | SDK SessionClient、ticket/WSS、单活、重连、角色包、动作、事件和 stop | DEV-06、现有 SDK/DEBUG 运行内核 | 外部网页仅凭 Session Token 加载角色并可靠连接；旧连接和迟到事件失效。 |
 | DEV-08 AI 对话与 Tools | LLM 流式输出、脱敏轮次日志、Prompt Skills、Tool 调用、打断与状态 | DEV-03～DEV-07 | CHAT 从文本输入到流式结果可用；多轮记忆归开发者 Relay，工具权限、次数、身份与失败降级闭合。 |
 | DEV-09 ASR、TTS 与独立播报 | 手动录音 ASR、分句官方 TTS、官方 Voice、顺序播放、播放回执 | DEV-03、DEV-05～DEV-08、现有播报内核 | 录音识别、对话播报和 speak 可用；stop 后无迟到声音，计额事实正确。 |
-| DEV-10 页面感知与高亮 | context SDK、Element/Page/Hybrid、显式/AI 按需、业务 Context、高亮 | DEV-05～DEV-08 | 授权范围内采集和高亮可用；过滤、部分结果、超时和引用失效语义明确。 |
+| DEV-10 页面感知与高亮 | context SDK、Page/Hybrid、显式/AI 按需、业务 Context、高亮 | DEV-05～DEV-08 | 授权范围内采集和高亮可用；过滤、部分结果、超时和引用失效语义明确。 |
 | DEV-11 用量、限额与 Webhook | 用量/额度/并发查询，调用状态，Avatar 终态 Webhook、重试和投递记录 | DEV-01、DEV-02、DEV-06～DEV-10、Outbox/job lease | 用量可核对、限制可执行；Webhook 可验签、去重和查看投递事实。 |
 
 ### 7.2 DEV-01 接入凭证与开放 API 鉴权
@@ -337,7 +337,7 @@
 
 实施内容：
 
-- `avatar-sdk/context` 独立导出，按需加载截图依赖；支持 Element、Page 和 Hybrid，Page 默认视口，全页显式开启并受大小/分片限制。
+- `avatar-sdk/context` 独立导出，按需加载截图依赖；仅支持 Page 与 Hybrid，不再接受 Element 采集或预登记元素目标。Page 为选定页面范围的截图；Hybrid 在同一页面范围附加经浏览器过滤的 DOM/文本与临时元素引用。默认视口，全页显式开启并受大小/分片限制。
 - 显式采集由开发者调用；AI 按需仅在当前用户 turn 内由服务端发起请求，限制每轮次数、范围和超时，不后台持续监控。
 - DOM/text 在浏览器端按 allow/deny 过滤，deny 优先、默认排除密码输入；过滤失败不上传受影响 DOM。截图按选定范围处理并单独报告状态。
 - 采集响应分别记录 screenshot/text 成功、实际范围、排除和缺失原因；partial 可继续，strict 要求两者成功。
@@ -346,7 +346,9 @@
 
 静态退出：跨域失败、DOM 过滤失败、截图差异、连接不可用、超时、部分结果、引用失效和停止清理都有明确状态；context 模块不增加 core 默认体积。
 
-用户终点：平台调试页验证 Element/Page/Hybrid、显式/AI 按需、partial/strict 和高亮；开发者自己网页上的最终感知体验在后续真实接入时验收。
+实施记录（2026-09-27）：用户授权删除 Element 并实施 DEV-10。Application/Skill 发布入口只接受 Page/Hybrid，历史 Element 要求和运行请求均拒绝。`avatar-sdk/context` 按需加载 html2canvas，截取共同允许的视口/显式全页范围；Hybrid 另采浏览器过滤 DOM、临时引用与本地高亮。WSS 轮次处理显式及 AI 按需请求，HTTP multipart 校验同轮次、连接代、当前策略、大小与图片分片；业务 Context 仅随本轮模型请求。DEBUG/BUSINESS 授权、Context operation 事实和调试页入口已接通；既有测试 Relay 扩展了需显式开启的 DEV-10 无费用图片与高亮探针。静态验证：system/session 聚焦 Maven 测试、SDK 构建、Vue 类型检查、devtools 构建及测试 Relay 的 7 项离线检查通过；未启动服务、未做真实页面/模型/截图终点。浏览器截图差异、跨域、partial/strict、AI Tool 和高亮仍按下述用户终点验收；本轮没有新 Flyway 迁移。
+
+用户终点：平台调试页验证 Page/Hybrid、显式/AI 按需、partial/strict 和高亮；开发者自己网页上的最终感知体验在后续真实接入时验收。
 
 ### 7.12 DEV-11 用量、限额与 Webhook
 
@@ -442,3 +444,4 @@
 | 2026-09-27 | DEV-08 本机完整链路验收与可复用项目 | 模块自身主要终点完成；DEV-09/10 联动待验 | 用户授权本机真实验收、Qwen 总费用上限 10 元，并要求保留测试项目。`test` Application 发布 CHAT 配置，注册独立 LLM Relay、Prompt Skill 与只读查询 Tool；服务器仅新增 `/dev08/` Nginx include，经 SSH 反向隧道接本机 Flask，原站根路径和新健康检查均为 200。DEBUG 与 BUSINESS 短期授权经 Gateway ticket/WSS 的真实流式、多轮记忆、Prompt 标记和 Tool 查询通过；Tool 只公开 `name/stock`。stop 和替换的轮次中断、在途 UNKNOWN、未绑定 Tool 不提交外部操作、Tool 超时 UNKNOWN、跨用户 404、应用停用 403 并恢复 ACTIVE 已实测。`s_outbox` 调用事实进入 `p_call_record/p_usage_daily`；本轮实际模型平台用量输入 1273/输出 84 token，先前直连/适配器输入 198/输出 25 token，远低于 10 元上限。真实 Chrome 调试页显示正式角色、连接 WSS 并显示无费用流式探针；修复后台登录 Redis key 校验、DEBUG grant 毫秒时间精度、DEBUG Session ID 的浏览器数字精度、CHAT 角色包可用性和伪成功响应、Vite 本机 WS 代理。system/session Maven 打包、聚焦测试、Vue typecheck 与 Relay 5 项测试通过。复用配置、启动方式、凭证位置与截图见 `examples/integration-demo/backend/README.md`，Application/Relay/Skills/HTTPS 入口和测试账号限额保留，临时浏览器 DEBUG Session 已关闭。 | DEV-09 官方 TTS/ASR、DEV-10 Context 和 DEV-11 Webhook 按各自计划验收；长时自然到期及真实多次断网仍按 DEV-07 边界单列。 |
 | 2026-09-27 | DEV-08 SDK 浏览器补验 | BUSINESS 浏览器文本终点通过 | 真实 Chrome 从保留测试项目加载 `avatar-sdk/dist`，以短期 BUSINESS Token 使用无 Vue `SessionClient.chat()` 发送零费用 `DEV08_FAST_TEST`；按序收到 `connection.ready`、`request.ack`、`turn.started`、`text.delta` 和 `turn.completed`，文本为“测试流”，无页面异常。该短期 Session 已关闭；脚本 `examples/integration-demo/backend/accept_dev08_sdk.py` 与项目配置保留供后续模块复用。 | 后续在 DEV-09/10 继续扩展同一验收项目，避免重复搭建凭证和入口。 |
 | 2026-09-27 | DEV-09 ASR、TTS 与独立播报 | 模块完成；DEV-11 对账另行处理 | 按 7.10 实现 SDK 录音与 ASR、CHAT 官方 Voice 分句播报、BUSINESS 独立 speak、额度和调用事实；真实 ASR 四次、TTS 独立/两句/stop、Chrome 录音与自动播放恢复通过。百炼旧 TTS 400 的 ClientDisconnect 已修复，用户确认新请求 200。修复临时音频的本地时间/UTC 比较后，session 打包、4 项聚焦测试、服务健康检查通过；12 条 `DELETE_PENDING` 变为 `DELETED`，12 个 WAV 文件均被删除。原有 Vue typecheck、SDK build 与 Relay 6 项检查通过；本轮清理复验未增加付费调用。 | 历史三笔 14 字 `REVIEW_REQUIRED` 及一笔停止轮 `UNKNOWN` 由 DEV-11 核对；DEV-10 Context 与跨模块完整贯通另行验收。 |
+| 2026-09-27 | DEV-10 页面感知与高亮 | 静态实现；真实用户终点待验 | 用户要求删除 Element 并授权 DEV-10。Page/Hybrid 配置与 SDK、显式及 AI 按需采集、业务 Context、受控截图和 DOM、临时引用与高亮、DEBUG/BUSINESS 授权、轮次事实及调试页已实现；测试 Relay 新增可选的无费用图片/高亮探针。system/session 聚焦 Maven 测试、SDK 构建、Vue 类型检查、devtools 构建、Relay 7 项离线检查和 diff 检查通过。未启动服务、执行付费模型调用或验真实页面；无新迁移。 | 用户在调试页和开发者页面核对 Page/Hybrid、显式/AI、partial/strict、截图差异/跨域失败、高亮和 stop/过期引用；真实图片识别另需支持图片的模型 Relay 与费用授权。 |

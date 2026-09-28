@@ -13,7 +13,7 @@
       <el-form label-width="125px">
         <template v-if="!editing"><el-form-item label="名称"><el-input v-model="name" maxlength="100" /></el-form-item><el-form-item label="说明"><el-input v-model="description" maxlength="1000" /></el-form-item></template>
         <el-form-item label="类型"><el-select v-model="form.skillType" class="full"><el-option label="Prompt" value="PROMPT" /><el-option label="HTTP Tool" value="HTTP_TOOL" /></el-select></el-form-item>
-        <el-form-item label="Context 需求"><el-checkbox v-model="form.contextRequirements.element">Element</el-checkbox><el-checkbox v-model="form.contextRequirements.page">Page</el-checkbox><el-checkbox v-model="form.contextRequirements.hybrid">Hybrid</el-checkbox></el-form-item>
+        <el-form-item label="Context 需求"><el-checkbox v-model="form.contextRequirements.page">Page</el-checkbox><el-checkbox v-model="form.contextRequirements.hybrid">Hybrid</el-checkbox></el-form-item>
         <template v-if="form.skillType === 'PROMPT'">
           <el-form-item label="指令内容"><el-input v-model="form.instructions" type="textarea" :rows="8" maxlength="32768" /></el-form-item>
           <el-form-item label="导入 JSON"><el-input v-model="importText" type="textarea" :rows="3" placeholder='{"instructions":"...","contextRequirements":{"page":true}}' /><el-button @click="importPrompt">解析配置</el-button></el-form-item>

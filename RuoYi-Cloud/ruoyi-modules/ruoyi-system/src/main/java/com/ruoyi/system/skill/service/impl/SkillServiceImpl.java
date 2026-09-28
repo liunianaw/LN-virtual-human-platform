@@ -199,8 +199,8 @@ public class SkillServiceImpl implements ISkillService
         if (input == null || !Set.of("PROMPT", "HTTP_TOOL").contains(input.skillType())
             || input.importFormat() != null && !"JSON".equals(input.importFormat())) throw bad("Skill 版本类型或导入格式无效");
         JsonNode context = json.valueToTree(input.contextRequirements() == null ? Map.of() : input.contextRequirements());
-        if (!context.isObject() || context.size() > 3) throw bad("Context 权限需求无效");
-        context.fieldNames().forEachRemaining(key -> { if (!Set.of("element", "page", "hybrid").contains(key)
+        if (!context.isObject() || context.size() > 2) throw bad("Context 权限需求无效");
+        context.fieldNames().forEachRemaining(key -> { if (!Set.of("page", "hybrid").contains(key)
             || !context.path(key).isBoolean()) throw bad("Context 权限需求无效"); });
         if ("PROMPT".equals(input.skillType()))
         {

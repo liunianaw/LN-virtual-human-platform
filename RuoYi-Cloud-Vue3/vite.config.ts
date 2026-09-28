@@ -26,6 +26,7 @@ export default defineConfig(({ mode, command }) => {
         '~': path.resolve(__dirname, './'),
         // 设置别名
         '@': path.resolve(__dirname, './src'),
+        '@ln-avatar/sdk/context': path.resolve(__dirname, '../avatar-sdk/src/context.ts'),
         '@ln-avatar/sdk': path.resolve(__dirname, '../avatar-sdk/src/index.ts')
       },
       // https://cn.vitejs.dev/config/#resolve-extensions

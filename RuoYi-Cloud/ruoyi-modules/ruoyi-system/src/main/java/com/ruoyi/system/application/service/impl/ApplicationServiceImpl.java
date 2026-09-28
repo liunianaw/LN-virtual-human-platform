@@ -32,7 +32,8 @@ public class ApplicationServiceImpl implements IApplicationService
 {
     private static final Map<String, Integer> LIMITS = Map.of("maxTextCodePoints", 8000, "maxCodePointsPerSegment", 200,
         "maxConcurrentSegments", 2, "maxBufferedSegments", 2, "maxAudioBytes", 5242880, "ttsTimeoutSeconds", 30,
-        "turnTimeoutSeconds", 300, "playbackWaitSeconds", 60, "temporaryAudioTtlSeconds", 900);
+        "turnTimeoutSeconds", 300, "playbackWaitSeconds", 60, "temporaryAudioTtlSeconds", 900,
+        "capturesPerTurn", 2);
     private final ApplicationMapper mapper;
     private final ObjectMapper json;
 
@@ -209,8 +210,8 @@ public class ApplicationServiceImpl implements IApplicationService
         long avatar = id(request.avatarVersionId()), voice = id(request.voiceVersionId());
         Map<String, Object> context = request.contextPolicy();
         if (context == null || !(context.get("enabled") instanceof Boolean)
-            || !Set.of("enabled", "modes", "sources", "captureScope", "targets", "dom", "fullPageEnabled",
-                "resultMode", "highlightMode", "maxCapturesPerTurn").containsAll(context.keySet()))
+            || !Set.of("enabled", "modes", "sources", "captureScope", "dom", "fullPageEnabled",
+                 "resultMode", "highlightMode", "allowScroll", "maxCapturesPerTurn").containsAll(context.keySet()))
             throw badRequest("Context 策略无效");
         boolean contextEnabled = Boolean.TRUE.equals(context.get("enabled"));
         if (contextEnabled) validateContext(context);
@@ -292,10 +293,10 @@ public class ApplicationServiceImpl implements IApplicationService
     private void checkContextRequirement(Object requirement, Map<String, Object> context)
     {
         JsonNode needs = jsonNode(requirement);
-        for (String source : List.of("element", "page", "hybrid"))
+        if (needs.has("element")) throw unavailable("Element Context 已停用");
+        for (String source : List.of("page", "hybrid"))
             if (needs.path(source).asBoolean() && (!Boolean.TRUE.equals(context.get("enabled"))
-                || !(sources(context).contains(source.toUpperCase())
-                    || !"hybrid".equals(source) && sources(context).contains("HYBRID"))))
+                || !sources(context).contains(source.toUpperCase())))
                 throw unavailable("Skill 所需 Context 来源未授权");
     }
 
@@ -304,32 +305,20 @@ public class ApplicationServiceImpl implements IApplicationService
         Set<String> modes = modes(context), sources = sources(context);
         if (text(context).length() > 32768 || modes.isEmpty() || sources.isEmpty()
             || !Set.of("EXPLICIT", "AI_ON_DEMAND").containsAll(modes)
-            || !Set.of("ELEMENT", "PAGE", "HYBRID").containsAll(sources)
+            || !Set.of("PAGE", "HYBRID").containsAll(sources)
             || !("PARTIAL".equals(context.get("resultMode")) || "STRICT".equals(context.get("resultMode")))
             || !("EVENT_ONLY".equals(context.get("highlightMode")) || "AUTO".equals(context.get("highlightMode")))
+            || context.containsKey("allowScroll") && !(context.get("allowScroll") instanceof Boolean)
             || !(context.get("maxCapturesPerTurn") instanceof Integer count) || count < 1 || count > 5
             || !(context.get("fullPageEnabled") instanceof Boolean))
             throw badRequest("Context 模式、来源或限值无效");
         JsonNode scope = jsonNode(context.get("captureScope")), dom = jsonNode(context.get("dom"));
-        JsonNode targets = jsonNode(context.get("targets"));
         if (!validSelectors(scope) || !validSelectors(dom)
             || !Set.of("allow", "deny", "allowViewport").containsAll(jsonKeys(scope))
             || !Set.of("allow", "deny", "excludePassword").containsAll(jsonKeys(dom))
-            || scope.has("allowViewport") && !scope.path("allowViewport").isBoolean()
-            || !dom.path("excludePassword").asBoolean()
-            || !targets.isArray() || targets.size() > 20)
+            || !scope.path("allowViewport").asBoolean()
+            || !dom.path("excludePassword").asBoolean())
             throw badRequest("Context 采集范围无效");
-        Set<String> keys = new HashSet<>();
-        for (JsonNode target : targets)
-            if (!target.isObject() || target.size() != 2 || !target.path("key").isTextual()
-                || !target.path("key").asText().matches("[A-Za-z][A-Za-z0-9_]{0,63}")
-                || !keys.add(target.path("key").asText()) || !target.path("selector").isTextual()
-                || target.path("selector").asText().isBlank() || target.path("selector").asText().length() > 200)
-                throw badRequest("Context 目标无效");
-        if (sources.contains("ELEMENT") && targets.isEmpty()) throw badRequest("ELEMENT 来源需要配置目标");
-        if (Boolean.TRUE.equals(context.get("fullPageEnabled"))
-            && (!sources.contains("PAGE") || !scope.path("allowViewport").asBoolean()))
-            throw badRequest("整页采集需要 PAGE 来源及明确视口授权");
     }
 
     private static Set<String> jsonKeys(JsonNode value)
