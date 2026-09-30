@@ -90,7 +90,8 @@ public interface AssetMapper
         @Param("avatarVersionId") Long avatarVersionId, @Param("sourceFileId") Long sourceFileId,
         @Param("officialServiceId") Long officialServiceId, @Param("serviceSnapshot") String serviceSnapshot,
         @Param("pipelineVersion") String pipelineVersion, @Param("quotaReservationId") Long quotaReservationId,
-        @Param("requestId") String requestId, @Param("requestHash") byte[] requestHash);
+        @Param("requestId") String requestId, @Param("requestHash") byte[] requestHash,
+        @Param("webhookEndpointId") Long webhookEndpointId);
 
     int insertGenerationActionStep(@Param("id") Long id, @Param("accountId") Long accountId, @Param("taskId") Long taskId,
         @Param("stepKey") String stepKey, @Param("actionCode") String actionCode,

@@ -2,7 +2,7 @@
 
 前置说明书：[编写与执行规范](../../../执行计划书编写与执行规范.md) · [项目整体说明书](../../../项目整体说明书.md) · [需求](../../../项目需求说明书.md) · [数据库](../../../数据库设计说明书.md) · [架构](../../../项目架构说明书.md) · [平台内共享契约](platform-console-shared-contract.md) · [开发者接入接口草案](developer-integration-interface-contract.md)
 
-日期：2026-09-23。版本：1.0。确认状态：用户于 2026-09-25 分别授权实施 DEV-01～DEV-07，于 2026-09-26 授权实施 DEV-08，并于 2026-09-27 授权实施 DEV-09；用户于 2026-09-27 要求删除 Element 模式并实施 DEV-10；DEV-11 须另行确认。
+日期：2026-09-23。版本：1.0。确认状态：用户于 2026-09-25 分别授权实施 DEV-01～DEV-07，于 2026-09-26 授权实施 DEV-08，并于 2026-09-27 授权实施 DEV-09；用户于 2026-09-27 要求删除 Element 模式并实施 DEV-10；用户于 2026-09-28 授权实施 DEV-11 并要求完成后统一验证。
 
 ## 1. 当前状态
 
@@ -12,10 +12,10 @@
 | Application | DEV-05 已扩展 CHAT/SPEAK_ONLY 的固定配置、Relay/Skill/Context、官方 Voice 与引用；本机 `test` Application 已发布 CHAT 配置并通过 DEV-08 DEBUG/BUSINESS 对话与 DEV-09 ASR/官方 TTS。DEV-10 Context 已静态实现，用户终点待验。 |
 | Session | DEV-06/07 BUSINESS API、Token v2、运行 HTTP、ticket/WSS、续权与单活已在本机主要终点通过；DEV-08 session V6 已迁移，真实 CHAT/LLM/Tool 的 DEBUG 与 BUSINESS 终点通过；DEV-09 BUSINESS/DEBUG ASR、官方 TTS、CHAT 分句和独立 speak 已通过本机真实终点。DEV-10 Context 运行链路已静态接通，真实终点待验。 |
 | SDK | `avatar-sdk` 的无 Vue `SessionClient` 已通过 DEV-07 浏览器角色、WSS 与单活验证；DEV-08 `chat(text)` 流式协议已通过真实 WSS；DEV-09 录音 API 已构建，平台 CHAT 调试页的浏览器录音、文本确认、两段播放与自动播放恢复已通过。Context 和高亮已在 DEV-10 静态实现，浏览器终点待验。 |
-| Relay、Skills、凭证、Webhook、用量 | V1 基础表与 Flyway V16～V20 已执行；本机真实 LLM Relay、Prompt Skill、HTTP 查询 Tool 及结果裁剪通过，LLM/Tool 事实已进入 `p_call_record` 与 `p_usage_daily`。Webhook 与后续模块的完整用量仍待各模块验收。 |
+| Relay、Skills、凭证、Webhook、用量 | V1 基础表与 Flyway V16～V21 已执行；本机真实 LLM Relay、Prompt Skill、HTTP 查询 Tool 及结果裁剪通过，LLM/Tool 事实已进入 `p_call_record` 与 `p_usage_daily`。DEV-11 的 LLM/ASR/TTS 逐次调用事实已有 Demo 实测；管理查询、额度边界和 Webhook 真实投递仍待验收。 |
 | 可复用验收项目 | 用户要求保留并继续扩展 `examples/integration-demo/backend`；本机测试 Application、Relay、Skills、HTTPS `/dev08/` 入口与 DPAPI 凭证继续保留，启动和配置记录见该目录 README。 |
 | 交付范围 | DEV-01～05 已按各自阶段交付；DEV-08/09 代码、契约与记录当前在工作树待提交，session V6 已在本机迁移。本地 `logs/`、运行密钥与诊断资料不纳入 Git。 |
-| 下一步 | DEV-09 的语音模块与临时音频实际清理均已在本机通过，模块完成。早期三笔 TTS 预占仍为 `REVIEW_REQUIRED`，由 DEV-11 的对账流程核定；DEV-10 Context 已获授权并静态实现、用户终点待验；DEV-11 Webhook 仍待授权实施，跨模块完整贯通需对应模块完成后复验。DEV-07 的自然到期、真实多次断网等长时边界仍单列。 |
+| 下一步 | DEV-09 的语音模块与临时音频实际清理均已在本机通过。早期三笔 TTS 预占仍为 `REVIEW_REQUIRED`，须依据厂商账单由管理员使用 DEV-11 核对入口处理。V21 已迁移，独立 Demo 的 BUSINESS Session、对话、ASR、TTS、动作和清理已实测；后台/Management 查询、额度边界及 HTTPS Webhook 投递仍待验。当前测试 Application 未启用 Context，DEV-10 Page/Hybrid 用户终点待启用后验收。跨模块完整贯通及 DEV-07 的长时边界仍单列。 |
 
 ## 2. 目标与边界
 
@@ -357,6 +357,7 @@
 - 汇总各运行模块逐次写入或经可靠跨库事件同步的 `p_call_record`，完成 `p_usage_daily` 的 LLM/ASR/TTS/TOOL/CONTEXT 状态修正和日汇总差额；无法取得厂商用量标为不可获取。不将一次轮次的多次外部调用合并为无法逐次结算的记录；调用开始时已有所属库事实，平台汇总最终一致，均不等 Session 结束或按固定年限删除。
 - 开发者后台和 Management Key 提供按账号/应用/日期/能力查询；不返回对话正文、业务用户身份或原始工具/页面数据。
 - 核对各入口已实施的 `p_account_limit`、并发与存储限制，以及官方 TTS/生成额度预占/结算；DEV-11 补查询、差额汇总和补偿。LLM/ASR 开发者自带 Key 只记可获取用量；Application 的官方 TTS 按平台额度预占/结算。
+- 管理员可为指定账号配置 `p_account_limit` 并授予 `AVATAR_COUNT`、`TTS_CHAR`、`STORAGE_BYTE` 单位额度；授予写不可变流水、带幂等键，开发者只能查看自己的限额与余额。该配置是后续真实接入验收的前置条件，人民币测试预算仍由实际厂商账单核对，不能直接换算为额度单位。
 - 实现 Webhook endpoint 创建、签名 Secret 一次展示/轮换/停用和投递记录；生成任务提交可选一个启用 endpoint。
 - Avatar 成功/最终失败事务写 Outbox → delivery → lease worker；使用 Standard Webhooks `webhook-id/timestamp/signature` HMAC-SHA256，对原始 body 签名，有限重试并记录 attempt。Avatar 任务/步骤/厂商尝试及 Webhook delivery/attempt 业务记录长期保留，不设置终态 30 天删除；Outbox/Inbox 等完成的技术队列仍按可靠重试窗口清理。
 - 迁移清空存量 `p_webhook_delivery.expires_at`，移除 delivery/attempt 的到期删除；长期日志不存接收端响应正文、签名头、秘密或素材，后台/API 查询按账号与时间分页。
@@ -365,6 +366,20 @@
 静态退出：调用状态重复事件不重复累计；并发额度不超扣；Webhook event ID 稳定、签名原文一致、重试去重、停用和重启恢复闭合；清理不删除未结算/待投递事实。
 
 用户终点：后台/API 查询用量和剩余额度；超限请求在外部调用前失败；本地接收端验证签名、重复 event 去重、失败重试和投递记录，任务查询始终返回真实状态。
+
+实施记录（2026-09-28）：用户授权 DEV-11 后，在既有 `ruoyi-system` 内增加账号限定的日用量、逐次调用、账号限额/余额和额度预占分页查询，后台与 Management Key 共用 Service。管理员可在账号锁内按逐次调用事实重建指定 UTC 日期汇总；仅对 `REVIEW_REQUIRED` 预占凭核对依据执行结算或释放，余额、预占与不可变流水同事务更新。沿用既有逐次调用事件和差额更新，不将厂商未报告用量记作已知 0，也不自动处理早期三笔 TTS 预占或一笔 `UNKNOWN` 调用。
+
+Webhook endpoint 支持创建、密钥一次展示/轮换、停用/启用和投递/尝试查询；完整制作、动作重做及新版本完整重制均可选当前账号已启用 endpoint。任务成功或最终失败与白名单 Outbox 事件同事务提交，Worker 幂等建立 delivery、租约投递与有限重试；每次按当前密钥对原始 body 使用 Standard Webhooks HMAC-SHA256 签名，重试保持 event ID 与正文。目标每次重新解析公网地址并固定到经原域名验证的 TLS 连接，不跟随重定向；日志/查询不保存响应正文、签名头、秘密或素材。V21 清空历史 delivery 到期值并加长期保留约束及后台菜单，**迁移尚未在本轮执行**。
+
+统一静态验证：`ruoyi-system/ruoyi-session` Maven 聚焦测试、Vue 类型检查与 devtools 构建、SDK 构建、可复用 Relay 示例 7 项离线测试及差异检查通过。真实服务启动、V21 数据迁移、后台/Management API、额度超限和 HTTPS 接收端签名/重试/去重均尚未在本轮执行，不能由静态结果代替。
+
+独立 Demo 本机验收追加记录（2026-09-28）：按用户授权在 `D:/BigData/LN-virtual‑human‑platform/Examples-Demo` 创建 Vue 3 单页、Spring Boot 接入后端，并将 SDK 源码完整复制到 Demo 内。平台 Gateway/system/session/media 启动后健康检查通过，system 启动日志确认 `platform_db` Flyway V20→V21。Demo 页面真实创建 BUSINESS Session，加载正式角色、建立 WSS、续权、播放 `wave`、完成无模型费用探针和一轮真实增量对话；逐次调用事实记录 LLM 215 输入/38 输出 token、官方 TTS 3+54+14+7 字、ASR 2 秒且返回“你好，虚拟人。”，独立播报完成。DNS 修复前另有一笔用量未知的 LLM 失败记录，不能据此断言实际账单金额；用户本次付费上限 ¥5，已停止继续付费调用，最终金额仍需厂商账单核对。三条测试 Session 均已结束并核对为 `DELETED`。Demo 后端聚焦测试与前端构建通过。当前测试 Application `contextPolicy.enabled=false`，Page 请求按策略返回 `CONTEXT_NOT_ALLOWED`；Webhook 接收器仅验证了本地签名/重放测试，未配置公网 HTTPS Endpoint 和真实 Avatar 生成投递。后台/Management 查询与额度超限也尚未作真实用户终点验收。完整运行记录见 Demo README。
+
+随后用户为 Demo 提供另一 Application Secret。本地复核显示 Key 为 `ACTIVE`、具备 Session Scope，但对应账号没有 `p_account_limit` 行，创建 BUSINESS Session 在准入阶段返回 HTTP 429，未发生外部模型/语音调用；当前发布配置为 `SPEAK_ONLY`，未启用 LLM、ASR、Context，不能用于完整对话验收。Demo 将 429 显示为明确的 Session 限额提示；Secret 已移至 Demo 内忽略的本地配置，源码和打包 JAR 均不含该值。待该账号配置测试额度并提供已发布 CHAT 能力的 Application 后继续真实终点。
+
+联动验收缺口（2026-09-28）：管理员登录后发现“用量与额度”仅支持本人查询，平台没有为其他账号配置 `p_account_limit` 或授予分类余额的管理入口。按上方已确认的额度准入要求补齐仅管理员可用的配置 API 与页面，开发者查询保持只读；完成后再重启服务、核对迁移和最短写链路。
+
+联动验收记录（2026-09-29）：补齐 `platform:quota:manage` 管理员权限、指定账号限额替换和三类额度授予 API/页面；写入在账号锁内执行，限额使用修订号，授予使用幂等键和不可变流水。修复 DEV-11 前端请求遗漏 `/system` 网关前缀导致的静态资源 404。V22 迁移成功，权限只绑定管理员角色；管理员通过页面为账号 910105 配置 Session/turn/文件限额并授予 200 TTS 字符，数据库核对为一条授予流水。Demo 随后真实创建 BUSINESS Session，读取正式角色包、通过 WSS 首帧认证并执行 SPEAK_ONLY 官方 TTS；修复 Session JVM 专用 hosts 文件缺少 DashScope 域名映射后，成功轮次按序收到 `audio.segment`/`playback.ack`/`turn.completed`，临时媒体为 200 `audio/wav` 并自动清理为 `DELETED`。成功调用共结算 3 字，两条测试 Session 均为 `DELETED`。DNS 修复前的 2 字预占保留为 `REVIEW_REQUIRED`，待管理员按厂商账单释放；未直接改账。当前 Application 仅授予 `speak:write/avatar:read/session:read`，未启用 CHAT、ASR 或 Context，因此这三项不作为该 SPEAK_ONLY 配置的通过项；真实 Webhook 仍需公网 HTTPS Endpoint 和 Avatar 生成终态。
 
 ### 7.13 推荐实施批次
 
@@ -445,3 +460,5 @@
 | 2026-09-27 | DEV-08 SDK 浏览器补验 | BUSINESS 浏览器文本终点通过 | 真实 Chrome 从保留测试项目加载 `avatar-sdk/dist`，以短期 BUSINESS Token 使用无 Vue `SessionClient.chat()` 发送零费用 `DEV08_FAST_TEST`；按序收到 `connection.ready`、`request.ack`、`turn.started`、`text.delta` 和 `turn.completed`，文本为“测试流”，无页面异常。该短期 Session 已关闭；脚本 `examples/integration-demo/backend/accept_dev08_sdk.py` 与项目配置保留供后续模块复用。 | 后续在 DEV-09/10 继续扩展同一验收项目，避免重复搭建凭证和入口。 |
 | 2026-09-27 | DEV-09 ASR、TTS 与独立播报 | 模块完成；DEV-11 对账另行处理 | 按 7.10 实现 SDK 录音与 ASR、CHAT 官方 Voice 分句播报、BUSINESS 独立 speak、额度和调用事实；真实 ASR 四次、TTS 独立/两句/stop、Chrome 录音与自动播放恢复通过。百炼旧 TTS 400 的 ClientDisconnect 已修复，用户确认新请求 200。修复临时音频的本地时间/UTC 比较后，session 打包、4 项聚焦测试、服务健康检查通过；12 条 `DELETE_PENDING` 变为 `DELETED`，12 个 WAV 文件均被删除。原有 Vue typecheck、SDK build 与 Relay 6 项检查通过；本轮清理复验未增加付费调用。 | 历史三笔 14 字 `REVIEW_REQUIRED` 及一笔停止轮 `UNKNOWN` 由 DEV-11 核对；DEV-10 Context 与跨模块完整贯通另行验收。 |
 | 2026-09-27 | DEV-10 页面感知与高亮 | 静态实现；真实用户终点待验 | 用户要求删除 Element 并授权 DEV-10。Page/Hybrid 配置与 SDK、显式及 AI 按需采集、业务 Context、受控截图和 DOM、临时引用与高亮、DEBUG/BUSINESS 授权、轮次事实及调试页已实现；测试 Relay 新增可选的无费用图片/高亮探针。system/session 聚焦 Maven 测试、SDK 构建、Vue 类型检查、devtools 构建、Relay 7 项离线检查和 diff 检查通过。未启动服务、执行付费模型调用或验真实页面；无新迁移。 | 用户在调试页和开发者页面核对 Page/Hybrid、显式/AI、partial/strict、截图差异/跨域失败、高亮和 stop/过期引用；真实图片识别另需支持图片的模型 Relay 与费用授权。 |
+| 2026-09-28 | DEV-11 用量、限额与 Webhook | 实施完成；统一静态验证通过，真实用户终点待验 | 后台与 Management Key 的账号限定用量/调用/限额/预占查询、UTC 日汇总重建、人工预占核对、Webhook endpoint 和签名、终态 Outbox、delivery/attempt 租约重试均已实现。`ruoyi-system/ruoyi-session` 聚焦 Maven 测试、Vue typecheck/devtools 构建、SDK 构建、Relay 示例 7 项离线测试、差异检查通过。V21 已写入源码，未运行数据库迁移或服务；历史待核对费用未自动结算。 | 用户终点需执行 V21，核对后台/Management API 与额度，使用 HTTPS 接收端验证签名、重复事件去重、失败重试、停用及任务事实独立；DEV-10 真实页面和跨模块完整贯通仍单列。 |
+| 2026-09-28 | 独立 Demo 真实接入验收 | 部分通过；Context/Webhook/额度终点待验 | 在仓库外的 `Examples-Demo` 建立 Vue 3 + Spring Boot 前后端分离项目并内置 SDK；后端测试、前端构建通过。平台服务健康，V21 已迁移。Demo 页面真实完成 BUSINESS Session、正式角色、WSS/续权、动作、增量 CHAT、ASR WAV、官方 TTS/独立播报；LLM 已知用量 215/38 token，TTS 78 字，ASR 2 秒，三条测试 Session 已删除。含一笔 DNS 修复前用量未知的失败调用，金额由厂商账单核对。 | 当前 Application 未启用 Context；需要发布启用 Context 的配置后新建 Session 验证 Page/Hybrid/高亮。Webhook 需公网 HTTPS Endpoint、Secret 和一次真实 Avatar 终态；后台/Management 用量及额度边界需有效管理凭证继续验收。 |

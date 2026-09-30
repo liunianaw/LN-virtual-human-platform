@@ -49,7 +49,7 @@ public class RelayTarget
         catch (Exception error) { throw invalid(); }
     }
 
-    static boolean publicAddress(InetAddress address)
+    public static boolean publicAddress(InetAddress address)
     {
         if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
             || address.isSiteLocalAddress() || address.isMulticastAddress()) return false;

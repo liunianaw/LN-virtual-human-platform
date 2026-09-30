@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.ruoyi.system.asset.mapper.GenerationWorkerMapper;
 import com.ruoyi.system.asset.service.IGenerationQuotaService;
+import com.ruoyi.system.developer.webhook.service.IWebhookService;
 
 /** Stops generation tasks that never reached a billable provider submission. */
 @Component
@@ -19,15 +20,17 @@ public class GenerationTimeoutSweeper
     private final TransactionTemplate transactions;
     private final int timeoutSeconds;
     private final IGenerationQuotaService quota;
+    private final IWebhookService webhooks;
 
     public GenerationTimeoutSweeper(GenerationWorkerMapper workerMapper, TransactionTemplate transactions,
-        IGenerationQuotaService quota,
+        IGenerationQuotaService quota, IWebhookService webhooks,
         @Value("${platform.generation.timeout.unsubmitted-seconds}") int timeoutSeconds)
     {
         this.workerMapper = workerMapper;
         this.transactions = transactions;
         this.timeoutSeconds = timeoutSeconds;
         this.quota = quota;
+        this.webhooks = webhooks;
     }
 
     @Scheduled(fixedDelayString = "${platform.generation.timeout.scan-delay-ms}")
@@ -37,6 +40,7 @@ public class GenerationTimeoutSweeper
             int steps = workerMapper.expireStalledUnsubmittedSteps(timeoutSeconds);
             int tasks = workerMapper.markTimedOutTasksFailed();
             quota.finishTimedOutTasks();
+            if (tasks > 0) webhooks.recordMissingTerminalEvents();
             if (steps > 0 || tasks > 0)
                 LOG.warn("stopped stalled generation work before provider submission: steps={}, tasks={}", steps, tasks);
         });

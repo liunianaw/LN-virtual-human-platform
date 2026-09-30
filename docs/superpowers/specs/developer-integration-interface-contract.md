@@ -117,6 +117,12 @@ ASR 的 `POST /audio/transcriptions` 为完整录音 multipart，字段 `audio,r
 | DEV-05 | `/management/applications`、`/management/applications/{id}/config-versions` | 发布锁定依赖并保持旧版本；CHAT/SPEAK_ONLY 均必选官方 Voice，拒绝私有 TTS；运行时调试能力随 DEV-08～10 接入 |
 | DEV-11 | `/management/usage`、`/management/call-records`、`/management/webhook-endpoints` | 脱敏查询、签名秘密一次展示、投递状态 |
 
+DEV-11 查询协议：后台 `/api/v1/developer/usage`、`/api/v1/developer/call-records` 和 Management Key 同名路径均只查当前账号；`GET /usage/limits` 返回 `configured,limits,balances`，`GET /usage/reservations` 返回预占状态分页。用量与调用查询可带 `applicationId,from,to,capability,pageNum,pageSize`，调用另可带 `status`；`from/to` 为 UTC `YYYY-MM-DD`，单次最多 31 日，默认最近 7 日，页大小 1～100。`p_usage_daily` 按实际逐次事实和币种汇总；`knownUsageCount/knownCostCount` 区分厂商未报告与数值 0。返回 ID 为十进制字符串，不返回输入正文、业务用户身份或原始 Tool/页面数据。管理员可用 `POST /api/v1/admin/usage/rebuild {accountId,usageDate}` 在账号锁内按逐次事实重建指定 UTC 日汇总；`POST /api/v1/admin/quota-reservations/{id}/reviews {decision:SETTLE|RELEASE,evidenceNote}` 只核定 `REVIEW_REQUIRED` 预占并同时更新余额与不可变流水，不能无证据自动释放未知费用。
+
+DEV-11 Webhook 协议：后台 `/api/v1/developer/webhook-endpoints` 和 Management Key `/management/webhook-endpoints` 调用同一账号 Service。`POST` 请求 `{name,url,events:[avatar.generation.succeeded|avatar.generation.failed],timeoutMs?,maxAttempts?}`，需 `Idempotency-Key`；返回 `endpointId,status,revision,signingSecret,secretAvailable`，同键重试只返回 `signingSecret:null`。`POST /{endpointId}/secret` 轮换、`POST /{endpointId}/status {status:ACTIVE|DISABLED}` 变更状态，均需 `If-Match` 和 `Idempotency-Key`；密钥轮换后旧密钥立即失效。`GET /{endpointId}/deliveries` 与 `GET /deliveries/{deliveryId}/attempts` 按账号和时间分页，仅返回安全状态、HTTP 状态和错误码。任务创建可选 `webhookEndpointId`，必须属于当前账号且已启用；同一任务的幂等参数包含此 ID。任务终态事务写含白名单快照的 Outbox，消费者幂等建立 delivery；重试保持同一 event ID 和正文，每次尝试使用当前 endpoint 密钥按 `webhook-id.timestamp.rawBody` 签 `v1,Base64(HMAC-SHA256)`。签名时间戳为 Unix 秒，事件正文时间为任务终态 UTC 时间。投递前重新核对 HTTPS 公网地址与原主机 TLS、拒绝重定向；最多 6 次，耗尽或停用不改变任务状态。delivery/attempt 长期保留，不保存响应正文、签名头或秘密；接收端按 event ID 去重，任务查询仍是真实状态来源。
+
+可选 `webhookEndpointId` 同样适用于新角色完整制作、单动作重做及现有角色的新版本完整重制；仅继承旧版本而不产生制作任务时不接受该字段。服务端在创建任务的事务中校验 endpoint 归属与启用状态，幂等摘要包括该字段。
+
 管理 Key 的权限按资源族分为 `assets:read/write`、`generation:read/write`、`config:read/write`、`keys:write`、`usage:read`、`webhooks:write`；具体操作不得因为拥有同账号身份就绕过 Scope。官方发布、账号额度授予和平台级封禁只允许管理员后台身份。每个开放 Controller 调用与后台入口相同的领域 Service，不复制业务状态机。
 
 ### 2.2 BUSINESS Session API

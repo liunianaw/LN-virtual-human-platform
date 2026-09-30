@@ -74,7 +74,8 @@ class AssetServiceTest
             org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(byte[].class))).thenReturn(1);
         AssetServiceImpl service = new AssetServiceImpl(mapper,
             new StaticListableBeanFactory().getBeanProvider(com.ruoyi.system.storage.ObjectStorage.class),
-            transactions, new ObjectMapper(), mock(IGenerationQuotaService.class), mock(IAssetStorageQuotaService.class));
+            transactions, new ObjectMapper(), mock(IGenerationQuotaService.class), mock(IAssetStorageQuotaService.class),
+            mock(com.ruoyi.system.developer.webhook.service.IWebhookService.class));
 
         assertEquals(101L, service.createGenerationTask(7L, request()).getTaskId());
     }
@@ -83,7 +84,7 @@ class AssetServiceTest
     {
         return new AssetServiceImpl(mapper, new StaticListableBeanFactory().getBeanProvider(com.ruoyi.system.storage.ObjectStorage.class),
             new TransactionTemplate(), new ObjectMapper(), mock(IGenerationQuotaService.class),
-            mock(IAssetStorageQuotaService.class));
+            mock(IAssetStorageQuotaService.class), mock(com.ruoyi.system.developer.webhook.service.IWebhookService.class));
     }
 
     private static CreateGenerationTaskRequest request()

@@ -35,6 +35,7 @@ public class OperationsService
     public Map<String, Object> accept(CallFactEvent event)
     {
         validateEvent(event);
+        lockUsageAccount(event.accountId());
         byte[] payloadHash = hash(canonical(event));
         Map<String, Object> prior = jdbc.query("select payload_hash from p_inbox where consumer_name=? and event_id=? for update",
             rs -> rs.next() ? Map.of("payloadHash", rs.getBytes(1)) : null, CONSUMER, event.eventId());
@@ -53,6 +54,7 @@ public class OperationsService
     /** Generation facts already enter system inside the Worker transaction, so do not create a second transport event. */
     public void generation(long attemptId, long accountId, String status, String providerRequestId, String errorCode)
     {
+        lockUsageAccount(accountId);
         CallFactEvent event = new CallFactEvent("generation-" + attemptId + "-" + UUID.randomUUID().toString().replace("-", ""),
             "generation:" + attemptId, accountId, "GENERATION", status, null, null, null, providerRequestId,
             new CallFactEvent.Usage(null, null, null, false), null, null, "UNKNOWN", errorCode);
@@ -153,6 +155,10 @@ public class OperationsService
     @Transactional
     public Map<String,Object> review(long actorId, long callId, CallReview review, String ifMatch, String key)
     {
+        Long usageAccount = jdbc.query("select account_id from p_call_record where id=?",
+            rs -> rs.next() ? rs.getLong(1) : null, callId);
+        if (usageAccount == null) throw problem(HttpStatus.NOT_FOUND, "调用记录不存在");
+        lockUsageAccount(usageAccount);
         if (review == null) throw problem(HttpStatus.BAD_REQUEST, "缺少核对依据"); requireReason(review.evidenceNote(), 1000); requireKey(key);
         require(review.reviewedStatus(), List.of("SUCCEEDED","FAILED","CANCELLED"));
         String source = review.costSource() == null ? "CONSOLE" : review.costSource(); require(source, List.of("CONSOLE","ESTIMATED"));
@@ -221,6 +227,13 @@ public class OperationsService
             bool(event.usage().usageAvailable()), event.costAmount(), event.currency(), event.costSource(),
             event.errorCode(), after.status, before.id);
         daily(after, 1, currencyChanged);
+    }
+
+    private void lockUsageAccount(long accountId)
+    {
+        Long id = jdbc.query("select user_id from sys_user where user_id=? for update",
+            rs -> rs.next() ? rs.getLong(1) : null, accountId);
+        if (id == null) throw problem(HttpStatus.NOT_FOUND, "调用归属账号不存在");
     }
 
     private void daily(CallRow value, int sign, boolean request)

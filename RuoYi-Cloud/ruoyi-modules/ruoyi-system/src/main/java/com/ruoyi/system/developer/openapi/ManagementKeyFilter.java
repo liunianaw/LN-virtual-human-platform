@@ -55,6 +55,8 @@ public class ManagementKeyFilter extends OncePerRequestFilter
             return "keys:write";
         if ("GET".equals(method))
         {
+            if (resource.matches("(?:usage|call-records)(?:/.*)?")) return "usage:read";
+            if (resource.matches("webhook-endpoints(?:/[0-9]+/deliveries|/deliveries/[0-9]+/attempts)?")) return "webhooks:write";
             if (resource.matches("avatars(?:/public|/" + id + "(?:/references|/versions/" + id + "/preview)?)?")) return "assets:read";
             if (resource.matches("avatar-generation-tasks(?:/" + id + "(?:/steps)?)?"
                 + "|avatar-generation-services|" + version + "/(?:production|actions/[^/]+/results/" + id + "/preview)"))
@@ -68,6 +70,7 @@ public class ManagementKeyFilter extends OncePerRequestFilter
         }
         if ("POST".equals(method))
         {
+            if (resource.matches("webhook-endpoints(?:/" + id + "/(?:secret|status))?")) return "webhooks:write";
             if (resource.equals("avatar-reference-files") || resource.matches(version + "/publish|avatars/" + id + "/versions")) return "assets:write";
             if (resource.equals("avatar-generation-tasks")
                 || resource.matches(version + "/(?:assemble|actions/[^/]+/(?:selection|generations|attempts/" + id + "/(?:recovery|discard)))"))

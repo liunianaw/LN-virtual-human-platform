@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.operations.mapper.UsageMapper">
+  <sql id="dailyWhere">where account_id=#{accountId} and usage_date between #{from} and #{to}
+    <if test="applicationId != null">and application_scope_id=#{applicationId}</if>
+    <if test="capability != null">and capability=#{capability}</if></sql>
+  <select id="daily" resultType="map">select application_scope_id as applicationId,usage_date as usageDate,
+    capability,billing_owner as billingOwner,currency,request_count as requestCount,success_count as successCount,
+    failure_count as failureCount,unknown_count as unknownCount,cancelled_count as cancelledCount,
+    input_tokens as inputTokens,output_tokens as outputTokens,input_chars as inputChars,image_count as imageCount,
+    audio_duration_ms as audioDurationMs,known_usage_count as knownUsageCount,known_cost_count as knownCostCount,
+    cost_amount as costAmount from p_usage_daily <include refid="dailyWhere"/>
+    order by usage_date desc,application_scope_id,capability,currency limit #{limit} offset #{offset}</select>
+  <select id="dailyCount" resultType="long">select count(*) from p_usage_daily <include refid="dailyWhere"/></select>
+  <sql id="callWhere">where account_id=#{accountId} and created_at &gt;= #{from}
+    and created_at &lt; date_add(#{to},interval 1 day)
+    <if test="applicationId != null">and application_id=#{applicationId}</if>
+    <if test="capability != null">and capability=#{capability}</if>
+    <if test="status != null">and status=#{status}</if></sql>
+  <select id="calls" resultType="map">select id as callId,application_id as applicationId,capability,
+    status,billing_owner as billingOwner,input_tokens as inputTokens,output_tokens as outputTokens,
+    input_chars as inputChars,image_count as imageCount,audio_duration_ms as audioDurationMs,
+    usage_available as usageAvailable,cost_amount as costAmount,currency,cost_source as costSource,
+    error_code as errorCode,created_at as createdAt,updated_at as updatedAt
+    from p_call_record <include refid="callWhere"/> order by created_at desc,id desc limit #{limit} offset #{offset}</select>
+  <select id="callCount" resultType="long">select count(*) from p_call_record <include refid="callWhere"/></select>
+  <select id="limits" resultType="map">select max_file_bytes as maxFileBytes,max_sessions as maxSessions,
+    max_generation_tasks as maxGenerationTasks,max_turns as maxTurns,revision from p_account_limit
+    where account_id=#{accountId}</select>
+  <select id="balances" resultType="map">select quota_type as quotaType,granted_units as grantedUnits,
+    used_units as usedUnits,reserved_units as reservedUnits,
+    granted_units-used_units-reserved_units as availableUnits,revision from p_quota_balance
+    where account_id=#{accountId} order by quota_type</select>
+  <sql id="reservationWhere">where account_id=#{accountId}
+    <if test="state != null">and state=#{state}</if></sql>
+  <select id="reservations" resultType="map">select id as reservationId,quota_type as quotaType,
+    business_type as businessType,business_id as businessId,reservation_no as reservationNo,
+    reserved_units as reservedUnits,settled_units as settledUnits,state,created_at as createdAt,
+    expires_at as expiresAt,settled_at as settledAt,released_at as releasedAt
+    from p_quota_reservation <include refid="reservationWhere"/>
+    order by created_at desc,id desc limit #{limit} offset #{offset}</select>
+  <select id="reservationCount" resultType="long">select count(*) from p_quota_reservation <include refid="reservationWhere"/></select>
+  <select id="lockAccount" resultType="long">select user_id from sys_user where user_id=#{accountId} for update</select>
+  <delete id="deleteDaily">delete from p_usage_daily where account_id=#{accountId} and usage_date=#{date}</delete>
+  <insert id="rebuildDaily">insert into p_usage_daily
+    (id,created_at,updated_at,account_id,application_scope_id,usage_date,capability,billing_owner,
+     request_count,success_count,failure_count,unknown_count,cancelled_count,input_tokens,output_tokens,
+     input_chars,image_count,audio_duration_ms,known_usage_count,known_cost_count,cost_amount,currency,expires_at)
+    select uuid_short(),utc_timestamp(3),utc_timestamp(3),account_id,coalesce(application_id,0),date(created_at),
+      capability,billing_owner,count(*),sum(status='SUCCEEDED'),sum(status='FAILED'),sum(status='UNKNOWN'),
+      sum(status='CANCELLED'),sum(coalesce(input_tokens,0)),sum(coalesce(output_tokens,0)),
+      sum(coalesce(input_chars,0)),sum(coalesce(image_count,0)),sum(coalesce(audio_duration_ms,0)),
+      sum(usage_available=1),sum(cost_amount is not null),sum(coalesce(cost_amount,0)),coalesce(currency,'UNKNOWN'),null
+    from p_call_record where account_id=#{accountId} and created_at &gt;= #{date}
+      and created_at &lt; date_add(#{date},interval 1 day)
+    group by account_id,coalesce(application_id,0),date(created_at),capability,billing_owner,coalesce(currency,'UNKNOWN')</insert>
+  <select id="reservation" resultType="map">select id,account_id as accountId,quota_type as quotaType,
+    reserved_units as reservedUnits,state from p_quota_reservation where id=#{id}</select>
+  <select id="reservationForUpdate" resultType="map">select id,account_id as accountId,quota_type as quotaType,
+    reserved_units as reservedUnits,state from p_quota_reservation where id=#{id} for update</select>
+  <select id="balanceForUpdate" resultType="map">select id from p_quota_balance
+    where account_id=#{accountId} and quota_type=#{quotaType} for update</select>
+  <update id="finishReservation">update p_quota_reservation set state=#{state},settled_units=#{settledUnits},
+    settled_at=case when #{state}='SETTLED' then utc_timestamp(3) else settled_at end,
+    released_at=case when #{state}='RELEASED' then utc_timestamp(3) else released_at end,
+    updated_at=utc_timestamp(3) where id=#{id} and state='REVIEW_REQUIRED'</update>
+  <update id="finishBalance">update p_quota_balance set reserved_units=reserved_units-#{reservedUnits},
+    used_units=used_units+#{settledUnits},revision=revision+1,updated_at=utc_timestamp(3)
+    where account_id=#{accountId} and quota_type=#{quotaType} and reserved_units &gt;= #{reservedUnits}
+      and used_units+#{settledUnits} &lt;= granted_units</update>
+  <insert id="insertReviewEntry">insert into p_quota_entry
+    (id,created_at,updated_at,account_id,quota_type,reservation_id,event_key,entry_type,
+     delta_granted,delta_used,delta_reserved,operator_id,reason)
+    values (uuid_short(),utc_timestamp(3),utc_timestamp(3),#{accountId},#{quotaType},#{reservationId},
+      concat('dev11:review:',#{reservationId}),#{entryType},0,#{settledUnits},-#{reservedUnits},#{operatorId},#{reason})</insert>
+  <select id="activeAccount" resultType="long">select user_id from sys_user
+    where user_id=#{accountId} and status='0' and del_flag='0'</select>
+  <select id="lockActiveAccount" resultType="long">select user_id from sys_user
+    where user_id=#{accountId} and status='0' and del_flag='0' for update</select>
+  <insert id="insertLimits">insert into p_account_limit
+    (id,created_at,updated_at,account_id,max_file_bytes,max_sessions,max_generation_tasks,max_turns,revision)
+    values (uuid_short(),utc_timestamp(3),utc_timestamp(3),#{accountId},#{maxFileBytes},
+      #{maxSessions},#{maxGenerationTasks},#{maxTurns},1)</insert>
+  <update id="updateLimits">update p_account_limit set max_file_bytes=#{maxFileBytes},
+    max_sessions=#{maxSessions},max_generation_tasks=#{maxGenerationTasks},max_turns=#{maxTurns},
+    revision=revision+1,updated_at=utc_timestamp(3)
+    where account_id=#{accountId} and revision=#{revision}</update>
+  <select id="grantByKey" resultType="map">select quota_type as quotaType,delta_granted as units,reason
+    from p_quota_entry where account_id=#{accountId} and event_key=#{eventKey}</select>
+  <select id="quotaBalanceForUpdate" resultType="map">select granted_units as grantedUnits,
+    used_units as usedUnits,reserved_units as reservedUnits from p_quota_balance
+    where account_id=#{accountId} and quota_type=#{quotaType} for update</select>
+  <insert id="insertQuotaBalance">insert into p_quota_balance
+    (id,created_at,updated_at,account_id,quota_type,granted_units,used_units,reserved_units,revision)
+    values (uuid_short(),utc_timestamp(3),utc_timestamp(3),#{accountId},#{quotaType},#{units},0,0,1)</insert>
+  <update id="addGrantedUnits">update p_quota_balance set granted_units=granted_units+#{units},
+    revision=revision+1,updated_at=utc_timestamp(3)
+    where account_id=#{accountId} and quota_type=#{quotaType}
+      and granted_units &lt;= 9223372036854775807-#{units}</update>
+  <insert id="insertGrantEntry">insert into p_quota_entry
+    (id,created_at,updated_at,account_id,quota_type,reservation_id,event_key,entry_type,
+     delta_granted,delta_used,delta_reserved,operator_id,reason)
+    values (uuid_short(),utc_timestamp(3),utc_timestamp(3),#{accountId},#{quotaType},null,
+      #{eventKey},'GRANT',#{units},0,0,#{operatorId},#{reason})</insert>
+</mapper>

@@ -40,10 +40,10 @@
     <insert id="insertActionTask">
         insert into p_generation_task (id, created_at, updated_at, account_id, avatar_id, avatar_version_id,
             source_file_id, task_kind, status, internal_state, progress, official_service_id, service_snapshot,
-            pipeline_version, quota_reservation_id, request_id, reservation_no)
+            pipeline_version, quota_reservation_id, request_id, reservation_no, webhook_endpoint_id)
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{avatarId}, #{versionId}, #{sourceFileId},
             'REGENERATE', 'QUEUED', 'READY', 0, #{officialServiceId}, cast(#{serviceSnapshot} as json),
-            #{pipelineVersion}, #{reservationId}, #{requestId}, 1)
+            #{pipelineVersion}, #{reservationId}, #{requestId}, 1, #{webhookEndpointId})
     </insert>
     <insert id="initializeSelection">
         insert into p_avatar_action_selection (avatar_version_id, action_code, account_id, updated_at)

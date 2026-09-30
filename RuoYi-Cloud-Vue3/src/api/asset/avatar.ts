@@ -16,6 +16,7 @@ export interface CreateAvatarGenerationTaskRequest {
   expectedServiceRevision: number
   requestId: string
   name: string
+  webhookEndpointId?: string
 }
 
 export interface AvatarGenerationService {
@@ -213,7 +214,8 @@ export function selectAvatarActionResult(avatarId: string, versionId: string, ac
 }
 
 export function regenerateAvatarAction(avatarId: string, versionId: string, actionCode: string, data: {
-  requestId: string; expectedActionRevision: number; acknowledgeUncertainCharge: boolean; supersedesAttemptId?: string
+  requestId: string; expectedActionRevision: number; acknowledgeUncertainCharge: boolean; supersedesAttemptId?: string;
+  webhookEndpointId?: string
 }): Promise<AjaxResult> {
   return request({ url: `/system/asset/avatars/${avatarId}/versions/${versionId}/actions/${actionCode}/generations`, method: 'post', data })
 }
@@ -244,7 +246,7 @@ export function assembleAvatarVersion(avatarId: string, versionId: string, data:
 
 export function createAvatarVersion(avatarId: string, data: {
   requestId: string; expectedAvatarRevision: number; baseVersionId?: string;
-  sourceFileId?: string; officialServiceId?: string; expectedServiceRevision?: number
+  sourceFileId?: string; officialServiceId?: string; expectedServiceRevision?: number; webhookEndpointId?: string
 }): Promise<AjaxResult<{ avatarId: string; versionId: string; candidateRevision: number; taskId?: string | null }>> {
   return request({ url: `/system/asset/avatars/${avatarId}/versions`, method: 'post', data })
 }

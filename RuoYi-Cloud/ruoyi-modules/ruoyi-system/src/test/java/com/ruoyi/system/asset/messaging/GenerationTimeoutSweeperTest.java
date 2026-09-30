@@ -20,6 +20,7 @@ class GenerationTimeoutSweeperTest
         GenerationWorkerMapper mapper = mock(GenerationWorkerMapper.class);
         TransactionTemplate transactions = mock(TransactionTemplate.class);
         when(mapper.expireStalledUnsubmittedSteps(300)).thenReturn(8);
+        when(mapper.markTimedOutTasksFailed()).thenReturn(1);
         org.mockito.Mockito.doAnswer(invocation -> {
             Consumer<TransactionStatus> callback = invocation.getArgument(0);
             callback.accept(mock(TransactionStatus.class));
@@ -27,11 +28,13 @@ class GenerationTimeoutSweeperTest
         }).when(transactions).executeWithoutResult(any());
 
         IGenerationQuotaService quota = mock(IGenerationQuotaService.class);
-        new GenerationTimeoutSweeper(mapper, transactions, quota, 300).sweep();
+        var webhooks = mock(com.ruoyi.system.developer.webhook.service.IWebhookService.class);
+        new GenerationTimeoutSweeper(mapper, transactions, quota, webhooks, 300).sweep();
 
         InOrder order = inOrder(mapper);
         order.verify(mapper).expireStalledUnsubmittedSteps(300);
         order.verify(mapper).markTimedOutTasksFailed();
         org.mockito.Mockito.verify(quota).finishTimedOutTasks();
+        org.mockito.Mockito.verify(webhooks).recordMissingTerminalEvents();
     }
 }
