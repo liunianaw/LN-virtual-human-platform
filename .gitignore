@@ -28,3 +28,15 @@ upstream/
 *.log.*
 **/.m1-runtime-logs/
 **/.m2-runtime-logs/
+
+# Local-only project documentation and diagnostic helpers
+/项目文档/
+/docs/
+/logs/
+*.md
+*.doc
+*.docx
+*.pdf
+*.ppt
+*.pptx
+**/[Rr][Ee][Aa][Dd][Mm][Ee].txt
