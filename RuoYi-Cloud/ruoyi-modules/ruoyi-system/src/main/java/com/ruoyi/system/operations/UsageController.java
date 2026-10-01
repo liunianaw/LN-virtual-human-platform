@@ -49,6 +49,23 @@ public class UsageController
         @RequestParam(defaultValue = "1") int pageNum, @RequestParam(defaultValue = "20") int pageSize)
     { return AjaxResult.success(service.reservations(developer(),state,pageNum,pageSize)); }
 
+    @RequiresPermissions("platform:quota:manage")
+    @GetMapping("/api/v1/admin/usage/overview")
+    public AjaxResult adminOverview(@RequestParam(required = false) String from,
+        @RequestParam(required = false) String to)
+    { administrator(); return AjaxResult.success(service.adminOverview(from,to)); }
+    @RequiresPermissions("platform:quota:manage")
+    @GetMapping("/api/v1/admin/usage/accounts")
+    public AjaxResult adminAccounts(@RequestParam(required = false) String keyword,
+        @RequestParam(required = false) String from, @RequestParam(required = false) String to,
+        @RequestParam(defaultValue = "1") int pageNum, @RequestParam(defaultValue = "20") int pageSize)
+    { administrator(); return AjaxResult.success(service.adminAccounts(keyword,from,to,pageNum,pageSize)); }
+    @RequiresPermissions("platform:quota:manage")
+    @GetMapping("/api/v1/admin/accounts/{accountId}/usage")
+    public AjaxResult adminAccountUsage(@PathVariable long accountId,
+        @RequestParam(required = false) String from, @RequestParam(required = false) String to)
+    { administrator(); return AjaxResult.success(service.adminAccountUsage(accountId,from,to)); }
+
     @RequiresPermissions("platform:operations:reconcile")
     @Log(title = "用量日汇总重建", businessType = BusinessType.UPDATE, isSaveRequestData = false)
     @PostMapping("/api/v1/admin/usage/rebuild")

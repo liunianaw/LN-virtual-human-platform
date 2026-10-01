@@ -1,6 +1,6 @@
 <template>
   <div class="app-container">
-    <el-alert title="逐次调用和日汇总按 UTC 日期查询。厂商未报告的用量显示为不可获取；剩余额度以账本为准。" type="info" :closable="false" />
+    <el-alert title="生成一个动作 50 积分，音频合成每字符 0.01 积分；实际单价以请求预占时锁定的费率版本为准。资源存储暂时免费，容量限制仍生效。" type="info" :closable="false" />
     <div class="toolbar"><el-button @click="refresh">刷新</el-button></div>
     <el-card header="账号限额与余额" shadow="never">
       <el-descriptions :column="4" border>
@@ -10,9 +10,9 @@
         <el-descriptions-item label="单文件字节">{{ limits?.limits.maxFileBytes ?? '未配置' }}</el-descriptions-item>
       </el-descriptions>
       <el-table :data="limits?.balances || []" class="section">
-        <el-table-column prop="quotaType" label="额度" /><el-table-column prop="grantedUnits" label="已授予" />
-        <el-table-column prop="usedUnits" label="已使用" /><el-table-column prop="reservedUnits" label="待结算" />
-        <el-table-column prop="availableUnits" label="可用" />
+        <el-table-column label="额度与单位" min-width="230"><template #default="{ row }">{{ quotaLabels[row.quotaType] || row.quotaType }}</template></el-table-column>
+        <el-table-column prop="grantedUnits" label="总额度" /><el-table-column prop="usedUnits" label="已使用 / 占用" />
+        <el-table-column prop="reservedUnits" label="待结算 / 预占" /><el-table-column prop="availableUnits" label="剩余可用" />
       </el-table>
     </el-card>
 
@@ -33,19 +33,20 @@
         <el-table-column prop="usageDate" label="UTC 日期" width="120" /><el-table-column prop="applicationId" label="应用" width="130" />
         <el-table-column prop="capability" label="能力" width="120" /><el-table-column prop="billingOwner" label="费用方" width="120" />
         <el-table-column prop="requestCount" label="请求" width="80" /><el-table-column prop="successCount" label="成功" width="80" />
-        <el-table-column prop="unknownCount" label="待核对" width="90" /><el-table-column prop="knownUsageCount" label="有用量" width="90" /><el-table-column prop="knownCostCount" label="有成本" width="90" />
+        <el-table-column prop="unknownCount" label="待核对" width="90" /><el-table-column prop="knownUsageCount" label="有用量" width="90" />
         <el-table-column prop="inputTokens" label="输入 Token" width="110" /><el-table-column prop="outputTokens" label="输出 Token" width="110" />
-        <el-table-column prop="inputChars" label="字符" width="90" /><el-table-column label="已知成本" min-width="120"><template #default="{ row }">{{ row.costAmount }} {{ row.currency }}</template></el-table-column>
+        <el-table-column prop="inputChars" label="字符" width="90" /><el-table-column prop="imageCount" label="图片" width="90" />
       </el-table>
       <el-table v-else-if="tab === 'calls'" v-loading="loading" :data="calls">
         <el-table-column prop="callId" label="调用 ID" min-width="170" /><el-table-column prop="createdAt" label="创建时间" min-width="175" />
         <el-table-column prop="applicationId" label="应用" min-width="130" /><el-table-column prop="capability" label="能力" width="105" />
         <el-table-column prop="status" label="状态" width="105" /><el-table-column label="用量" min-width="145"><template #default="{ row }">{{ row.usageAvailable ? `${row.inputTokens ?? 0}/${row.outputTokens ?? 0} Token，${row.inputChars ?? 0} 字` : '不可获取' }}</template></el-table-column>
-        <el-table-column label="成本" min-width="110"><template #default="{ row }">{{ row.costAmount == null ? '不可获取' : `${row.costAmount} ${row.currency || ''}` }}</template></el-table-column>
+        <el-table-column label="积分消耗" min-width="120"><template #default="{ row }">{{ row.pointAmount == null ? '—' : `${row.pointAmount}（${row.pointState || '已锁价'}）` }}</template></el-table-column>
       </el-table>
       <el-table v-else v-loading="loading" :data="reservations">
-        <el-table-column prop="reservationId" label="预占 ID" min-width="170" /><el-table-column prop="quotaType" label="额度" width="145" />
+        <el-table-column prop="reservationId" label="预占 ID" min-width="170" /><el-table-column label="额度与单位" min-width="230"><template #default="{ row }">{{ quotaLabels[row.quotaType] || row.quotaType }}</template></el-table-column>
         <el-table-column prop="businessType" label="业务" width="125" /><el-table-column prop="reservedUnits" label="预占" width="100" />
+        <el-table-column label="锁价依据" min-width="180"><template #default="{ row }">{{ row.billingItem ? `${row.measuredUnits} × ${row.unitPrice} 积分` : '历史额度' }}</template></el-table-column>
         <el-table-column prop="state" label="状态" width="155" /><el-table-column prop="createdAt" label="创建时间" min-width="170" />
       </el-table>
       <el-pagination class="section" layout="prev, pager, next, total" :page-size="20" :total="total" :current-page="pageNum" @current-change="changePage" />
@@ -55,6 +56,7 @@
 
 <script setup lang="ts">
 import { getCalls, getLimits, getReservations, getUsage, type CallRecord, type QuotaReservation, type UsageDaily, type UsageLimits } from '@/api/developer/usage'
+const quotaLabels: Record<string, string> = { POINT: '积分', AVATAR_COUNT: '历史角色制作（次）', TTS_CHAR: '历史音频字符', STORAGE_BYTE: '资源存储（字节，暂时免费）' }
 const capabilities = ['GENERATION', 'ASR', 'TTS', 'TOOL']
 const statuses = ['STARTED', 'SUCCEEDED', 'FAILED', 'UNKNOWN', 'CANCELLED']
 const limits = ref<UsageLimits>(), daily = ref<UsageDaily[]>([]), calls = ref<CallRecord[]>([]), reservations = ref<QuotaReservation[]>([])

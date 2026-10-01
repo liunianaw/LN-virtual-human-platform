@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.operations.mapper.PointBillingMapper">
+  <sql id="rateColumns">id,version_no versionNo,generation_action_cent generationActionCent,
+    tts_character_cent ttsCharacterCent,storage_byte_cent storageByteCent,effective_at effectiveAt,created_at createdAt</sql>
+  <sql id="reservationColumns">id,account_id accountId,business_type businessType,business_id businessId,
+    reservation_no reservationNo,billing_item billingItem,measured_units measuredUnits,unit_price_cent unitPriceCent,
+    rate_version_id rateVersionId,reserved_cent reservedCent,settled_cent settledCent,state,created_at createdAt</sql>
+  <select id="currentRate" resultType="map">select <include refid="rateColumns"/> from p_point_rate_version
+    where effective_at &lt;= utc_timestamp(3) order by effective_at desc,version_no desc limit 1</select>
+  <select id="latestRateForUpdate" resultType="map">select <include refid="rateColumns"/> from p_point_rate_version
+    order by version_no desc limit 1 for update</select>
+  <select id="rates" resultType="map">select <include refid="rateColumns"/> from p_point_rate_version order by version_no desc limit 50</select>
+  <insert id="insertRate">insert into p_point_rate_version
+    (id,created_at,version_no,generation_action_cent,tts_character_cent,storage_byte_cent,effective_at,created_by)
+    values (#{id},utc_timestamp(3),#{versionNo},#{generationActionCent},#{ttsCharacterCent},#{storageByteCent},#{effectiveAt},#{operatorId})</insert>
+  <select id="balanceForUpdate" resultType="map">select granted_cent grantedCent,used_cent usedCent,reserved_cent reservedCent
+    from p_point_balance where account_id=#{accountId} for update</select>
+  <insert id="insertBalance">insert into p_point_balance
+    (account_id,created_at,updated_at,granted_cent,used_cent,reserved_cent,revision)
+    values (#{accountId},utc_timestamp(3),utc_timestamp(3),#{grantedCent},0,0,1)</insert>
+  <update id="reserveBalance">update p_point_balance set reserved_cent=reserved_cent+#{amountCent},revision=revision+1,
+    updated_at=utc_timestamp(3) where account_id=#{accountId} and granted_cent-used_cent-reserved_cent &gt;= #{amountCent}</update>
+  <update id="finishBalance">update p_point_balance set reserved_cent=reserved_cent-#{reservedCent},
+    used_cent=used_cent+#{settledCent},revision=revision+1,updated_at=utc_timestamp(3)
+    where account_id=#{accountId} and reserved_cent &gt;= #{reservedCent} and used_cent+#{settledCent} &lt;= granted_cent</update>
+  <update id="addGranted">update p_point_balance set granted_cent=granted_cent+#{amountCent},revision=revision+1,
+    updated_at=utc_timestamp(3) where account_id=#{accountId} and granted_cent &lt;= 9223372036854775807-#{amountCent}</update>
+  <select id="activeAccountForUpdate" resultType="long">select user_id from sys_user
+    where user_id=#{accountId} and status='0' and del_flag='0' for update</select>
+  <select id="reservation" resultType="map">select <include refid="reservationColumns"/> from p_point_reservation
+    where account_id=#{accountId} and business_type=#{businessType} and business_id=#{businessId} and reservation_no=#{reservationNo}</select>
+  <select id="latestReservationForUpdate" resultType="map">select <include refid="reservationColumns"/> from p_point_reservation
+    where account_id=#{accountId} and business_type=#{businessType} and business_id=#{businessId}
+    order by reservation_no desc limit 1 for update</select>
+  <select id="reservationById" resultType="map">select <include refid="reservationColumns"/> from p_point_reservation where id=#{id}</select>
+  <select id="reservationByIdForUpdate" resultType="map">select <include refid="reservationColumns"/> from p_point_reservation where id=#{id} for update</select>
+  <insert id="insertReservation">insert into p_point_reservation
+    (id,created_at,updated_at,account_id,business_type,business_id,reservation_no,billing_item,measured_units,
+     unit_price_cent,rate_version_id,reserved_cent,settled_cent,state)
+    values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{businessType},#{businessId},#{reservationNo},
+      #{billingItem},#{measuredUnits},#{unitPriceCent},#{rateVersionId},#{reservedCent},0,'RESERVED')</insert>
+  <update id="finishReservation">update p_point_reservation set state=#{state},settled_cent=#{settledCent},
+    settled_at=case when #{state}='SETTLED' then utc_timestamp(3) else settled_at end,
+    released_at=case when #{state}='RELEASED' then utc_timestamp(3) else released_at end,updated_at=utc_timestamp(3)
+    where id=#{id} and state=#{fromState}</update>
+  <update id="reviewReservation">update p_point_reservation set state='REVIEW_REQUIRED',updated_at=utc_timestamp(3)
+    where id=#{id} and state='RESERVED'</update>
+  <select id="grantByKey" resultType="map">select delta_granted_cent amountCent,reason from p_point_entry
+    where account_id=#{accountId} and event_key=#{eventKey}</select>
+  <insert id="insertEntry">insert into p_point_entry
+    (id,created_at,account_id,reservation_id,event_key,entry_type,delta_granted_cent,delta_used_cent,
+     delta_reserved_cent,operator_id,reason)
+    values (#{id},utc_timestamp(3),#{accountId},#{reservationId},#{eventKey},#{entryType},#{deltaGrantedCent},
+      #{deltaUsedCent},#{deltaReservedCent},#{operatorId},#{reason})</insert>
+  <select id="nextId" resultType="long">select uuid_short()</select>
+</mapper>

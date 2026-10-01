@@ -135,14 +135,19 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         select greatest(granted_units - used_units - reserved_units, 0)
         from p_quota_balance where account_id = #{accountId} and quota_type = 'AVATAR_COUNT'
     </select>
-    <select id="taskReservationForUpdate" resultType="map">
-        select r.id reservationId, r.state, r.reserved_units reservedUnits, r.reservation_no reservationNo,
-            t.status taskStatus,
+    <select id="taskReservation" resultType="map">
+        select coalesce(p.id,q.id) reservationId,coalesce(p.state,q.state) state,
+            coalesce(p.reserved_cent,q.reserved_units) reservedUnits,coalesce(p.reservation_no,q.reservation_no) reservationNo,
+            p.measured_units measuredUnits,p.unit_price_cent unitPriceCent,
+            case when p.id is null then 'LEGACY' else 'POINT' end ledgerType,t.status taskStatus,
             (select count(*) from p_generation_attempt a where a.account_id = t.account_id
-                and a.task_id = t.id and a.status = 'UNKNOWN') unknownAttempts
-        from p_generation_task t join p_quota_reservation r on r.id = t.quota_reservation_id
-            and r.account_id = t.account_id
-        where t.account_id = #{accountId} and t.id = #{taskId} for update
+                and a.task_id = t.id and a.status = 'UNKNOWN') unknownAttempts,
+            (select count(*) from p_generation_attempt a where a.account_id = t.account_id
+                and a.task_id = t.id and a.status = 'SUCCEEDED') successfulAttempts
+        from p_generation_task t
+        left join p_point_reservation p on p.id=t.quota_reservation_id and p.account_id=t.account_id
+        left join p_quota_reservation q on q.id=t.quota_reservation_id and q.account_id=t.account_id
+        where t.account_id = #{accountId} and t.id = #{taskId} and (p.id is not null or q.id is not null)
     </select>
     <update id="changeTaskReservation">
         update p_generation_task set quota_reservation_id = #{reservationId}, reservation_no = #{reservationNo},
@@ -176,10 +181,15 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </update>
     <select id="timedOutTasksForQuota" resultType="map">
         select t.account_id accountId, t.id taskId
-        from p_generation_task t join p_quota_reservation r on r.id = t.quota_reservation_id
+        from p_generation_task t join p_point_reservation r on r.id = t.quota_reservation_id
         where t.status = 'FAILED' and t.error_code = 'GENERATION_START_TIMEOUT'
-            and r.state = 'RESERVED' and r.reserved_units = 1
-        order by t.id limit 1000
+            and r.state = 'RESERVED'
+        union all
+        select t.account_id accountId,t.id taskId
+        from p_generation_task t join p_quota_reservation r on r.id=t.quota_reservation_id
+        where t.status='FAILED' and t.error_code='GENERATION_START_TIMEOUT'
+            and r.state='RESERVED' and r.reserved_units=1
+        order by taskId limit 1000
     </select>
 
     <select id="maxFileBytesForUpdate" resultType="long">

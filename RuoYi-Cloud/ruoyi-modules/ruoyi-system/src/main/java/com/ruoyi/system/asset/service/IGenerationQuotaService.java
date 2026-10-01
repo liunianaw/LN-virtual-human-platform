@@ -3,7 +3,7 @@ package com.ruoyi.system.asset.service;
 public interface IGenerationQuotaService
 {
     /** Called inside the task creation transaction, before any payable work is published. */
-    void reserve(long accountId, long taskId, long reservationId);
+    void reserve(long accountId, long taskId, long reservationId, int actionCount);
 
     /** Reopen a failed task only after restoring an already released reservation. */
     void resume(long accountId, long taskId);

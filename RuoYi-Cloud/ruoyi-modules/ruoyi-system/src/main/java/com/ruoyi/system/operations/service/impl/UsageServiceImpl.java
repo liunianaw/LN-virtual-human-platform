@@ -60,6 +60,51 @@ public class UsageServiceImpl implements IUsageService
             mapper.reservationCount(accountId, state), pageNum, pageSize);
     }
 
+    @Override public Map<String,Object> adminOverview(String from, String to)
+    {
+        administrator();
+        DateRange range = dateRange(from, to);
+        Map<String,Object> result = new LinkedHashMap<>(mapper.platformOverview(range.from, range.to));
+        result.put("from", range.from.toString());
+        result.put("to", range.to.toString());
+        result.put("capabilities", mapper.platformCapabilityUsage(range.from, range.to));
+        return result;
+    }
+
+    @Override public Map<String,Object> adminAccounts(String keyword, String from, String to,
+        int pageNum, int pageSize)
+    {
+        administrator();
+        checkPage(1, pageNum, pageSize);
+        String query = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        if (query != null && query.length() > 64) throw bad("用户搜索内容过长");
+        DateRange range = dateRange(from, to);
+        return page(mapper.adminAccounts(query, range.from, range.to, pageSize, (pageNum - 1) * pageSize)
+                .stream().map(UsageServiceImpl::stringIds).toList(),
+            mapper.adminAccountCount(query), pageNum, pageSize);
+    }
+
+    @Override public Map<String,Object> adminAccountUsage(long accountId, String from, String to)
+    {
+        administrator();
+        if (accountId <= 0) throw bad("账号无效");
+        Map<String,Object> account = mapper.adminAccount(accountId);
+        if (account == null) throw new ServiceException("开发者账号不存在",404);
+        DateRange range = dateRange(from, to);
+        Map<String,Object> result = new LinkedHashMap<>();
+        result.put("account", stringIds(account));
+        result.put("from", range.from.toString());
+        result.put("to", range.to.toString());
+        result.put("summary", mapper.adminAccountSummary(accountId, range.from, range.to));
+        result.put("capabilities", mapper.adminAccountCapabilityUsage(accountId, range.from, range.to));
+        result.put("quota", limits(accountId));
+        result.put("recentCalls", mapper.calls(accountId, null, range.from, range.to, null, null, 20, 0)
+            .stream().map(UsageServiceImpl::stringIds).toList());
+        result.put("recentReservations", mapper.reservations(accountId, null, 20, 0)
+            .stream().map(UsageServiceImpl::stringIds).toList());
+        return result;
+    }
+
     @Override public Map<String,Object> adminLimits(long accountId)
     {
         administrator();
@@ -179,10 +224,15 @@ public class UsageServiceImpl implements IUsageService
             catch (NumberFormatException error) { throw bad("应用标识无效"); }
         }
         if (capability != null && !CAPABILITIES.contains(capability)) throw bad("能力筛选无效");
+        DateRange range = dateRange(from, to);
+        return new Filters(app,range.from,range.to,capability,pageNum,pageSize);
+    }
+    private static DateRange dateRange(String from, String to)
+    {
         LocalDate end = date(to, LocalDate.now(java.time.ZoneOffset.UTC));
         LocalDate start = date(from, end.minusDays(6));
         if (start.isAfter(end) || ChronoUnit.DAYS.between(start,end) > 30) throw bad("最多查询31天");
-        return new Filters(app,start,end,capability,pageNum,pageSize);
+        return new DateRange(start,end);
     }
     private static LocalDate date(String value, LocalDate fallback)
     { try { return value == null || value.isBlank() ? fallback : LocalDate.parse(value); }
@@ -195,7 +245,7 @@ public class UsageServiceImpl implements IUsageService
     private static Map<String,Object> stringIds(Map<String,Object> source)
     {
         Map<String,Object> copy = new LinkedHashMap<>(source);
-        for (String key : List.of("callId","applicationId","reservationId","businessId"))
+        for (String key : List.of("callId","applicationId","reservationId","businessId","accountId","userId"))
             if (copy.get(key) instanceof Number value) copy.put(key, value.toString());
         if (copy.get("usageDate") instanceof java.sql.Date value) copy.put("usageDate", value.toLocalDate().toString());
         return copy;
@@ -206,4 +256,5 @@ public class UsageServiceImpl implements IUsageService
     private static ServiceException bad(String message) { return new ServiceException(message,400); }
     private record Filters(Long applicationId, LocalDate from, LocalDate to, String capability, int pageNum, int pageSize)
     { int offset() { return (pageNum - 1) * pageSize; } }
+    private record DateRange(LocalDate from, LocalDate to) { }
 }

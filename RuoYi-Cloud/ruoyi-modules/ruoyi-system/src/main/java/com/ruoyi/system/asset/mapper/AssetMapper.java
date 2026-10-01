@@ -38,7 +38,7 @@ public interface AssetMapper
     Integer maxGenerationTasksForUpdate(@Param("accountId") Long accountId);
     int countActiveGenerationTasks(@Param("accountId") Long accountId);
     Long availableAvatarQuota(@Param("accountId") Long accountId);
-    Map<String, Object> taskReservationForUpdate(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
+    Map<String, Object> taskReservation(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
     int changeTaskReservation(@Param("accountId") Long accountId, @Param("taskId") Long taskId,
         @Param("oldReservationId") Long oldReservationId, @Param("reservationId") Long reservationId,
         @Param("reservationNo") int reservationNo);

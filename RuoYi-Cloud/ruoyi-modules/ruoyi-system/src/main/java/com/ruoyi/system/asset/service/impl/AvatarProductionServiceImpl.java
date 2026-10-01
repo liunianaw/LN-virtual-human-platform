@@ -188,7 +188,7 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
                     throw new ServiceException("上次结果待核对；再次生成前必须确认可能重复计费", 409);
             }
             Long taskId = nextId(), stepId = nextId(), attemptId = nextId(), reservationId = nextId();
-            quota.reserve(accountId, taskId, reservationId);
+            quota.reserve(accountId, taskId, reservationId, 1);
             mapper.insertActionTask(taskId, accountId, avatarId, versionId, Long.valueOf((String) context.get("sourceFileId")),
                 Long.valueOf((String) context.get("officialServiceId")), (String) context.get("serviceSnapshot"),
                 (String) context.get("pipelineVersion"), reservationId, request.requestId());
@@ -361,7 +361,7 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
                     "sourceSha256", java.util.HexFormat.of().formatHex(source.getSha256())));
                 mapper.insertCandidateVersion(versionId, accountId, avatarId, versionNo, source.getId(), PIPELINE_VERSION, recipe);
                 Long generationTaskId = nextId(), reservationId = nextId();
-                quota.reserve(accountId, generationTaskId, reservationId);
+                quota.reserve(accountId, generationTaskId, reservationId, ACTIONS.size());
                 assetMapper.insertGenerationTask(generationTaskId, accountId, avatarId, versionId, source.getId(),
                     generationService.getId(), snapshot, PIPELINE_VERSION, reservationId, request.requestId(), hash);
                 for (String action : ACTIONS)

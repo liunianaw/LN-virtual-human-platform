@@ -13,6 +13,9 @@ public interface IUsageService
         String capability, String status, int pageNum, int pageSize);
     Map<String,Object> limits(long accountId);
     Map<String,Object> reservations(long accountId, String state, int pageNum, int pageSize);
+    Map<String,Object> adminOverview(String from, String to);
+    Map<String,Object> adminAccounts(String keyword, String from, String to, int pageNum, int pageSize);
+    Map<String,Object> adminAccountUsage(long accountId, String from, String to);
     Map<String,Object> rebuild(long accountId, LocalDate date);
     Map<String,Object> reviewReservation(long operatorId, long reservationId, String decision, String reason);
     Map<String,Object> adminLimits(long accountId);

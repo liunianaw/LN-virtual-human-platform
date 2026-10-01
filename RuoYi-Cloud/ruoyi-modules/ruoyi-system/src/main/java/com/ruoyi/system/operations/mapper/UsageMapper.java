@@ -25,6 +25,16 @@ public interface UsageMapper
     List<Map<String,Object>> reservations(@Param("accountId") long accountId, @Param("state") String state,
         @Param("limit") int limit, @Param("offset") int offset);
     long reservationCount(@Param("accountId") long accountId, @Param("state") String state);
+    Map<String,Object> platformOverview(@Param("from") LocalDate from, @Param("to") LocalDate to);
+    List<Map<String,Object>> platformCapabilityUsage(@Param("from") LocalDate from, @Param("to") LocalDate to);
+    List<Map<String,Object>> adminAccounts(@Param("keyword") String keyword, @Param("from") LocalDate from,
+        @Param("to") LocalDate to, @Param("limit") int limit, @Param("offset") int offset);
+    long adminAccountCount(@Param("keyword") String keyword);
+    Map<String,Object> adminAccount(@Param("accountId") long accountId);
+    Map<String,Object> adminAccountSummary(@Param("accountId") long accountId,
+        @Param("from") LocalDate from, @Param("to") LocalDate to);
+    List<Map<String,Object>> adminAccountCapabilityUsage(@Param("accountId") long accountId,
+        @Param("from") LocalDate from, @Param("to") LocalDate to);
     Long lockAccount(@Param("accountId") long accountId);
     int deleteDaily(@Param("accountId") long accountId, @Param("date") LocalDate date);
     int rebuildDaily(@Param("accountId") long accountId, @Param("date") LocalDate date);

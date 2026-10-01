@@ -55,8 +55,10 @@ public class OperationsService
     public void generation(long attemptId, long accountId, String status, String providerRequestId, String errorCode)
     {
         lockUsageAccount(accountId);
+        Long reservationId = jdbc.query("select p.id from p_generation_attempt a join p_generation_task t on t.id=a.task_id and t.account_id=a.account_id join p_point_reservation p on p.id=t.quota_reservation_id where a.id=? and a.account_id=?",
+            rs -> rs.next() ? rs.getLong(1) : null, attemptId, accountId);
         CallFactEvent event = new CallFactEvent("generation-" + attemptId + "-" + UUID.randomUUID().toString().replace("-", ""),
-            "generation:" + attemptId, accountId, "GENERATION", status, null, null, null, providerRequestId,
+            "generation:" + attemptId, accountId, "GENERATION", status, null, null, null, reservationId, providerRequestId,
             new CallFactEvent.Usage(null, null, null, false), null, null, "UNKNOWN", errorCode);
         validateEvent(event); upsert(event);
     }

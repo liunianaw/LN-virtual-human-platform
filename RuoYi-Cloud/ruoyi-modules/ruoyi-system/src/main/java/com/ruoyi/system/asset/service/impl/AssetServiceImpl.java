@@ -214,7 +214,7 @@ public class AssetServiceImpl implements IAssetService
         Long avatarVersionId = nextId();
         Long taskId = nextId();
         Long reservationId = nextId();
-        quota.reserve(accountId, taskId, reservationId);
+        quota.reserve(accountId, taskId, reservationId, 8);
         assetMapper.insertAvatar(avatarId, accountId, request.getName().trim(), visibility);
         assetMapper.insertAvatarVersion(avatarVersionId, avatarId, accountId, sourceFile.getId(), PIPELINE_VERSION,
             json(Map.of("pipelineVersion", PIPELINE_VERSION, "sourceSha256", hex(sourceFile.getSha256()))));

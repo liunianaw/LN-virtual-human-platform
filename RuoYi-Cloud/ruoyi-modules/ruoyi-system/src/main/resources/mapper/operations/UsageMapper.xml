@@ -12,34 +12,125 @@
     cost_amount as costAmount from p_usage_daily <include refid="dailyWhere"/>
     order by usage_date desc,application_scope_id,capability,currency limit #{limit} offset #{offset}</select>
   <select id="dailyCount" resultType="long">select count(*) from p_usage_daily <include refid="dailyWhere"/></select>
-  <sql id="callWhere">where account_id=#{accountId} and created_at &gt;= #{from}
-    and created_at &lt; date_add(#{to},interval 1 day)
-    <if test="applicationId != null">and application_id=#{applicationId}</if>
-    <if test="capability != null">and capability=#{capability}</if>
-    <if test="status != null">and status=#{status}</if></sql>
-  <select id="calls" resultType="map">select id as callId,application_id as applicationId,capability,
-    status,billing_owner as billingOwner,input_tokens as inputTokens,output_tokens as outputTokens,
-    input_chars as inputChars,image_count as imageCount,audio_duration_ms as audioDurationMs,
-    usage_available as usageAvailable,cost_amount as costAmount,currency,cost_source as costSource,
-    error_code as errorCode,created_at as createdAt,updated_at as updatedAt
-    from p_call_record <include refid="callWhere"/> order by created_at desc,id desc limit #{limit} offset #{offset}</select>
-  <select id="callCount" resultType="long">select count(*) from p_call_record <include refid="callWhere"/></select>
+  <sql id="callWhere">where c.account_id=#{accountId} and c.created_at &gt;= #{from}
+    and c.created_at &lt; date_add(#{to},interval 1 day)
+    <if test="applicationId != null">and c.application_id=#{applicationId}</if>
+    <if test="capability != null">and c.capability=#{capability}</if>
+    <if test="status != null">and c.status=#{status}</if></sql>
+  <select id="calls" resultType="map">select c.id as callId,c.application_id as applicationId,c.capability,
+    c.status,c.billing_owner as billingOwner,c.input_tokens as inputTokens,c.output_tokens as outputTokens,
+    c.input_chars as inputChars,c.image_count as imageCount,c.audio_duration_ms as audioDurationMs,
+    c.usage_available as usageAvailable,c.cost_amount as costAmount,c.currency,c.cost_source as costSource,
+    case when p.id is null then null when c.capability='GENERATION' then p.unit_price_cent/100.0
+      when p.state='SETTLED' then p.settled_cent/100.0 else p.reserved_cent/100.0 end pointAmount,
+    p.state pointState,c.error_code as errorCode,c.created_at as createdAt,c.updated_at as updatedAt
+    from p_call_record c left join p_point_reservation p on p.id=c.quota_reservation_id
+    <include refid="callWhere"/> order by c.created_at desc,c.id desc limit #{limit} offset #{offset}</select>
+  <select id="callCount" resultType="long">select count(*) from p_call_record c <include refid="callWhere"/></select>
   <select id="limits" resultType="map">select max_file_bytes as maxFileBytes,max_sessions as maxSessions,
     max_generation_tasks as maxGenerationTasks,max_turns as maxTurns,revision from p_account_limit
     where account_id=#{accountId}</select>
-  <select id="balances" resultType="map">select quota_type as quotaType,granted_units as grantedUnits,
+  <select id="balances" resultType="map">select convert(quota_type using utf8mb4) collate utf8mb4_unicode_ci as quotaType,granted_units as grantedUnits,
     used_units as usedUnits,reserved_units as reservedUnits,
     granted_units-used_units-reserved_units as availableUnits,revision from p_quota_balance
-    where account_id=#{accountId} order by quota_type</select>
+    where account_id=#{accountId} and quota_type='STORAGE_BYTE'
+    union all select convert('POINT' using utf8mb4) collate utf8mb4_unicode_ci,granted_cent/100.0,used_cent/100.0,reserved_cent/100.0,
+      (granted_cent-used_cent-reserved_cent)/100.0,revision from p_point_balance where account_id=#{accountId}
+    order by quotaType</select>
   <sql id="reservationWhere">where account_id=#{accountId}
     <if test="state != null">and state=#{state}</if></sql>
-  <select id="reservations" resultType="map">select id as reservationId,quota_type as quotaType,
-    business_type as businessType,business_id as businessId,reservation_no as reservationNo,
-    reserved_units as reservedUnits,settled_units as settledUnits,state,created_at as createdAt,
-    expires_at as expiresAt,settled_at as settledAt,released_at as releasedAt
+  <select id="reservations" resultType="map">select id as reservationId,
+    convert(quota_type using utf8mb4) collate utf8mb4_unicode_ci as quotaType,
+    convert(business_type using utf8mb4) collate utf8mb4_unicode_ci as businessType,
+    convert(business_id using utf8mb4) collate utf8mb4_unicode_ci as businessId,reservation_no as reservationNo,
+    reserved_units as reservedUnits,settled_units as settledUnits,
+    convert(state using utf8mb4) collate utf8mb4_unicode_ci as state,created_at as createdAt,
+    expires_at as expiresAt,settled_at as settledAt,released_at as releasedAt,
+    null billingItem,null measuredUnits,null unitPrice
     from p_quota_reservation <include refid="reservationWhere"/>
-    order by created_at desc,id desc limit #{limit} offset #{offset}</select>
-  <select id="reservationCount" resultType="long">select count(*) from p_quota_reservation <include refid="reservationWhere"/></select>
+    union all select id,convert('POINT' using utf8mb4) collate utf8mb4_unicode_ci,
+      convert(business_type using utf8mb4) collate utf8mb4_unicode_ci,
+      convert(business_id using utf8mb4) collate utf8mb4_unicode_ci,reservation_no,reserved_cent/100.0,
+      settled_cent/100.0,convert(state using utf8mb4) collate utf8mb4_unicode_ci,created_at,null,settled_at,released_at,
+      convert(billing_item using utf8mb4) collate utf8mb4_unicode_ci,measured_units,unit_price_cent/100.0
+      from p_point_reservation where account_id=#{accountId}
+      <if test="state != null">and state=#{state}</if>
+    order by createdAt desc,reservationId desc limit #{limit} offset #{offset}</select>
+  <select id="reservationCount" resultType="long">select
+    (select count(*) from p_quota_reservation <include refid="reservationWhere"/>)+
+    (select count(*) from p_point_reservation where account_id=#{accountId}<if test="state != null"> and state=#{state}</if>)</select>
+  <select id="platformOverview" resultType="map">select users.totalUsers,users.activeUsers,
+    balances.pointAccounts,balances.grantedPoints,balances.usedPoints,balances.reservedPoints,
+    balances.availablePoints,calls.usageUsers,calls.requestCount,calls.successCount,calls.failureCount,
+    calls.unknownCount,calls.imageCount,calls.inputChars,calls.audioDurationMs
+    from (select count(*) totalUsers,coalesce(sum(u.status='0'),0) activeUsers
+      from sys_user u where u.del_flag='0' and exists (select 1 from sys_user_role ur
+        join sys_role r on r.role_id=ur.role_id where ur.user_id=u.user_id and r.role_key='developer')) users
+    cross join (select count(*) pointAccounts,coalesce(sum(b.granted_cent),0)/100.0 grantedPoints,
+      coalesce(sum(b.used_cent),0)/100.0 usedPoints,coalesce(sum(b.reserved_cent),0)/100.0 reservedPoints,
+      coalesce(sum(b.granted_cent-b.used_cent-b.reserved_cent),0)/100.0 availablePoints
+      from p_point_balance b where exists (select 1 from sys_user_role ur join sys_role r on r.role_id=ur.role_id
+        where ur.user_id=b.account_id and r.role_key='developer')) balances
+    cross join (select count(distinct c.account_id) usageUsers,count(*) requestCount,
+      coalesce(sum(c.status='SUCCEEDED'),0) successCount,
+      coalesce(sum(c.status='FAILED'),0) failureCount,coalesce(sum(c.status='UNKNOWN'),0) unknownCount,
+      coalesce(sum(c.image_count),0) imageCount,coalesce(sum(c.input_chars),0) inputChars,
+      coalesce(sum(c.audio_duration_ms),0) audioDurationMs
+      from p_call_record c where c.created_at &gt;= #{from} and c.created_at &lt; date_add(#{to},interval 1 day)
+        and exists (select 1 from sys_user_role ur join sys_role r on r.role_id=ur.role_id
+          where ur.user_id=c.account_id and r.role_key='developer')) calls</select>
+  <select id="platformCapabilityUsage" resultType="map">select c.capability,count(*) requestCount,
+    coalesce(sum(c.status='SUCCEEDED'),0) successCount,coalesce(sum(c.status='FAILED'),0) failureCount,
+    coalesce(sum(c.status='UNKNOWN'),0) unknownCount,coalesce(sum(c.image_count),0) imageCount,
+    coalesce(sum(c.input_chars),0) inputChars,coalesce(sum(c.audio_duration_ms),0) audioDurationMs
+    from p_call_record c where c.created_at &gt;= #{from} and c.created_at &lt; date_add(#{to},interval 1 day)
+      and exists (select 1 from sys_user_role ur join sys_role r on r.role_id=ur.role_id
+        where ur.user_id=c.account_id and r.role_key='developer')
+    group by c.capability order by requestCount desc,c.capability</select>
+  <sql id="adminAccountWhere">where u.del_flag='0' and exists (select 1 from sys_user_role ur
+    join sys_role r on r.role_id=ur.role_id where ur.user_id=u.user_id and r.role_key='developer')
+    <if test="keyword != null">and (cast(u.user_id as char)=#{keyword} or u.user_name like concat('%',#{keyword},'%')
+      or u.nick_name like concat('%',#{keyword},'%') or u.email like concat('%',#{keyword},'%'))</if></sql>
+  <select id="adminAccounts" resultType="map">select u.user_id userId,u.user_name userName,u.nick_name nickName,
+    u.email,u.status,u.create_time createdAt,coalesce(b.granted_cent,0)/100.0 grantedPoints,
+    coalesce(b.used_cent,0)/100.0 usedPoints,coalesce(b.reserved_cent,0)/100.0 reservedPoints,
+    coalesce(b.granted_cent-b.used_cent-b.reserved_cent,0)/100.0 availablePoints,
+    coalesce(c.requestCount,0) requestCount,coalesce(c.successCount,0) successCount,
+    coalesce(c.failureCount,0) failureCount,coalesce(c.unknownCount,0) unknownCount,c.lastCallAt
+    from sys_user u left join p_point_balance b on b.account_id=u.user_id
+    left join (select account_id,count(*) requestCount,sum(status='SUCCEEDED') successCount,
+      sum(status='FAILED') failureCount,sum(status='UNKNOWN') unknownCount,max(created_at) lastCallAt
+      from p_call_record where created_at &gt;= #{from} and created_at &lt; date_add(#{to},interval 1 day)
+      group by account_id) c on c.account_id=u.user_id
+    <include refid="adminAccountWhere"/>
+    order by coalesce(c.requestCount,0) desc,u.user_id desc limit #{limit} offset #{offset}</select>
+  <select id="adminAccountCount" resultType="long">select count(*) from sys_user u
+    <include refid="adminAccountWhere"/></select>
+  <select id="adminAccount" resultType="map">select u.user_id userId,u.user_name userName,u.nick_name nickName,
+    u.email,u.status,u.create_time createdAt from sys_user u where u.user_id=#{accountId} and u.del_flag='0'
+    and exists (select 1 from sys_user_role ur join sys_role r on r.role_id=ur.role_id
+      where ur.user_id=u.user_id and r.role_key='developer')</select>
+  <select id="adminAccountSummary" resultType="map">select coalesce(b.granted_cent,0)/100.0 grantedPoints,
+    coalesce(b.used_cent,0)/100.0 usedPoints,coalesce(b.reserved_cent,0)/100.0 reservedPoints,
+    coalesce(b.granted_cent-b.used_cent-b.reserved_cent,0)/100.0 availablePoints,
+    coalesce(c.requestCount,0) requestCount,coalesce(c.successCount,0) successCount,
+    coalesce(c.failureCount,0) failureCount,coalesce(c.unknownCount,0) unknownCount,
+    coalesce(c.imageCount,0) imageCount,coalesce(c.inputChars,0) inputChars,
+    coalesce(c.audioDurationMs,0) audioDurationMs,c.lastCallAt
+    from sys_user u left join p_point_balance b on b.account_id=u.user_id
+    left join (select account_id,count(*) requestCount,sum(status='SUCCEEDED') successCount,
+      sum(status='FAILED') failureCount,sum(status='UNKNOWN') unknownCount,sum(image_count) imageCount,
+      sum(input_chars) inputChars,sum(audio_duration_ms) audioDurationMs,max(created_at) lastCallAt
+      from p_call_record where account_id=#{accountId} and created_at &gt;= #{from}
+        and created_at &lt; date_add(#{to},interval 1 day) group by account_id) c on c.account_id=u.user_id
+    where u.user_id=#{accountId}</select>
+  <select id="adminAccountCapabilityUsage" resultType="map">select capability,count(*) requestCount,
+    coalesce(sum(status='SUCCEEDED'),0) successCount,coalesce(sum(status='FAILED'),0) failureCount,
+    coalesce(sum(status='UNKNOWN'),0) unknownCount,coalesce(sum(image_count),0) imageCount,
+    coalesce(sum(input_chars),0) inputChars,coalesce(sum(audio_duration_ms),0) audioDurationMs
+    from p_call_record where account_id=#{accountId} and created_at &gt;= #{from}
+      and created_at &lt; date_add(#{to},interval 1 day)
+    group by capability order by requestCount desc,capability</select>
   <select id="lockAccount" resultType="long">select user_id from sys_user where user_id=#{accountId} for update</select>
   <delete id="deleteDaily">delete from p_usage_daily where account_id=#{accountId} and usage_date=#{date}</delete>
   <insert id="rebuildDaily">insert into p_usage_daily
