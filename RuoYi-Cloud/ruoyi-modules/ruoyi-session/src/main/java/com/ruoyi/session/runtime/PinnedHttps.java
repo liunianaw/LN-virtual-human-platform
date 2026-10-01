@@ -29,7 +29,7 @@ public class PinnedHttps
             || target.getPort() != -1 && target.getPort() != 443
             || !pinnedAddress.matches("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}|[0-9a-fA-F:]{2,45}")
             || !java.util.Set.of("GET", "POST").contains(method)
-            || body.length > 2097152 || timeoutMs < 1000 || timeoutMs > 120000
+            || body.length > 3145728 || timeoutMs < 1000 || timeoutMs > 120000
             || maxResponseBytes < 1 || maxResponseBytes > 10485760)
             throw new IOException("Invalid pinned request");
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);

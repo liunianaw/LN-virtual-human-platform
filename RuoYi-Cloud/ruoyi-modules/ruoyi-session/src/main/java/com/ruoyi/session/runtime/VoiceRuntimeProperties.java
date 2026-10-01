@@ -14,7 +14,6 @@ public class VoiceRuntimeProperties
     private Duration temporaryAudioTtl = Duration.ofMinutes(15);
     private String temporaryAudioDirectory = System.getProperty("java.io.tmpdir") + "/ln-session-audio";
     private Provider official = new Provider();
-    private Provider relay = new Provider();
 
     public int getMaxCodePointsPerSegment()
     {
@@ -74,16 +73,6 @@ public class VoiceRuntimeProperties
     public void setOfficial(Provider official)
     {
         this.official = official;
-    }
-
-    public Provider getRelay()
-    {
-        return relay;
-    }
-
-    public void setRelay(Provider relay)
-    {
-        this.relay = relay;
     }
 
     public static class Provider

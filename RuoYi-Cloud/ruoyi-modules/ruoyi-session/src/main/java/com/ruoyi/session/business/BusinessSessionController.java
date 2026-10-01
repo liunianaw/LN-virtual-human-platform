@@ -1,5 +1,6 @@
 package com.ruoyi.session.business;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.ruoyi.session.runtime.RuntimeProblem;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class BusinessSessionController
 {
     private final BusinessSessionService sessions;
-    public BusinessSessionController(BusinessSessionService sessions) { this.sessions = sessions; }
+    private final ISessionToolService tools;
+    public BusinessSessionController(BusinessSessionService sessions, ISessionToolService tools)
+    { this.sessions = sessions; this.tools = tools; }
 
     @PostMapping
     public BusinessSessionService.View create(@RequestHeader(HttpHeaders.AUTHORIZATION) String secret,
@@ -50,9 +53,16 @@ public class BusinessSessionController
         @RequestHeader("Idempotency-Key") String key, @PathVariable long sessionId, @RequestBody RevokeBody body)
     { return Map.of("revokedSessions", sessions.revoke(secret, sessionId, requireBody(body).externalUserId(), key, requireBody(body).allSessions())); }
 
+    @PostMapping("/{sessionId}/skills/{skillId}/invoke")
+    public JsonNode invoke(@RequestHeader(HttpHeaders.AUTHORIZATION) String secret,
+        @RequestHeader("Idempotency-Key") String key, @PathVariable long sessionId,
+        @PathVariable long skillId, @RequestBody ToolBody body)
+    { return tools.invoke(secret, sessionId, skillId, key, requireBody(body).externalUserId(), requireBody(body).arguments()); }
+
     @ExceptionHandler(RuntimeProblem.class)
-    public ResponseEntity<Map<String, String>> error(RuntimeProblem problem)
-    { return ResponseEntity.status(problem.status()).body(Map.of("code", problem.code(), "message", problem.getMessage())); }
+    public ResponseEntity<Map<String, Object>> error(RuntimeProblem problem)
+    { return ResponseEntity.status(problem.status()).body(Map.of("code", problem.code(), "message", problem.getMessage(),
+        "requestId", java.util.UUID.randomUUID().toString(), "retryable", false)); }
 
     private static <T> T requireBody(T body)
     {
@@ -65,4 +75,5 @@ public class BusinessSessionController
     public record UserBody(String externalUserId) { }
     public record TokenBody(String externalUserId, List<String> scopes) { }
     public record RevokeBody(String externalUserId, boolean allSessions) { }
+    public record ToolBody(String externalUserId, com.fasterxml.jackson.databind.JsonNode arguments) { }
 }

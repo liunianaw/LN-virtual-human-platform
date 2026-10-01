@@ -10,7 +10,7 @@ import java.util.Map;
 public class OfficialServiceInput
 {
     @NotBlank @Size(max = 100) private String name;
-    @NotBlank @Pattern(regexp = "AVATAR_GENERATION|TTS") private String capability;
+    @NotBlank @Pattern(regexp = "AVATAR_GENERATION|TTS|ASR") private String capability;
     @NotBlank @Size(max = 64) private String providerCode;
     @NotBlank @Size(max = 2048) private String endpoint;
     @NotBlank @Size(max = 128) private String modelId;

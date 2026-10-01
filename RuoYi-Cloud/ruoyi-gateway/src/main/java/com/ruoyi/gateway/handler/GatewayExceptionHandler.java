@@ -51,6 +51,10 @@ public class GatewayExceptionHandler implements ErrorWebExceptionHandler
 
         log.error("[网关异常处理]请求路径:{},异常信息:{}", exchange.getRequest().getPath(), ex.getMessage());
 
+        if (ex instanceof ResponseStatusException status && status.getStatusCode().value() == 404)
+        {
+            return ServletUtils.webFluxResponseWriter(response, org.springframework.http.HttpStatus.NOT_FOUND, "接口不存在", 404);
+        }
         return ServletUtils.webFluxResponseWriter(response, msg);
     }
 }

@@ -3,86 +3,92 @@
 <mapper namespace="com.ruoyi.system.developer.session.mapper.BusinessSessionMapper">
   <select id="snapshot" resultType="map">
     select a.account_id accountId,a.id applicationId,a.status applicationStatus,a.admin_disabled adminDisabled,
-      a.current_config_id currentConfigId,a.auth_epoch applicationEpoch,u.status accountStatus,u.del_flag accountDeleted,
-      c.id configId,c.mode,c.avatar_version_id avatarVersionId,
-      c.llm_relay_version_id llmRelayVersionId,c.asr_relay_version_id asrRelayVersionId,c.context_policy contextPolicy,
-      vv.id voiceVersionId,vv.voice_code providerVoiceRef,vv.official_service_id officialServiceId,
+      a.auth_epoch applicationEpoch,a.revision applicationRevision,a.system_prompt systemPrompt,
+      u.status accountStatus,u.del_flag accountDeleted,
+      av.id avatarVersionId,vv.id voiceVersionId,vv.voice_code providerVoiceRef,
+      vv.official_service_id officialServiceId,
       cast(json_unquote(json_extract(vv.official_config_snapshot,'$.revision')) as unsigned) officialServiceRevision
-    from p_application a join sys_user u on u.user_id=a.account_id
-    left join p_app_config c on c.id=coalesce(#{configId},a.current_config_id) and c.application_id=a.id and c.account_id=a.account_id
-    left join p_voice_version vv on vv.id=c.voice_version_id and vv.service_type='OFFICIAL'
+    from p_application a
+    join sys_user u on u.user_id=a.account_id
+    left join p_avatar avatar on avatar.id=a.avatar_id
+    left join p_avatar_version av on av.id=avatar.current_version_id
+    left join p_voice voice on voice.id=a.voice_id
+    left join p_voice_version vv on vv.id=voice.current_version_id and vv.service_type='OFFICIAL'
     where a.account_id=#{accountId} and a.id=#{applicationId} and a.purpose='USER'
   </select>
-  <select id="chatConfig" resultType="map">
-    select c.id configId,c.llm_relay_version_id llmRelayVersionId,c.asr_relay_version_id asrRelayVersionId,c.llm_model_id model,
-      c.system_prompt systemPrompt,c.llm_parameters parameters,c.llm_capabilities capabilities,
-      c.runtime_limits runtimeLimits,c.context_policy contextPolicy,a.current_policy currentPolicy
-    from p_app_config c join p_resource_reference ref on ref.account_id=c.account_id
-      and ref.holder_type='SESSION' and ref.holder_id=#{sessionId} and ref.resource_type='APP_CONFIG'
-      and ref.resource_id=c.id and ref.state='CONFIRMED'
-    join p_application a on a.id=c.application_id and a.account_id=c.account_id
-    where c.id=#{configId} and c.account_id=#{accountId} and c.application_id=#{applicationId} and c.mode='CHAT'
-  </select>
-  <select id="chatSkills" resultType="long">
-    select binding.skill_version_id from p_app_skill binding
-    join p_resource_reference ref on ref.account_id=binding.account_id and ref.holder_type='SESSION'
-      and ref.holder_id=#{sessionId} and ref.resource_type='SKILL_VERSION'
-      and ref.resource_id=binding.skill_version_id and ref.state='CONFIRMED'
-    where binding.account_id=#{accountId} and binding.app_config_id=#{configId} and binding.enabled=1
-    order by binding.sort_order,binding.id
+  <select id="skills" resultType="map">
+    select s.id skillId,s.account_id skillAccountId,s.name,s.description,s.status,s.revision skillRevision,
+      s.skill_type skillType,s.tool_name toolName,s.instructions,s.context_requirements contextRequirements,
+      s.tool_url toolUrl,s.http_method httpMethod,s.input_schema inputSchema,s.output_schema outputSchema,
+      s.tool_secret_id toolSecretId,s.requires_user_credential requiresUserCredential,
+      s.identity_binding identityBinding,s.frontend_fields frontendFields,s.timeout_ms timeoutMs,
+      s.max_result_bytes maxResultBytes,s.max_calls_per_session maxCallsPerSession,x.sort_order sortOrder
+    from p_application_skill x join p_skill s on s.id=x.skill_id
+    where x.account_id=#{accountId} and x.application_id=#{applicationId}
+    order by x.sort_order,x.id
   </select>
   <select id="currentForUpdate" resultType="map">
-    select a.current_config_id currentConfigId,a.status,a.admin_disabled adminDisabled
+    select a.revision applicationRevision,a.status,a.admin_disabled adminDisabled
     from p_application a where a.account_id=#{accountId} and a.id=#{applicationId} and a.purpose='USER' for update
   </select>
   <select id="resources" resultType="map">
-    select 'APP_CONFIG' resourceType,id resourceId from p_app_config where id=#{configId}
-    union all select 'AVATAR_VERSION',avatar_version_id from p_app_config where id=#{configId}
-    union all select 'VOICE_VERSION',voice_version_id from p_app_config where id=#{configId}
-    union all select 'RELAY_VERSION',llm_relay_version_id from p_app_config where id=#{configId} and llm_relay_version_id is not null
-    union all select 'RELAY_VERSION',asr_relay_version_id from p_app_config where id=#{configId} and asr_relay_version_id is not null and asr_relay_version_id != llm_relay_version_id
-    union all select 'SKILL_VERSION',skill_version_id from p_app_skill where app_config_id=#{configId} and enabled=1
+    select 'APPLICATION_SNAPSHOT' resourceType,a.id resourceId from p_application a where a.id=#{applicationId}
+    union all select 'AVATAR_VERSION',avatar.current_version_id from p_application a join p_avatar avatar on avatar.id=a.avatar_id where a.id=#{applicationId}
+    union all select 'VOICE_VERSION',voice.current_version_id from p_application a join p_voice voice on voice.id=a.voice_id where a.id=#{applicationId}
+    union all select 'SKILL',skill_id from p_application_skill where application_id=#{applicationId}
   </select>
+  <select id="availableSession" resultType="int">
+    select count(*) from p_resource_reference root
+    where root.account_id=#{accountId} and root.holder_type='SESSION' and root.holder_id=#{sessionId}
+      and root.resource_type='APPLICATION_SNAPSHOT' and root.resource_id=#{applicationId} and root.state='CONFIRMED'
+      and not exists (select 1 from p_resource_reference r
+        left join p_avatar_version av on r.resource_type='AVATAR_VERSION' and av.id=r.resource_id
+        left join p_avatar avatar on avatar.id=av.avatar_id
+        left join p_voice_version vv on r.resource_type='VOICE_VERSION' and vv.id=r.resource_id
+        left join p_voice voice on voice.id=vv.voice_id
+        left join p_official_service service on service.id=vv.official_service_id
+        left join p_skill skill on r.resource_type='SKILL' and skill.id=r.resource_id
+        where r.account_id=#{accountId} and r.holder_type='SESSION' and r.holder_id=#{sessionId}
+          and r.state='CONFIRMED' and (
+            r.resource_type='AVATAR_VERSION' and (av.id is null or avatar.status not in ('PUBLISHED','UNLISTED') or av.status!='PUBLISHED')
+            or r.resource_type='VOICE_VERSION' and (vv.id is null or voice.status not in ('PUBLISHED','UNLISTED') or service.status!='ACTIVE')
+            or r.resource_type='SKILL' and (skill.id is null or skill.status not in ('PUBLISHED','UNLISTED'))))
+  </select>
+  <select id="maxRecordingBytes" resultType="long">select max_file_bytes from p_account_limit where account_id=#{accountId}</select>
   <select id="maxSessionsForUpdate" resultType="int">select max_sessions from p_account_limit where account_id=#{accountId} for update</select>
-  <select id="occupiedSessions" resultType="int">select count(distinct holder_id) from p_resource_reference where account_id=#{accountId} and holder_type='SESSION' and holder_id!=#{sessionId} and resource_type='APP_CONFIG' and state in ('RESERVED','CONFIRMED')</select>
-  <select id="availableConfig" resultType="int">
+  <select id="occupiedSessions" resultType="int">select count(distinct holder_id) from p_resource_reference
+    where account_id=#{accountId} and holder_type='SESSION' and holder_id!=#{sessionId}
+      and resource_type='APPLICATION_SNAPSHOT' and state in ('RESERVED','CONFIRMED')</select>
+  <select id="availableCurrent" resultType="int">
     select count(*) from p_application a
-      join p_app_config c on c.id=#{configId} and c.application_id=a.id and c.account_id=a.account_id
-      join p_avatar_version av on av.id=c.avatar_version_id
-      join p_avatar avatar on avatar.id=av.avatar_id
-      join p_voice_version vv on vv.id=c.voice_version_id
-      join p_voice voice on voice.id=vv.voice_id
+      join p_avatar avatar on avatar.id=a.avatar_id
+      join p_avatar_version av on av.id=avatar.current_version_id
+      join p_voice voice on voice.id=a.voice_id
+      join p_voice_version vv on vv.id=voice.current_version_id
       join p_official_service official on official.id=vv.official_service_id
-    where a.id=#{applicationId} and a.account_id=#{accountId} and av.status='PUBLISHED' and avatar.status in ('PUBLISHED','UNLISTED')
-      and voice.visibility='OFFICIAL' and voice.status in ('PUBLISHED','UNLISTED')
-      and vv.service_type='OFFICIAL' and official.capability='TTS' and official.status='ACTIVE'
-      and (c.mode='SPEAK_ONLY' or c.mode='CHAT' and exists (
-        select 1 from p_relay_version rv join p_relay_service rs on rs.id=rv.relay_service_id
-        where rv.id=c.llm_relay_version_id and rs.account_id=a.account_id and rs.status='ACTIVE'
-          and rs.admin_disabled=0 and json_unquote(json_extract(rv.capabilities,'$.llm'))='true'
-          and (rs.grant_mode='ALL_ACCOUNT_APPS' or exists (
-            select 1 from p_relay_grant g where g.relay_service_id=rs.id and g.application_id=a.id
-              and g.status='ACTIVE' and json_contains(g.scopes,'"LLM"')))))
-      and (c.asr_relay_version_id is null or exists (
-        select 1 from p_relay_version rv join p_relay_service rs on rs.id=rv.relay_service_id
-        where rv.id=c.asr_relay_version_id and rs.account_id=a.account_id and rs.status='ACTIVE'
-          and rs.admin_disabled=0 and json_unquote(json_extract(rv.capabilities,'$.asr'))='true'
-          and (rs.grant_mode='ALL_ACCOUNT_APPS' or exists (
-            select 1 from p_relay_grant g where g.relay_service_id=rs.id and g.application_id=a.id
-              and g.status='ACTIVE' and json_contains(g.scopes,'"ASR"')))))
-      and not exists (
-        select 1 from p_app_skill binding join p_skill_version sv on sv.id=binding.skill_version_id
-          join p_skill skill on skill.id=sv.skill_id
-        where binding.app_config_id=c.id and binding.enabled=1 and skill.status not in ('PUBLISHED','UNLISTED'))
+    where a.id=#{applicationId} and a.account_id=#{accountId} and a.purpose='USER'
+      and a.status='ACTIVE' and a.admin_disabled=0 and av.status='PUBLISHED'
+      and avatar.status in ('PUBLISHED','UNLISTED') and voice.visibility='OFFICIAL'
+      and voice.status in ('PUBLISHED','UNLISTED') and vv.service_type='OFFICIAL'
+      and official.capability='TTS' and official.status='ACTIVE'
+      and not exists (select 1 from p_application_skill x join p_skill s on s.id=x.skill_id
+        where x.application_id=a.id and s.status not in ('PUBLISHED','UNLISTED'))
   </select>
   <insert id="reserve">
-    insert into p_resource_reference (id,created_at,updated_at,account_id,holder_type,holder_id,operation_id,resource_type,resource_id,state,next_check_at)
-    values (uuid_short(),utc_timestamp(3),utc_timestamp(3),#{accountId},'SESSION',#{sessionId},#{operationId},#{resourceType},#{resourceId},'RESERVED',date_add(utc_timestamp(3),interval 1 minute))
-    on duplicate key update updated_at=values(updated_at),state=if(state='RELEASED',state,'RESERVED'),operation_id=if(state='RELEASED',operation_id,values(operation_id))
+    insert into p_resource_reference
+      (id,created_at,updated_at,account_id,holder_type,holder_id,operation_id,resource_type,resource_id,state,next_check_at)
+    values (uuid_short(),utc_timestamp(3),utc_timestamp(3),#{accountId},'SESSION',#{sessionId},#{operationId},
+      #{resourceType},#{resourceId},'RESERVED',date_add(utc_timestamp(3),interval 1 minute))
+    on duplicate key update updated_at=values(updated_at),
+      state=if(state='RELEASED',state,'RESERVED'),operation_id=if(state='RELEASED',operation_id,values(operation_id))
   </insert>
-  <update id="confirm">update p_resource_reference set state='CONFIRMED',confirmed_at=utc_timestamp(3),next_check_at=null,updated_at=utc_timestamp(3)
-    where account_id=#{accountId} and holder_type='SESSION' and holder_id=#{sessionId} and operation_id=#{operationId} and state='RESERVED'</update>
-  <update id="release">update p_resource_reference set state='RELEASED',released_at=utc_timestamp(3),next_check_at=null,updated_at=utc_timestamp(3)
-    where account_id=#{accountId} and holder_type='SESSION' and holder_id=#{sessionId} and operation_id=#{operationId} and state in ('RESERVED','CONFIRMED')</update>
-  <select id="confirmed" resultType="int">select count(*) from p_resource_reference where account_id=#{accountId} and holder_type='SESSION' and holder_id=#{sessionId} and operation_id=#{operationId} and state='CONFIRMED'</select>
+  <update id="confirm">update p_resource_reference set state='CONFIRMED',confirmed_at=utc_timestamp(3),
+    next_check_at=null,updated_at=utc_timestamp(3) where account_id=#{accountId} and holder_type='SESSION'
+    and holder_id=#{sessionId} and operation_id=#{operationId} and state='RESERVED'</update>
+  <update id="release">update p_resource_reference set state='RELEASED',released_at=utc_timestamp(3),
+    next_check_at=null,updated_at=utc_timestamp(3) where account_id=#{accountId} and holder_type='SESSION'
+    and holder_id=#{sessionId} and operation_id=#{operationId} and state in ('RESERVED','CONFIRMED')</update>
+  <select id="confirmed" resultType="int">select count(*) from p_resource_reference
+    where account_id=#{accountId} and holder_type='SESSION' and holder_id=#{sessionId}
+      and operation_id=#{operationId} and state='CONFIRMED'</select>
 </mapper>

@@ -28,13 +28,11 @@ class GenerationTimeoutSweeperTest
         }).when(transactions).executeWithoutResult(any());
 
         IGenerationQuotaService quota = mock(IGenerationQuotaService.class);
-        var webhooks = mock(com.ruoyi.system.developer.webhook.service.IWebhookService.class);
-        new GenerationTimeoutSweeper(mapper, transactions, quota, webhooks, 300).sweep();
+        new GenerationTimeoutSweeper(mapper, transactions, quota, 300).sweep();
 
         InOrder order = inOrder(mapper);
         order.verify(mapper).expireStalledUnsubmittedSteps(300);
         order.verify(mapper).markTimedOutTasksFailed();
         org.mockito.Mockito.verify(quota).finishTimedOutTasks();
-        org.mockito.Mockito.verify(webhooks).recordMissingTerminalEvents();
     }
 }

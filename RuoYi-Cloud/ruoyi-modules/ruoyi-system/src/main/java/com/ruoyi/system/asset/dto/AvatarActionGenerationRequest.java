@@ -7,4 +7,4 @@ import jakarta.validation.constraints.PositiveOrZero;
 
 public record AvatarActionGenerationRequest(@NotBlank @RequestId String requestId,
     @NotNull @PositiveOrZero Long expectedActionRevision, Boolean acknowledgeUncertainCharge,
-    @Positive Long supersedesAttemptId, @Positive Long webhookEndpointId) { }
+    @Positive Long supersedesAttemptId) { }

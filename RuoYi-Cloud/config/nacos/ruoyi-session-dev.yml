@@ -36,9 +36,3 @@ ln:
         endpoint: ${LN_SESSION_TTS_OFFICIAL_ENDPOINT:wss://dashscope.aliyuncs.com/api-ws/v1/realtime}
         model: ${LN_SESSION_TTS_OFFICIAL_MODEL:qwen3-tts-flash-realtime}
         voice: ${LN_SESSION_TTS_OFFICIAL_VOICE:Cherry}
-      relay:
-        enabled: ${LN_SESSION_TTS_RELAY_ENABLED:false}
-        timeout: ${LN_SESSION_TTS_RELAY_TIMEOUT:30s}
-        endpoint: ${LN_SESSION_TTS_RELAY_ENDPOINT:http://127.0.0.1:8024/ln-relay/v1}
-        model: ${LN_SESSION_TTS_RELAY_MODEL:qwen3-tts-flash-realtime}
-        voice: ${LN_SESSION_TTS_RELAY_VOICE:Cherry}

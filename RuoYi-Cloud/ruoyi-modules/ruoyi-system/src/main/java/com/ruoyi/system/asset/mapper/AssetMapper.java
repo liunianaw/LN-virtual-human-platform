@@ -90,8 +90,7 @@ public interface AssetMapper
         @Param("avatarVersionId") Long avatarVersionId, @Param("sourceFileId") Long sourceFileId,
         @Param("officialServiceId") Long officialServiceId, @Param("serviceSnapshot") String serviceSnapshot,
         @Param("pipelineVersion") String pipelineVersion, @Param("quotaReservationId") Long quotaReservationId,
-        @Param("requestId") String requestId, @Param("requestHash") byte[] requestHash,
-        @Param("webhookEndpointId") Long webhookEndpointId);
+        @Param("requestId") String requestId, @Param("requestHash") byte[] requestHash);
 
     int insertGenerationActionStep(@Param("id") Long id, @Param("accountId") Long accountId, @Param("taskId") Long taskId,
         @Param("stepKey") String stepKey, @Param("actionCode") String actionCode,
@@ -100,4 +99,6 @@ public interface AssetMapper
     int insertOutbox(@Param("id") Long id, @Param("accountId") Long accountId, @Param("eventId") String eventId,
         @Param("eventType") String eventType, @Param("aggregateType") String aggregateType,
         @Param("aggregateId") String aggregateId, @Param("traceId") String traceId, @Param("payload") String payload);
+    String avatarVisibility(@org.apache.ibatis.annotations.Param("accountId") Long accountId,
+        @org.apache.ibatis.annotations.Param("avatarId") Long avatarId);
 }

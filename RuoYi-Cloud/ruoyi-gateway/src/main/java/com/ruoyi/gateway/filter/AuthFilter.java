@@ -56,13 +56,10 @@ public class AuthFilter implements GlobalFilter, Ordered
         removeHeader(mutate, "X-LN-Key-Id");
         if (url.startsWith("/openapi/v1/"))
         {
-            if (!url.startsWith("/openapi/v1/management/") && !url.equals("/openapi/v1/management")
-                && !url.startsWith("/openapi/v1/sessions/") && !url.equals("/openapi/v1/sessions"))
+            if (!url.startsWith("/openapi/v1/sessions/") && !url.equals("/openapi/v1/sessions"))
                 return unauthorizedResponse(exchange, "开放接口路径无效");
             String credential = request.getHeaders().getFirst(SecurityConstants.AUTHORIZATION_HEADER);
-            boolean management = url.startsWith("/openapi/v1/management");
-            String expectedPrefix = management ? "lnm_" : "lna_";
-            if (credential == null || !credential.matches("Bearer " + expectedPrefix + "[0-9a-f]{32}_[A-Za-z0-9_-]{43}"))
+            if (credential == null || !credential.matches("Bearer lna_[0-9a-f]{32}_[A-Za-z0-9_-]{43}"))
                 return unauthorizedResponse(exchange, "接入凭证无效");
             // The destination validates the hash, type, account, scope and current state on every request.
             return chain.filter(exchange.mutate().request(mutate.build()).build());

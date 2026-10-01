@@ -10,6 +10,8 @@ import org.springframework.web.bind.MissingPathVariableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import com.ruoyi.common.core.constant.HttpStatus;
 import com.ruoyi.common.core.exception.DemoModeException;
 import com.ruoyi.common.core.exception.InnerAuthException;
@@ -30,6 +32,14 @@ import com.ruoyi.common.core.web.domain.AjaxResult;
 public class GlobalExceptionHandler
 {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    /** Missing or retired routes are 404, not a successful HTTP response with a generic 500 body. */
+    @ExceptionHandler(NoResourceFoundException.class)
+    @ResponseStatus(org.springframework.http.HttpStatus.NOT_FOUND)
+    public AjaxResult handleNoResourceFound(NoResourceFoundException e)
+    {
+        return AjaxResult.error(HttpStatus.NOT_FOUND, "接口不存在");
+    }
 
     /**
      * 权限码异常

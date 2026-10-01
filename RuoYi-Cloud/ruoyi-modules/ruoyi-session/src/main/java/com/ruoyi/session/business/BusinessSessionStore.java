@@ -21,13 +21,14 @@ public class BusinessSessionStore
 {
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
-    private final com.ruoyi.session.runtime.ChatTurnStore chat;
-    public BusinessSessionStore(JdbcTemplate jdbc, ObjectMapper json, com.ruoyi.session.runtime.ChatTurnStore chat)
-    { this.jdbc = jdbc; this.json = json; this.chat = chat; }
+    public BusinessSessionStore(JdbcTemplate jdbc, ObjectMapper json)
+    { this.jdbc = jdbc; this.json = json; }
 
     @Transactional
-    public Preparation prepare(long accountId, long applicationId, long configId, String externalUserId, String key, byte[] requestHash)
+    public Preparation prepare(BusinessSystemClient.Snapshot snapshot, String externalUserId,
+        String key, byte[] requestHash)
     {
+        long accountId = snapshot.accountId(), applicationId = snapshot.applicationId();
         Instant now = Instant.now();
         jdbc.update("insert into s_principal (id,created_at,updated_at,account_id,application_id,principal_type,external_user_id,status,auth_epoch,last_seen_at) " +
             "values (uuid_short(),?,?,?,?,'BUSINESS',?,'ACTIVE',1,?) on duplicate key update id=id",
@@ -35,7 +36,7 @@ public class BusinessSessionStore
         Long principalId = jdbc.query("select id from s_principal where account_id=? and application_id=? and principal_type='BUSINESS' and external_user_id=? and status='ACTIVE' for update",
             rs -> rs.next() ? rs.getLong(1) : null, accountId, applicationId, externalUserId);
         if (principalId == null) throw problem(HttpStatus.FORBIDDEN, "PRINCIPAL_DISABLED");
-        Preparation existing = jdbc.query("select s.id,s.account_id,s.application_id,s.principal_id,s.app_config_id,s.status,p.external_user_id,s.created_at,s.last_activity_at,s.expires_at,s.reference_operation_id,s.revision,s.create_request_hash " +
+        Preparation existing = jdbc.query("select s.id,s.account_id,s.application_id,s.principal_id,s.session_snapshot_id,s.status,p.external_user_id,s.created_at,s.last_activity_at,s.expires_at,s.reference_operation_id,s.revision,s.create_request_hash " +
             "from s_session s join s_principal p on p.id=s.principal_id where s.account_id=? and s.application_id=? and s.principal_id=? and s.create_request_id=? for update",
             rs -> rs.next() ? new Preparation(session(rs), rs.getBytes(13), false) : null, accountId, applicationId, principalId, key);
         if (existing != null)
@@ -47,9 +48,20 @@ public class BusinessSessionStore
         }
         long id = nextId();
         String operation = "business:" + UUID.randomUUID().toString().replace("-", "");
-        jdbc.update("insert into s_session (id,created_at,updated_at,account_id,application_id,principal_id,app_config_id,create_request_id,reference_operation_id,create_request_hash,status,auth_epoch,connection_epoch,next_turn_no,next_message_seq,last_activity_at,expires_at,revision) " +
+        try
+        {
+            jdbc.update("insert into s_session_snapshot (id,created_at,account_id,application_id,application_revision,avatar_version_id,voice_version_id,system_prompt,developer_config,internal_skills,allowed_scopes,provider_voice_ref,official_service_id,official_service_revision) " +
+                "values (?,?,?,?,?,?,?,?,cast(? as json),cast(? as json),cast(? as json),?,?,?)",
+                id, now, accountId, applicationId, snapshot.applicationRevision(), snapshot.avatarVersionId(),
+                snapshot.voiceVersionId(), snapshot.systemPrompt(), json.writeValueAsString(snapshot.developerConfig()),
+                json.writeValueAsString(snapshot.internalSkills()), json.writeValueAsString(snapshot.allowedScopes()),
+                snapshot.providerVoiceRef(), snapshot.officialServiceId(), snapshot.officialServiceRevision());
+        }
+        catch (com.fasterxml.jackson.core.JsonProcessingException error)
+        { throw new IllegalStateException("Session snapshot cannot be encoded", error); }
+        jdbc.update("insert into s_session (id,created_at,updated_at,account_id,application_id,principal_id,session_snapshot_id,create_request_id,reference_operation_id,create_request_hash,status,auth_epoch,connection_epoch,next_turn_no,next_message_seq,last_activity_at,expires_at,revision) " +
             "values (?,?,?,?,?,?,?,?,?,?,'CREATING',1,0,1,1,?,?,1)",
-            id, now, now, accountId, applicationId, principalId, configId, key, operation, requestHash, now, now.plus(2, ChronoUnit.HOURS));
+            id, now, now, accountId, applicationId, principalId, id, key, operation, requestHash, now, now.plus(2, ChronoUnit.HOURS));
         return new Preparation(find(id), requestHash, true);
     }
 
@@ -66,7 +78,7 @@ public class BusinessSessionStore
 
     public Session owned(long accountId, long applicationId, long sessionId, String externalUserId)
     {
-        Session row = jdbc.query("select s.id,s.account_id,s.application_id,s.principal_id,s.app_config_id,s.status,p.external_user_id,s.created_at,s.last_activity_at,s.expires_at,s.reference_operation_id,s.revision " +
+        Session row = jdbc.query("select s.id,s.account_id,s.application_id,s.principal_id,s.session_snapshot_id,s.status,p.external_user_id,s.created_at,s.last_activity_at,s.expires_at,s.reference_operation_id,s.revision " +
             "from s_session s join s_principal p on p.id=s.principal_id and p.principal_type='BUSINESS' where s.id=? and s.account_id=? and s.application_id=? and p.external_user_id=?",
             rs -> rs.next() ? session(rs) : null, sessionId, accountId, applicationId, externalUserId);
         if (row == null) throw problem(HttpStatus.NOT_FOUND, "SESSION_NOT_FOUND");
@@ -75,7 +87,7 @@ public class BusinessSessionStore
 
     public Session find(long sessionId)
     {
-        return jdbc.query("select s.id,s.account_id,s.application_id,s.principal_id,s.app_config_id,s.status,p.external_user_id,s.created_at,s.last_activity_at,s.expires_at,s.reference_operation_id,s.revision " +
+        return jdbc.query("select s.id,s.account_id,s.application_id,s.principal_id,s.session_snapshot_id,s.status,p.external_user_id,s.created_at,s.last_activity_at,s.expires_at,s.reference_operation_id,s.revision " +
             "from s_session s join s_principal p on p.id=s.principal_id and p.principal_type='BUSINESS' where s.id=?",
             rs -> rs.next() ? session(rs) : null, sessionId);
     }
@@ -117,12 +129,12 @@ public class BusinessSessionStore
             "values (uuid_short(),?,?,?,?,?,?,'SESSION_GRANT',?,'SUCCEEDED',?)",
             now, now, row.accountId(), scope, key, hash, grantId, now.plus(25, ChronoUnit.HOURS));
         return issued(new Grant(grantId, row.id(), jti, signing, "ACTIVE", now, expires, scopes,
-            row.accountId(), row.applicationId(), row.configId(), snapshot.applicationEpoch(), principalEpoch, sessionEpoch), codec);
+            row.accountId(), row.applicationId(), row.snapshotId(), snapshot.applicationEpoch(), principalEpoch, sessionEpoch), codec);
     }
 
     private Session ownedForUpdate(Session identity)
     {
-        Session row = jdbc.query("select s.id,s.account_id,s.application_id,s.principal_id,s.app_config_id,s.status,p.external_user_id,s.created_at,s.last_activity_at,s.expires_at,s.reference_operation_id,s.revision " +
+        Session row = jdbc.query("select s.id,s.account_id,s.application_id,s.principal_id,s.session_snapshot_id,s.status,p.external_user_id,s.created_at,s.last_activity_at,s.expires_at,s.reference_operation_id,s.revision " +
             "from s_session s join s_principal p on p.id=s.principal_id and p.principal_type='BUSINESS' where s.id=? and s.account_id=? and s.application_id=? and p.external_user_id=? for update",
             rs -> rs.next() ? session(rs) : null, identity.id(), identity.accountId(), identity.applicationId(), identity.externalUserId());
         if (row == null) throw problem(HttpStatus.NOT_FOUND, "SESSION_NOT_FOUND");
@@ -141,7 +153,6 @@ public class BusinessSessionStore
             "audio_status=if(audio_status='RUNNING','INTERRUPTED',audio_status),playback_status=if(playback_status in ('WAITING','PLAYING'),'STOPPED',playback_status)," +
             "cancel_reason='REVOKED',ended_at=coalesce(ended_at,?),updated_at=? where session_id=? and status='RUNNING'",
             now, now, row.id());
-        chat.unknownInFlight(row.id(), "SESSION_REVOKED");
         jdbc.update("update s_operation set status=if(status in ('QUEUED','RUNNING'),'CANCELLED',status)," +
             "playback_status=if(playback_status in ('WAITING','STARTED'),'STOPPED',playback_status)," +
             "finished_at=coalesce(finished_at,?),updated_at=? where session_id=? and (status in ('QUEUED','RUNNING') or playback_status in ('WAITING','STARTED'))",
@@ -170,7 +181,7 @@ public class BusinessSessionStore
             rs -> rs.next() ? rs.getLong(1) : null, accountId, applicationId, externalUserId);
         if (principal == null) return List.of();
         jdbc.update("update s_principal set auth_epoch=auth_epoch+1,updated_at=utc_timestamp(3) where id=?", principal);
-        return jdbc.query("select s.id,s.account_id,s.application_id,s.principal_id,s.app_config_id,s.status,p.external_user_id,s.created_at,s.last_activity_at,s.expires_at,s.reference_operation_id,s.revision " +
+        return jdbc.query("select s.id,s.account_id,s.application_id,s.principal_id,s.session_snapshot_id,s.status,p.external_user_id,s.created_at,s.last_activity_at,s.expires_at,s.reference_operation_id,s.revision " +
             "from s_session s join s_principal p on p.id=s.principal_id where s.principal_id=? and s.status in ('ACTIVE','CREATING','DELETING')",
             (rs, index) -> session(rs), principal);
     }
@@ -228,15 +239,15 @@ public class BusinessSessionStore
 
     public VerifiedGrant verify(RuntimeTokenCodec.V2Claims claims)
     {
-        Grant row = jdbc.query("select g.id,g.session_id,g.token_id,g.signing_key_version,g.status,g.created_at,g.expires_at,g.scopes,g.account_id,g.application_id,s.app_config_id,g.application_epoch,g.principal_epoch,g.session_epoch " +
+        Grant row = jdbc.query("select g.id,g.session_id,g.token_id,g.signing_key_version,g.status,g.created_at,g.expires_at,g.scopes,g.account_id,g.application_id,s.session_snapshot_id,g.application_epoch,g.principal_epoch,g.session_epoch " +
             "from s_session_grant g join s_session s on s.id=g.session_id join s_principal p on p.id=g.principal_id " +
-            "where g.token_id=? and g.grant_source='BUSINESS_KEY' and g.account_id=? and g.application_id=? and g.session_id=? and s.app_config_id=? " +
+            "where g.token_id=? and g.grant_source='BUSINESS_KEY' and g.account_id=? and g.application_id=? and g.session_id=? " +
             "and s.status='ACTIVE' and s.expires_at>utc_timestamp(3) and p.principal_type='BUSINESS' and p.status='ACTIVE' and p.auth_epoch=g.principal_epoch and s.auth_epoch=g.session_epoch",
-            rs -> rs.next() ? grant(rs) : null, claims.tokenId(), claims.accountId(), claims.applicationId(), claims.sessionId(), claims.configVersionId());
+            rs -> rs.next() ? grant(rs) : null, claims.tokenId(), claims.accountId(), claims.applicationId(), claims.sessionId());
         if (row == null || !"ACTIVE".equals(row.status()) || !row.expiresAt().isAfter(Instant.now())
             || !row.createdAt().equals(claims.issuedAt()) || !row.expiresAt().equals(claims.expiresAt())
             || !row.signingVersion().equals(claims.keyVersion())) throw problem(HttpStatus.UNAUTHORIZED, "TOKEN_REVOKED");
-        return new VerifiedGrant(row.scopes(), row.applicationEpoch());
+        return new VerifiedGrant(row.scopes(), row.applicationEpoch(), row.snapshotId());
     }
 
     @Transactional
@@ -249,7 +260,7 @@ public class BusinessSessionStore
 
     private Grant grant(long id)
     {
-        return jdbc.query("select g.id,g.session_id,g.token_id,g.signing_key_version,g.status,g.created_at,g.expires_at,g.scopes,g.account_id,g.application_id,s.app_config_id,g.application_epoch,g.principal_epoch,g.session_epoch " +
+        return jdbc.query("select g.id,g.session_id,g.token_id,g.signing_key_version,g.status,g.created_at,g.expires_at,g.scopes,g.account_id,g.application_id,s.session_snapshot_id,g.application_epoch,g.principal_epoch,g.session_epoch " +
             "from s_session_grant g join s_session s on s.id=g.session_id where g.id=?",
             rs -> rs.next() ? grant(rs) : null, id);
     }
@@ -274,7 +285,7 @@ public class BusinessSessionStore
     private static IssuedGrant issued(Grant grant, RuntimeTokenCodec codec)
     {
         RuntimeTokenCodec.V2Claims claims = new RuntimeTokenCodec.V2Claims(grant.signingVersion(), grant.jti(),
-            grant.accountId(), grant.applicationId(), grant.sessionId(), grant.configId(), "BUSINESS_KEY",
+            grant.accountId(), grant.applicationId(), grant.sessionId(), "BUSINESS_KEY",
             grant.createdAt(), grant.expiresAt());
         return new IssuedGrant(codec.encodeV2(claims), grant.expiresAt(), grant.scopes());
     }
@@ -294,13 +305,23 @@ public class BusinessSessionStore
     private static RuntimeProblem problem(HttpStatus status, String code) { return new RuntimeProblem(status, code, code); }
 
     public record Preparation(Session session, byte[] requestHash, boolean created) { }
-    public record Session(long id, long accountId, long applicationId, long principalId, long configId, String status,
+    public record Session(long id, long accountId, long applicationId, long principalId, long snapshotId, String status,
         String externalUserId, Instant createdAt, Instant lastActivityAt, Instant expiresAt, String referenceOperationId, long revision) { }
+    public Snapshot snapshot(long snapshotId)
+    {
+        return jdbc.query("select id,application_revision,avatar_version_id,voice_version_id,system_prompt,developer_config,internal_skills,allowed_scopes,provider_voice_ref,official_service_id,official_service_revision from s_session_snapshot where id=?",
+            rs -> rs.next() ? new Snapshot(rs.getLong(1),rs.getLong(2),rs.getLong(3),rs.getLong(4),rs.getString(5),
+                rs.getString(6),rs.getString(7),rs.getString(8),rs.getString(9),rs.getLong(10),rs.getLong(11)) : null,
+            snapshotId);
+    }
+    public record Snapshot(long id, long applicationRevision, long avatarVersionId, long voiceVersionId,
+        String systemPrompt, String developerConfig, String internalSkills, String allowedScopes,
+        String providerVoiceRef, long officialServiceId, long officialServiceRevision) { }
     public record IssuedGrant(String token, Instant expiresAt, List<String> scopes) { }
-    public record VerifiedGrant(List<String> scopes, long applicationEpoch) { }
+    public record VerifiedGrant(List<String> scopes, long applicationEpoch, long snapshotId) { }
     private record Idempotency(byte[] hash, long resourceId) { }
     public record ActionClaim(byte[] hash, boolean completed, int count, Instant updatedAt) { }
     private record Grant(long id, long sessionId, String jti, String signingVersion, String status, Instant createdAt,
-        Instant expiresAt, List<String> scopes, long accountId, long applicationId, long configId, long applicationEpoch,
+        Instant expiresAt, List<String> scopes, long accountId, long applicationId, long snapshotId, long applicationEpoch,
         long principalEpoch, long sessionEpoch) { }
 }

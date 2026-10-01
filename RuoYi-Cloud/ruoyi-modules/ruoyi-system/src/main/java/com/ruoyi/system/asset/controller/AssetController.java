@@ -41,6 +41,13 @@ public class AssetController
         this.productionService = productionService;
     }
 
+    @org.springframework.web.bind.annotation.ModelAttribute
+    public void consoleIdentity(@PathVariable(required = false) Long avatarId)
+    {
+        AssetConsoleIdentity.console();
+        if (avatarId != null) AssetConsoleIdentity.avatar(publicationService, avatarId);
+    }
+
     @Log(title = "参考图上传", businessType = BusinessType.INSERT)
     @RequiresPermissions("system:asset:add")
     @PostMapping("/files")
@@ -66,15 +73,6 @@ public class AssetController
         return AjaxResult.success(assetService.createGenerationTask(SecurityUtils.getUserId(), request));
     }
 
-    /** 管理员公共角色入口。可见性由后端固定，客户端不能通过普通入口提升资产范围。 */
-    @Log(title = "官方公共 Avatar 制作任务", businessType = BusinessType.INSERT)
-    @RequiresPermissions("system:asset:add")
-    @PostMapping("/admin/public-generation-tasks")
-    public AjaxResult createOfficialGenerationTask(@Valid @RequestBody CreateGenerationTaskRequest request)
-    {
-        return AjaxResult.success(assetService.createOfficialGenerationTask(SecurityUtils.getUserId(), request));
-    }
-
     @RequiresPermissions("system:asset:list")
     @GetMapping("/generation-tasks")
     public AjaxResult listGenerationTasks()
@@ -97,6 +95,7 @@ public class AssetController
         @RequestParam(defaultValue = "20") int pageSize, @RequestParam(required = false) String status,
         @RequestParam(required = false) String keyword)
     {
+        AssetConsoleIdentity.developer();
         return AjaxResult.success(publicationService.listOwned(SecurityUtils.getUserId(), pageNum, pageSize, status, keyword));
     }
 
@@ -105,6 +104,7 @@ public class AssetController
     public AjaxResult listAdminPublicAvatars(@RequestParam(defaultValue = "1") int pageNum,
         @RequestParam(defaultValue = "20") int pageSize, @RequestParam(required = false) String status)
     {
+        AssetConsoleIdentity.administrator();
         return AjaxResult.success(publicationService.listAdminPublic(pageNum, pageSize, status));
     }
 

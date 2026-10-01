@@ -20,5 +20,10 @@ public class OfficialServiceInternalController
     public OfficialServiceInternalController(InternalBearerGuard guard, MediaInternalTokenGuard mediaGuard, IOfficialServiceService services) { this.guard = guard; this.mediaGuard = mediaGuard; this.services = services; }
     @PostMapping("/{serviceId}/resolve") public IOfficialServiceService.ResolvedService resolve(@PathVariable long serviceId, @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization, @RequestHeader(value = "X-LN-Internal-Token", required = false) String mediaToken, @RequestBody ResolveRequest input)
     { if (mediaToken != null) mediaGuard.require(mediaToken); else guard.requireSession(authorization); return services.resolve(serviceId, input.expectedServiceRevision(), input.purpose(), input.taskId(), input.voiceVersionId()); }
+    @PostMapping("/default/resolve") public IOfficialServiceService.DefaultResolvedService resolveDefault(
+        @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+        @RequestBody DefaultResolveRequest input)
+    { guard.requireSession(authorization); return services.resolveDefault(input.purpose()); }
     public record ResolveRequest(long expectedServiceRevision, String purpose, Long taskId, Long voiceVersionId) { }
+    public record DefaultResolveRequest(String purpose) { }
 }

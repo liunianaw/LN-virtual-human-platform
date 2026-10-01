@@ -18,7 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.ruoyi.common.core.exception.ServiceException;
 
-/** Official voice candidates; private Relay voices remain intentionally out of this flow. */
+/** Administrator-managed official voice candidates. */
 @Service
 public class VoiceService
 {
@@ -28,52 +28,12 @@ public class VoiceService
     private static final String APPROVED_VOICE = "Cherry";
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final OfficialVoiceAuditionClient auditions;
+    private final com.ruoyi.system.operations.OperationsService operations;
 
-    public VoiceService(JdbcTemplate jdbc, ObjectMapper objectMapper)
-    { this.jdbc = jdbc; this.objectMapper = objectMapper; }
-
-    /** Compatibility path for postponed private Relay voices. It is intentionally not part of official discovery or preview. */
-    @Transactional
-    public PrivateVoiceResponse createPrivate(long accountId, PrivateVoiceInput input)
-    {
-        validatePrivate(input);
-        long voiceId = nextId(); Instant now = Instant.now();
-        jdbc.update("insert into p_voice (id,created_at,updated_at,account_id,visibility,name,description,status,revision) values (?,?,?,?, 'PRIVATE',?,?, 'DRAFT',1)",
-            voiceId, now, now, accountId, input.name().trim(), blankToNull(input.description()));
-        return createPrivateVersion(accountId, voiceId, input);
-    }
-
-    @Transactional
-    public PrivateVoiceResponse createPrivateVersion(long accountId, long voiceId, PrivateVoiceInput input)
-    {
-        validatePrivate(input);
-        Integer exists = jdbc.queryForObject("select count(1) from p_voice where id = ? and account_id = ? and visibility = 'PRIVATE' and status not in ('DELETING','DELETED')", Integer.class, voiceId, accountId);
-        if (exists == null || exists != 1) throw forbidden("Voice 不存在或不属于当前账号");
-        Integer relay = jdbc.queryForObject("select count(1) from p_relay_version v join p_relay_service s on s.id = v.relay_service_id where v.id = ? and v.account_id = ? and s.status = 'ACTIVE' and json_extract(v.capabilities,'$.tts') = true", Integer.class, input.relayVersionId(), accountId);
-        if (relay == null || relay != 1) throw forbidden("Relay 版本不可用或未声明 TTS 能力");
-        Integer number = jdbc.queryForObject("select coalesce(max(version_no),0)+1 from p_voice_version where voice_id = ? for update", Integer.class, voiceId);
-        long versionId = nextId(); Instant now = Instant.now();
-        jdbc.update("insert into p_voice_version (id,created_at,updated_at,account_id,voice_id,version_no,service_type,relay_version_id,voice_code,language_code,model_id,parameters,created_by) values (?,?,?,?,?,?, 'RELAY',?,?,?,?,?,?)",
-            versionId, now, now, accountId, voiceId, number == null ? 1 : number, input.relayVersionId(), input.voiceAlias().trim(),
-            blankToNull(input.language()), blankToNull(input.modelAlias()), parameters(input.parameters()), accountId);
-        return new PrivateVoiceResponse(text(voiceId), text(versionId), "DRAFT", "RELAY", input.voiceAlias().trim(), number == null ? 1 : number);
-    }
-
-    @Transactional
-    public PrivateVoiceResponse publishPrivate(long accountId, long voiceId, long versionId)
-    {
-        Integer found = jdbc.queryForObject("select count(1) from p_voice_version v join p_voice voice on voice.id = v.voice_id where v.id = ? and v.voice_id = ? and voice.account_id = ? and v.account_id = ? and voice.visibility = 'PRIVATE'", Integer.class, versionId, voiceId, accountId, accountId);
-        if (found == null || found != 1) throw forbidden("Voice 版本不存在或不属于当前账号");
-        jdbc.update("update p_voice set status = 'PUBLISHED',current_version_id = ?,updated_at = utc_timestamp(3),revision = revision + 1 where id = ? and account_id = ?", versionId, voiceId, accountId);
-        return readPrivate(accountId, voiceId);
-    }
-
-    public PrivateVoiceResponse readPrivate(long accountId, long voiceId)
-    {
-        PrivateVoiceResponse result = jdbc.query("select v.id,v.version_no,voice.status,v.service_type,v.voice_code from p_voice voice join p_voice_version v on v.id = voice.current_version_id where voice.id = ? and (voice.account_id = ? or (voice.visibility = 'OFFICIAL' and voice.status = 'PUBLISHED'))",
-            rs -> rs.next() ? new PrivateVoiceResponse(text(voiceId), text(rs.getLong(1)), rs.getString(3), rs.getString(4), rs.getString(5), rs.getInt(2)) : null, voiceId, accountId);
-        if (result == null) throw forbidden("Voice 不存在或不可访问"); return result;
-    }
+    public VoiceService(JdbcTemplate jdbc, ObjectMapper objectMapper, OfficialVoiceAuditionClient auditions,
+        com.ruoyi.system.operations.OperationsService operations)
+    { this.jdbc = jdbc; this.objectMapper = objectMapper; this.auditions = auditions; this.operations = operations; }
 
     public List<OfficialServiceResponse> listAvailableOfficialServices()
     {
@@ -161,6 +121,10 @@ public class VoiceService
     {
         if (request == null || !request.auditionConfirmed()) throw badRequest("发布前必须确认已完成试听");
         requireIdempotency(key);
+        Integer completedAuditions = jdbc.queryForObject("select count(*) from p_api_idempotency " +
+            "where account_id=? and scope=? and resource_id=? and status='SUCCEEDED'", Integer.class,
+            administratorId, scope("official-voice:audition:" + voiceId + ":" + versionId), versionId);
+        if (completedAuditions == null || completedAuditions == 0) throw conflict("发布前必须完成该版本官方试听");
         VoiceHead voice = officialHeadForUpdate(voiceId, administratorId); verifyIfMatch(ifMatch, voice.revision());
         byte[] hash = digest("publish|" + voiceId + "|" + versionId + "|true|" + voice.revision());
         Long previous = existingIdempotentResource(administratorId, scope("official-voice:publish:" + voiceId), key, hash);
@@ -179,55 +143,54 @@ public class VoiceService
         return new VoiceMutation(text(voiceId), text(versionId), "PUBLISHED", text(voice.revision() + 1));
     }
 
-    /** A VOICE_PREVIEW app is hidden from normal application management and freezes the candidate binding. */
-    @Transactional
-    public PreviewApplication preparePreview(long administratorId, long voiceId, long versionId, long avatarVersionId)
+    public byte[] audition(long administratorId, long voiceId, long versionId, String text, String key)
     {
-        if (avatarVersionId <= 0) throw badRequest("试听需要已发布角色版本");
-        officialHeadForUpdate(voiceId, administratorId);
-        Integer candidate = jdbc.queryForObject("select count(1) from p_voice_version v join p_official_service s on s.id = v.official_service_id "
-                + "where v.id = ? and v.voice_id = ? and v.service_type = 'OFFICIAL' and s.capability = 'TTS' and s.status = 'ACTIVE'",
-            Integer.class, versionId, voiceId);
-        if (candidate == null || candidate != 1) throw conflict("候选声音或其服务不可用");
-        Integer actions = jdbc.queryForObject("select count(1) from p_avatar_version v join p_avatar a on a.id = v.avatar_id "
-                + "join p_avatar_action action on action.avatar_version_id = v.id where v.id = ? and v.status = 'PUBLISHED' "
-                + "and a.status in ('PUBLISHED','UNLISTED') and a.visibility = 'OFFICIAL' "
-                + "and action.action_code in ('idle','speaking','listening','thinking','nod','shake_head','wave','happy')",
-            Integer.class, avatarVersionId);
-        if (actions == null || actions != 8) throw conflict("请选择已发布且包含完整八动作的官方角色版本");
-        Long appId = jdbc.query("select id from p_application where account_id = ? and purpose = 'VOICE_PREVIEW' "
-                + "and preview_voice_version_id = ? and status = 'ACTIVE' for update", rs -> rs.next() ? rs.getLong(1) : null, administratorId, versionId);
-        if (appId == null)
+        requireIdempotency(key);
+        if (!com.ruoyi.common.security.utils.SecurityUtils.isAdmin()) throw forbidden("仅管理员可试听官方声音");
+        if (text == null || text.isBlank() || text.length() > 200) throw badRequest("试听文本限 1～200 字符");
+        VoiceHead head = officialHead(voiceId, false);
+        if (Set.of("DISABLED", "DELETING", "DELETED").contains(head.status())) throw conflict("官方声音不可用");
+        Map<String, Object> version = jdbc.query("select official_service_id,voice_code,official_config_snapshot " +
+            "from p_voice_version where voice_id=? and id=? and service_type='OFFICIAL'",
+            rs -> rs.next() ? Map.of("serviceId", rs.getLong(1), "alias", rs.getString(2),
+                "snapshot", rs.getString(3)) : null, voiceId, versionId);
+        if (version == null) throw forbidden("官方声音版本不存在");
+        long serviceId = (Long) version.get("serviceId");
+        Long revision = snapshotRevision((String) version.get("snapshot"));
+        OfficialService service = officialService(serviceId, false);
+        if (revision == null || revision != service.revision()) throw conflict("官方服务已变更，请保存新候选");
+        String auditionScope = scope("official-voice:audition:" + voiceId + ":" + versionId);
+        byte[] hash = digest(text + "|" + revision);
+        int claimed = jdbc.update("insert ignore into p_api_idempotency " +
+            "(id,created_at,updated_at,account_id,scope,request_id,request_hash,resource_type,resource_id,status,expires_at) " +
+            "values (uuid_short(),utc_timestamp(3),utc_timestamp(3),?,?,?,?,'VOICE_VERSION',?,'PROCESSING',date_add(utc_timestamp(3),interval 1 day))",
+            administratorId, auditionScope, key, hash, versionId);
+        if (claimed != 1) throw conflict("该试听请求已受理，请勿重复付费提交");
+        String operation = "audition-" + java.util.UUID.randomUUID();
+        auditionFact(administratorId, operation, "STARTED", text.length(), null);
+        try
         {
-            appId = nextId(); Instant now = Instant.now();
-            jdbc.update("insert into p_application (id,created_at,updated_at,account_id,purpose,preview_voice_version_id,name,status,current_policy,auth_epoch,revision) "
-                    + "values (?,?,?,?, 'VOICE_PREVIEW',?,?, 'ACTIVE',cast('{}' as json),1,1)", appId, now, now, administratorId, versionId,
-                "官方声音试听-" + voiceId + "-" + versionId);
+            byte[] audio = auditions.audition(versionId, serviceId, revision, (String) version.get("alias"), text);
+            jdbc.update("update p_api_idempotency set status='SUCCEEDED',updated_at=utc_timestamp(3) " +
+                "where account_id=? and scope=? and request_id=? and status='PROCESSING'", administratorId, auditionScope, key);
+            auditionFact(administratorId, operation, "SUCCEEDED", text.length(), null);
+            return audio;
         }
-        Long configId = jdbc.query("select id from p_app_config where application_id = ? and avatar_version_id = ? and voice_version_id = ? "
-                + "order by version_no desc limit 1", rs -> rs.next() ? rs.getLong(1) : null, appId, avatarVersionId, versionId);
-        if (configId == null)
+        catch (Exception error)
         {
-            Integer number = jdbc.queryForObject("select coalesce(max(version_no),0)+1 from p_app_config where application_id = ? for update", Integer.class, appId);
-            configId = nextId(); Instant now = Instant.now();
-            jdbc.update("insert into p_app_config (id,created_at,updated_at,account_id,application_id,version_no,mode,avatar_version_id,voice_version_id,"
-                    + "context_policy,runtime_limits,config_hash,published_at,created_by) values (?,?,?,?,?,?, 'SPEAK_ONLY',?,?,cast('{}' as json),cast('{}' as json),?,?,?)",
-                configId, now, now, administratorId, appId, number == null ? 1 : number, avatarVersionId, versionId,
-                digest("voice-preview|" + appId + "|" + avatarVersionId + "|" + versionId), now, administratorId);
-            jdbc.update("update p_application set current_config_id = ?,updated_at = utc_timestamp(3),revision = revision + 1 where id = ?", configId, appId);
-            insertReference(administratorId, appId, "APP_CONFIG", configId);
-            insertReference(administratorId, appId, "AVATAR_VERSION", avatarVersionId);
-            insertReference(administratorId, appId, "VOICE_VERSION", versionId);
+            jdbc.update("update p_api_idempotency set status='FAILED',updated_at=utc_timestamp(3) " +
+                "where account_id=? and scope=? and request_id=? and status='PROCESSING'", administratorId, auditionScope, key);
+            auditionFact(administratorId, operation, "UNKNOWN", text.length(), "AUDITION_UNAVAILABLE");
+            throw error;
         }
-        return new PreviewApplication(text(appId), text(configId), text(voiceId), text(versionId));
     }
 
-    private void insertReference(long accountId, long appId, String resourceType, long resourceId)
+    private void auditionFact(long accountId, String operation, String status, int characters, String code)
     {
-        Instant now = Instant.now();
-        jdbc.update("insert ignore into p_resource_reference (id,created_at,updated_at,account_id,holder_type,holder_id,operation_id,resource_type,resource_id,state,confirmed_at) "
-                + "values (?,?,?,?, 'APP_CURRENT',?,?,?,?,'CONFIRMED',?)", nextId(), now, now, accountId, appId,
-            "voice-preview:" + appId, resourceType, resourceId, now);
+        operations.accept(new com.ruoyi.system.operations.CallFactEvent(operation + "-" + status, operation,
+            accountId, "TTS", status, null, null, null, null,
+            new com.ruoyi.system.operations.CallFactEvent.Usage((long) characters, null, null, false),
+            null, null, "UNKNOWN", code));
     }
 
     private void insertOfficialVersion(long accountId, long voiceId, long versionId, int number, OfficialVoiceInput input, OfficialService service, Instant now)
@@ -275,14 +238,6 @@ public class VoiceService
             || input.description() != null && input.description().length() > 1000) throw badRequest("官方声音参数无效");
         if (input.parameters().keySet().stream().anyMatch(key -> !PARAMETER_KEYS.contains(key)) || input.parameters().values().stream().anyMatch(value -> !(value instanceof Number)))
             throw badRequest("声音参数仅允许速率、音高和音量数值");
-    }
-    private void validatePrivate(PrivateVoiceInput input)
-    {
-        if (input == null || blank(input.name()) || input.name().trim().length() > 100 || input.relayVersionId() == null || input.relayVersionId() <= 0
-            || blank(input.voiceAlias()) || input.voiceAlias().trim().length() > 128 || input.parameters() == null)
-            throw badRequest("私有 Voice 参数无效");
-        if (input.parameters().keySet().stream().anyMatch(key -> !PARAMETER_KEYS.contains(key)) || input.parameters().values().stream().anyMatch(value -> !(value instanceof Number)))
-            throw badRequest("Voice 参数仅允许速率、音高和音量数值");
     }
     private void verifyAlias(OfficialService service, String alias)
     { if (!availableAliases(service.providerCode(), service.modelId()).contains(alias.trim())) throw conflict("该官方服务未声明可用音色"); }
@@ -360,8 +315,6 @@ public class VoiceService
     private record OfficialVersionRow(long officialServiceId, String snapshot) { }
     private record Idempotency(byte[] hash, long resourceId) { }
     public record OfficialVoiceInput(String name, String description, Long officialServiceId, String expectedServiceRevision, String voiceAlias, String language, String modelAlias, Map<String, Object> parameters) { }
-    public record PrivateVoiceInput(String name, String description, Long relayVersionId, String voiceAlias, String language, String modelAlias, Map<String, Object> parameters) { }
-    public record PrivateVoiceResponse(String voiceId, String versionId, String status, String serviceType, String voiceAlias, int versionNo) { }
     public record PublishRequest(boolean auditionConfirmed) { }
     public record OfficialServiceResponse(String serviceId, String name, String providerCode, String modelId, String revision, List<String> availableVoiceAliases) { }
     public record VoiceMutation(String voiceId, String versionId, String status, String revision) { }
@@ -369,5 +322,4 @@ public class VoiceService
     public record VoiceVersion(String versionId, int versionNo, String officialServiceId, String voiceAlias, String language, String modelId, Map<String, Object> parameters, Map<String, Object> serviceSnapshot, String createdAt) { }
     public record VoiceDetail(String voiceId, String name, String description, String status, String currentVersionId, String revision, String updatedAt, List<VoiceVersion> versions) { }
     public record VoicePage(List<VoiceSummary> items, int total, int pageNum, int pageSize) { }
-    public record PreviewApplication(String applicationId, String configVersionId, String voiceId, String versionId) { }
 }

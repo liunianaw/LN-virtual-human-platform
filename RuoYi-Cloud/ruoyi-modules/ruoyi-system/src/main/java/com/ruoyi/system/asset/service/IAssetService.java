@@ -13,7 +13,6 @@ public interface IAssetService
     AssetFileResponse uploadReference(Long accountId, MultipartFile file, String rightsNoticeVersion, Boolean rightsConfirmed);
     AssetFileResponse readReference(Long accountId, Long fileId);
     GenerationTaskResponse createGenerationTask(Long accountId, CreateGenerationTaskRequest request);
-    GenerationTaskResponse createOfficialGenerationTask(Long accountId, CreateGenerationTaskRequest request);
     GenerationTaskResponse readGenerationTask(Long accountId, Long taskId);
     List<GenerationTaskResponse> listGenerationTasks(Long accountId);
     Map<String, Object> pageGenerationTasks(Long accountId, int pageNum, int pageSize);

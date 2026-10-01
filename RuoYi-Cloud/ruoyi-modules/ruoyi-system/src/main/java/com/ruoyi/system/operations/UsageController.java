@@ -32,22 +32,22 @@ public class UsageController
         @RequestParam(required = false) String from, @RequestParam(required = false) String to,
         @RequestParam(required = false) String capability, @RequestParam(defaultValue = "1") int pageNum,
         @RequestParam(defaultValue = "20") int pageSize)
-    { return AjaxResult.success(service.usage(SecurityUtils.getUserId(),applicationId,from,to,capability,pageNum,pageSize)); }
+    { return AjaxResult.success(service.usage(developer(),applicationId,from,to,capability,pageNum,pageSize)); }
     @RequiresPermissions("platform:usage:read")
     @GetMapping("/api/v1/developer/call-records")
     public AjaxResult calls(@RequestParam(required = false) String applicationId,
         @RequestParam(required = false) String from, @RequestParam(required = false) String to,
         @RequestParam(required = false) String capability, @RequestParam(required = false) String status,
         @RequestParam(defaultValue = "1") int pageNum, @RequestParam(defaultValue = "20") int pageSize)
-    { return AjaxResult.success(service.calls(SecurityUtils.getUserId(),applicationId,from,to,capability,status,pageNum,pageSize)); }
+    { return AjaxResult.success(service.calls(developer(),applicationId,from,to,capability,status,pageNum,pageSize)); }
     @RequiresPermissions("platform:usage:read")
     @GetMapping("/api/v1/developer/usage/limits")
-    public AjaxResult limits() { return AjaxResult.success(service.limits(SecurityUtils.getUserId())); }
+    public AjaxResult limits() { return AjaxResult.success(service.limits(developer())); }
     @RequiresPermissions("platform:usage:read")
     @GetMapping("/api/v1/developer/usage/reservations")
     public AjaxResult reservations(@RequestParam(required = false) String state,
         @RequestParam(defaultValue = "1") int pageNum, @RequestParam(defaultValue = "20") int pageSize)
-    { return AjaxResult.success(service.reservations(SecurityUtils.getUserId(),state,pageNum,pageSize)); }
+    { return AjaxResult.success(service.reservations(developer(),state,pageNum,pageSize)); }
 
     @RequiresPermissions("platform:operations:reconcile")
     @Log(title = "用量日汇总重建", businessType = BusinessType.UPDATE, isSaveRequestData = false)
@@ -77,6 +77,15 @@ public class UsageController
     { administrator(); return AjaxResult.success(service.grantQuota(SecurityUtils.getUserId(),accountId,input,key)); }
     private static void administrator()
     { if (!SecurityUtils.isAdmin()) throw new ServiceException("仅管理员可核对用量与额度",403); }
+    private static long developer()
+    {
+        var login = SecurityUtils.getLoginUser();
+        if (login == null || login.getUserid() == null || login.getUserid() <= 0)
+            throw new ServiceException("后台登录无效",401);
+        if (login.getRoles() == null || !login.getRoles().contains("developer") || login.getRoles().contains("admin"))
+            throw new ServiceException("仅开发者账号可查看自身用量",403);
+        return login.getUserid();
+    }
     public record Rebuild(@jakarta.validation.constraints.Positive long accountId,
             @jakarta.validation.constraints.NotNull LocalDate usageDate) { }
     public record Review(@jakarta.validation.constraints.NotBlank String decision,

@@ -10,13 +10,12 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Current runtime HTTP state, tickets, package and media for DEBUG and BUSINESS grants. */
+/** Current runtime HTTP state, tickets, package and media for BUSINESS grants. */
 @RestController
 @RequestMapping("/api/v1/runtime")
 public class RuntimeVoiceController
 {
     private final RuntimeAuthorization access;
-    private final TtsSubmissionService submissions;
     private final SpeakOnlyRuntimeService runtime;
     private final RuntimeConnectionTicketService tickets;
     private final PersistentRuntimeStore store;
@@ -24,30 +23,22 @@ public class RuntimeVoiceController
     private final TemporaryWavStorage audioStorage;
     private final SystemRuntimeClient system;
     private final RuntimeLimits limits;
-    private final IChatRuntimeService chat;
-    private final ChatTurnStore chatStore;
     private final AsrRuntimeService asr;
-    private final ContextRuntimeService context;
 
-    public RuntimeVoiceController(RuntimeAuthorization access, TtsSubmissionService submissions,
-            SpeakOnlyRuntimeService runtime, RuntimeConnectionTicketService tickets, PersistentRuntimeStore store,
+    public RuntimeVoiceController(RuntimeAuthorization access, SpeakOnlyRuntimeService runtime,
+            RuntimeConnectionTicketService tickets, PersistentRuntimeStore store,
             TemporaryWavStorage audioStorage, SystemRuntimeClient system, RuntimeLimits limits,
-            RuntimeConnectionEpochs epochs, IChatRuntimeService chat, ChatTurnStore chatStore,
-             AsrRuntimeService asr, ContextRuntimeService context)
+            RuntimeConnectionEpochs epochs, AsrRuntimeService asr)
     {
         this.access = access;
-        this.submissions = submissions;
         this.runtime = runtime;
         this.tickets = tickets;
         this.store = store;
         this.audioStorage = audioStorage;
         this.system = system;
         this.limits = limits;
-        this.chat = chat;
-        this.chatStore = chatStore;
         this.epochs = epochs;
         this.asr = asr;
-        this.context = context;
     }
 
     @PostMapping("/connection-tickets")
@@ -73,8 +64,6 @@ public class RuntimeVoiceController
         state.put("effectiveLimits", limits.current());
         java.util.List<String> capabilities = new java.util.ArrayList<>(
             java.util.List.of("speech.create", "turn.stop", "playback.report"));
-        if (grant.principal().scopes().contains("chat:write")) capabilities.add("chat.create");
-        if (grant.principal().scopes().contains("context:capture")) capabilities.add("guidance.result");
         state.put("capabilities", capabilities);
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(RuntimeEnvelope.ok(state));
     }
@@ -112,38 +101,6 @@ public class RuntimeVoiceController
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store").body(RuntimeEnvelope.ok(result));
     }
 
-    @PostMapping(value = "/context-captures", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<RuntimeEnvelope<java.util.Map<String, Object>>> contextCapture(
-        @RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
-        @RequestHeader("X-Connection-Epoch") String connectionEpoch,
-        jakarta.servlet.http.HttpServletRequest request) throws java.io.IOException
-    {
-        RuntimeAuthorization.Grant grant = access.authenticate(authorization);
-        if (!(request instanceof org.springframework.web.multipart.MultipartHttpServletRequest multipart))
-            throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "CONTEXT_METADATA_INVALID", "Context upload is invalid.");
-        org.springframework.web.multipart.MultipartFile metadata = multipart.getFile("metadata");
-        if (metadata == null) throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST,
-            "CONTEXT_METADATA_INVALID", "Context metadata is required.");
-        java.util.Map<String, org.springframework.web.multipart.MultipartFile> images = new java.util.HashMap<>(multipart.getFileMap());
-        images.remove("metadata");
-        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
-            .body(RuntimeEnvelope.ok(context.upload(grant, epoch(connectionEpoch), metadata.getBytes(), images)));
-    }
-
-    @PostMapping("/debug/speech")
-    public RuntimeEnvelope<SpeechResponse> speech(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
-            @RequestHeader("X-Connection-Epoch") String connectionEpoch, @RequestBody SpeechRequest request)
-    {
-        RuntimePrincipal principal = debugOnly(authorization, connectionEpoch);
-        principal.requireSpeakScope();
-        if (principal.scopes().contains("chat:write"))
-            throw new RuntimeProblem(org.springframework.http.HttpStatus.FORBIDDEN, "CAPABILITY_NOT_ALLOWED", "CHAT does not use this speech endpoint.");
-        RuntimeAuthorization.Grant grant = access.authenticate(authorization);
-        SpeakOnlyRuntimeService.SpeechStarted started = runtime.start(principal, request.requestId(), request.text(), epoch(connectionEpoch));
-        submissions.submit(grant, epoch(connectionEpoch), started.initialWork());
-        return RuntimeEnvelope.ok(new SpeechResponse(started.turnId(), started.generation(), started.segmentCount()));
-    }
-
     @PostMapping("/stop")
     public RuntimeEnvelope<StopResponse> stop(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
             @RequestHeader("X-Connection-Epoch") String connectionEpoch, @RequestBody StopRequest request)
@@ -157,26 +114,8 @@ public class RuntimeVoiceController
         try { turnId = Long.parseLong(request.turnId()); }
         catch (NumberFormatException error)
         { throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", "Turn ID is invalid."); }
-        boolean chatTurn = chatStore.chatTurn(principal, turnId);
-        SpeakOnlyRuntimeService.StopResult stopped = runtime.hasTurn(request.turnId())
-            ? runtime.stop(principal, request.turnId()) : chatTurn
-            ? new SpeakOnlyRuntimeService.StopResult(request.turnId(), !chat.stop(principal, turnId, "USER_STOP"))
-            : runtime.stop(principal, request.turnId());
+        SpeakOnlyRuntimeService.StopResult stopped = runtime.stop(principal, request.turnId());
         return RuntimeEnvelope.ok(new StopResponse(stopped.turnId(), stopped.alreadyStopped()));
-    }
-
-    @PostMapping("/debug/playback-report")
-    public RuntimeEnvelope<PlaybackResponse> playback(@RequestHeader(HttpHeaders.AUTHORIZATION) String authorization,
-            @RequestHeader("X-Connection-Epoch") String connectionEpoch, @RequestBody PlaybackRequest request)
-    {
-        RuntimePrincipal principal = debugOnly(authorization, connectionEpoch);
-        SpeakOnlyRuntimeService.PlaybackUpdated updated = runtime.reportPlayback(principal, request.turnId(), request.segmentId(),
-                request.state());
-        if (updated.accepted() && !updated.nextWork().isEmpty())
-        {
-            submissions.submit(access.authenticate(authorization), epoch(connectionEpoch), updated.nextWork());
-        }
-        return RuntimeEnvelope.ok(new PlaybackResponse(updated.accepted()));
     }
 
     private static long epoch(String value)
@@ -186,15 +125,6 @@ public class RuntimeVoiceController
         try { return Long.parseLong(value); }
         catch (NumberFormatException error)
         { throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST, "EPOCH_MISMATCH", "Connection epoch is invalid."); }
-    }
-
-    private RuntimePrincipal debugOnly(String authorization, String connectionEpoch)
-    {
-        RuntimeAuthorization.Grant grant = access.authenticate(authorization);
-        if (!"CONSOLE_DEBUG".equals(grant.source()))
-            throw new RuntimeProblem(org.springframework.http.HttpStatus.FORBIDDEN, "TOKEN_SOURCE_INVALID", "DEBUG endpoint requires a DEBUG grant.");
-        requireCurrentConnection(grant.principal(), connectionEpoch);
-        return grant.principal();
     }
 
     private void requireCurrentConnection(RuntimePrincipal principal, String connectionEpoch)
@@ -209,10 +139,6 @@ public class RuntimeVoiceController
         return ResponseEntity.status(problem.status()).body(RuntimeEnvelope.error(problem.code(), problem.getMessage()));
     }
 
-    public record SpeechRequest(String requestId, String text)
-    {
-    }
-
     public record TicketRequest(String purpose, String connectionEpoch) { }
     public record TicketResponse(String ticket, String expiresAt, String webSocketUrl, String protocol) { }
 
@@ -220,19 +146,7 @@ public class RuntimeVoiceController
     {
     }
 
-    public record PlaybackRequest(String turnId, String segmentId, PlaybackState state)
-    {
-    }
-
-    public record SpeechResponse(String turnId, long generation, int segmentCount)
-    {
-    }
-
     public record StopResponse(String turnId, boolean alreadyStopped)
-    {
-    }
-
-    public record PlaybackResponse(boolean accepted)
     {
     }
 
@@ -245,11 +159,12 @@ public class RuntimeVoiceController
 
         static RuntimeEnvelope<Void> error(String code, String message)
         {
-            return new RuntimeEnvelope<>(code, null, new RuntimeError(code, message));
+            return new RuntimeEnvelope<>(code, null,
+                new RuntimeError(code, message, false, java.util.UUID.randomUUID().toString()));
         }
     }
 
-    public record RuntimeError(String code, String message)
+    public record RuntimeError(String code, String message, boolean retryable, String requestId)
     {
     }
 }

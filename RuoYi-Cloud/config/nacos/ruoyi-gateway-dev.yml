@@ -33,19 +33,11 @@ spring:
           - id: platform-official-voices
             uri: lb://ruoyi-system
             predicates:
-            - Path=/api/v1/voices/**,/api/v1/applications/**,/api/v1/developer/**,/api/v1/admin/applications/**,/api/v1/admin/voices/**,/api/v1/admin/avatars/**,/api/v1/admin/official-services/**,/api/v1/admin/generation-tasks/**,/api/v1/admin/call-records/**,/api/v1/admin/operations/**
-          - id: developer-management
-            uri: lb://ruoyi-system
-            predicates:
-            - Path=/openapi/v1/management/**
+            - Path=/api/v1/voices/**,/api/v1/applications/**,/api/v1/developer/**,/api/v1/admin/**
           - id: developer-sessions
             uri: lb://ruoyi-session
             predicates:
             - Path=/openapi/v1/sessions/**
-          - id: platform-debug-system
-            uri: lb://ruoyi-system
-            predicates:
-            - Path=/api/v1/debug-sessions/**
           - id: platform-runtime
             uri: lb://ruoyi-session
             predicates:

@@ -1,16 +1,11 @@
 import { AvatarPlayer } from "./avatar-player.js";
-import type { ContextRequest, PageContext } from "./context.js";
+import type { CaptureOptions, ContextCapture, PageContext } from "./context.js";
 
 export interface SessionToken { token: string; expiresAt: string }
 export interface SessionClientOptions {
   baseUrl: string;
   getToken: () => Promise<SessionToken>;
   player: AvatarPlayer;
-}
-export interface ChatOptions {
-  contextRequest?: { source: "PAGE" | "HYBRID"; coverage?: "VIEWPORT" | "FULL_PAGE"; resultMode?: "PARTIAL" | "STRICT" };
-  contextMode?: "AI_ON_DEMAND";
-  businessContext?: Record<string, unknown>;
 }
 export interface SessionClientEvent {
   type: string;
@@ -32,7 +27,7 @@ interface Envelope {
   occurredAt: string; data: Record<string, unknown>;
 }
 export interface SessionState {
-  sessionId: string; applicationId: string; configVersionId: string;
+  sessionId: string; applicationId: string;
   status: string; expiresAt: string; connectionEpoch: string;
   effectiveScopes: string[]; activeTurn: { turnId: string } | null;
 }
@@ -103,20 +98,33 @@ export class SessionClient {
     return this.connecting;
   }
 
-  chat(text: string, options: ChatOptions = {}): string {
-    if (!text.trim()) throw new SessionClientError("INVALID_ARGUMENT", "Chat text is required.");
-    const requestId = this.command("chat.create", { text, ...options });
-    for (const pending of this.pendingSpeech) this.stopOnAck.set(pending, "REPLACED");
-    if (this.activeTurn) this.stopLocal();
-    this.pendingSpeech.add(requestId);
-    return requestId;
-  }
-
   speak(text: string): string {
     if (!text.trim()) throw new SessionClientError("INVALID_ARGUMENT", "Speech text is required.");
     const requestId = this.command("speech.create", { text });
     this.pendingSpeech.add(requestId);
     return requestId;
+  }
+
+  async capture(options: CaptureOptions): Promise<ContextCapture> {
+    this.assertLive();
+    if (!this.session?.effectiveScopes.includes("context:capture"))
+      throw new SessionClientError("CONTEXT_NOT_ALLOWED", "Connect the Session before capture.");
+    const controller = new AbortController();
+    this.contextAbort?.abort();
+    this.contextAbort = controller;
+    this.pageContext ??= new (await import("./context.js")).PageContext();
+    try {
+      const result = await this.pageContext.captureLocal(options, controller.signal);
+      this.assertLive();
+      if (controller.signal.aborted || this.contextAbort !== controller)
+        throw new SessionClientError("CONTEXT_CANCELLED", "Capture was superseded.");
+      return result;
+    }
+    finally { if (this.contextAbort === controller) this.contextAbort = undefined; }
+  }
+
+  highlight(captureRequestId: string, elementRef: string): string {
+    return this.pageContext?.highlight(captureRequestId, elementRef) ?? "TARGET_STALE";
   }
 
   clearContextHighlight(): void { this.pageContext?.clearHighlight(); }
@@ -149,7 +157,7 @@ export class SessionClient {
     this.emit({ type: "recording.started", data: { mimeType } });
   }
 
-  async endRecording(chatAfterRecognition = false): Promise<string> {
+  async endRecording(): Promise<string> {
     this.assertLive();
     const recording = this.recording;
     if (!recording || recording.recorder.state === "inactive") throw new SessionClientError("RECORDING_NOT_ACTIVE", "No recording is active.");
@@ -176,7 +184,6 @@ export class SessionClient {
         throw new SessionClientError(envelope.error?.code ?? "ASR_FAILED", envelope.error?.message ?? "Recognition failed.", requestId);
       if (controller.signal.aborted) throw new SessionClientError("RECORDING_CANCELLED", "Recognition was cancelled.", requestId);
       this.emit({ type: "asr.completed", requestId, data: envelope.data });
-      if (chatAfterRecognition) this.chat(envelope.data.text);
       return envelope.data.text;
     } catch (error) { this.emitError(error, requestId); throw error; }
     finally { if (this.asrAbort === controller) this.asrAbort = undefined; }
@@ -370,10 +377,6 @@ export class SessionClient {
         void this.playNext(event.turnId);
       }
     }
-    if (event.type === "context.request" && event.turnId === this.activeTurn)
-      void this.captureContext(event as Envelope & { data: ContextRequest });
-    if (event.type === "guidance.proposed" && event.turnId === this.activeTurn)
-      void this.highlightContext(event);
     if (event.type === "turn.stopped" || event.type === "turn.completed" || event.type === "turn.failed") {
       if (event.turnId) this.stoppedTurns.add(event.turnId);
       if (event.turnId === this.activeTurn) this.stopLocal();
@@ -435,41 +438,6 @@ export class SessionClient {
     }
   }
 
-  private async captureContext(event: Envelope & { data: ContextRequest }): Promise<void> {
-    const controller = new AbortController();
-    this.contextAbort?.abort();
-    this.contextAbort = controller;
-    try {
-      if (!this.token || !this.epoch || event.turnId !== this.activeTurn) return;
-      this.pageContext ??= new (await import("./context.js")).PageContext();
-      const result = await this.pageContext.capture(event.data, this.epoch, controller.signal);
-      if (controller.signal.aborted || !this.epoch || event.turnId !== this.activeTurn) return;
-      const form = new FormData();
-      form.append("metadata", new Blob([JSON.stringify(result.metadata)], { type: "application/json" }));
-      result.images.forEach((blob, index) => form.append(`screenshot${index}`, blob, `screenshot${index}.jpg`));
-      const response = await fetch(`${this.baseUrl}/api/v1/runtime/context-captures`, {
-        method: "POST", cache: "no-store", signal: controller.signal,
-        headers: { Authorization: `Bearer ${this.token.token}`, "X-Connection-Epoch": this.epoch }, body: form,
-      });
-      const body = await response.json() as { code: string; error?: { code: string; message: string } };
-      if (!response.ok || body.code !== "OK") throw new SessionClientError(body.error?.code ?? "CONTEXT_CAPTURE_FAILED",
-        body.error?.message ?? "Page capture was rejected.", event.requestId, event.turnId ?? undefined);
-    } catch (error) {
-      if (!controller.signal.aborted) this.emitError(error, event.requestId, event.turnId ?? undefined);
-    } finally {
-      if (this.contextAbort === controller) this.contextAbort = undefined;
-    }
-  }
-
-  private async highlightContext(event: Envelope): Promise<void> {
-    const captureRequestId = String(event.data.captureRequestId ?? "");
-    const elementRef = String(event.data.elementRef ?? "");
-    const status = this.pageContext?.highlight(captureRequestId, elementRef, event.data.scrollIntoView === true) ?? "TARGET_STALE";
-    try {
-      if (this.socketOpen() && event.turnId === this.activeTurn)
-        this.command("guidance.result", { guidanceId: event.data.guidanceId, captureRequestId, status }, event.turnId);
-    } catch (error) { this.emitError(error, event.requestId, event.turnId ?? undefined); }
-  }
 
   private report(segmentId: string, state: string, turnId: string): void {
     if (turnId === this.activeTurn && this.socket?.readyState === WebSocket.OPEN)

@@ -131,15 +131,14 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </select>
 
     <select id="countApplicationReferences" resultType="int">
-        select count(*) from p_app_config c
-        join p_avatar_version v on v.id = c.avatar_version_id
-        where v.avatar_id = #{avatarId}
+        select count(*) from p_application a
+        where a.avatar_id = #{avatarId} and a.purpose = 'USER' and a.status != 'DELETED'
     </select>
 
     <select id="countRecoverableSessionReferences" resultType="int">
         select count(*) from session_db.s_session s
-        join p_app_config c on c.id = s.app_config_id
-        join p_avatar_version v on v.id = c.avatar_version_id
+        join session_db.s_session_snapshot snap on snap.id = s.session_snapshot_id
+        join p_avatar_version v on v.id = snap.avatar_version_id
         where v.avatar_id = #{avatarId}
           and s.status in ('CREATING', 'ACTIVE', 'DELETING', 'FAILED')
           and s.deleted_at is null

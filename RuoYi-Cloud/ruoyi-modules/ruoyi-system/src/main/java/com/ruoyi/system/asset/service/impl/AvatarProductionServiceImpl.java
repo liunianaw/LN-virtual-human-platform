@@ -20,7 +20,6 @@ import com.ruoyi.system.asset.dto.CreateAvatarVersionRequest;
 import com.ruoyi.system.asset.service.IAvatarProductionService;
 import com.ruoyi.system.asset.service.IAssetStorageQuotaService;
 import com.ruoyi.system.asset.service.IGenerationQuotaService;
-import com.ruoyi.system.developer.webhook.service.IWebhookService;
 import com.ruoyi.system.storage.ObjectStorage;
 import com.ruoyi.common.security.utils.SecurityUtils;
 import org.springframework.beans.factory.ObjectProvider;
@@ -38,12 +37,10 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
     private final ObjectProvider<ObjectStorage> storage;
     private final IGenerationQuotaService quota;
     private final IAssetStorageQuotaService storageQuota;
-    private final IWebhookService webhooks;
 
     public AvatarProductionServiceImpl(AvatarProductionMapper mapper, AssetMapper assetMapper, ObjectMapper json,
-        ObjectProvider<ObjectStorage> storage, IGenerationQuotaService quota, IAssetStorageQuotaService storageQuota,
-        IWebhookService webhooks)
-    { this.mapper = mapper; this.assetMapper = assetMapper; this.json = json; this.storage = storage; this.quota = quota; this.storageQuota = storageQuota; this.webhooks = webhooks; }
+        ObjectProvider<ObjectStorage> storage, IGenerationQuotaService quota, IAssetStorageQuotaService storageQuota)
+    { this.mapper = mapper; this.assetMapper = assetMapper; this.json = json; this.storage = storage; this.quota = quota; this.storageQuota = storageQuota; }
 
     public Map<String, Object> production(Long accountId, Long avatarId, Long versionId)
     {
@@ -160,14 +157,13 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
         requireOwned(accountId, avatarId, versionId);
         if (!ACTIONS.contains(actionCode) || request == null || request.requestId() == null
             || !request.requestId().matches("[A-Za-z0-9._:-]{1,64}") || request.expectedActionRevision() == null
-            || request.expectedActionRevision() < 0 || request.webhookEndpointId() != null && request.webhookEndpointId() <= 0)
+            || request.expectedActionRevision() < 0)
             throw new ServiceException("动作生成参数无效", 400);
         try {
             String material = json.writeValueAsString(Map.of(
                 "expectedActionRevision", request.expectedActionRevision(),
                 "acknowledgeUncertainCharge", Boolean.TRUE.equals(request.acknowledgeUncertainCharge()),
-                "supersedesAttemptId", request.supersedesAttemptId() == null ? "" : request.supersedesAttemptId().toString(),
-                "webhookEndpointId", request.webhookEndpointId() == null ? "" : request.webhookEndpointId().toString()));
+                "supersedesAttemptId", request.supersedesAttemptId() == null ? "" : request.supersedesAttemptId().toString()));
             byte[] hash = java.security.MessageDigest.getInstance("SHA-256").digest(material.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             Map<String, Object> previous = mapper.generationOperation(accountId, versionId, actionCode, request.requestId());
             if (previous != null) {
@@ -191,12 +187,11 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
                     || !request.supersedesAttemptId().toString().equals(latestAttemptId))
                     throw new ServiceException("上次结果待核对；再次生成前必须确认可能重复计费", 409);
             }
-            if (request.webhookEndpointId() != null) webhooks.requireActive(accountId, request.webhookEndpointId());
             Long taskId = nextId(), stepId = nextId(), attemptId = nextId(), reservationId = nextId();
             quota.reserve(accountId, taskId, reservationId);
             mapper.insertActionTask(taskId, accountId, avatarId, versionId, Long.valueOf((String) context.get("sourceFileId")),
                 Long.valueOf((String) context.get("officialServiceId")), (String) context.get("serviceSnapshot"),
-                (String) context.get("pipelineVersion"), reservationId, request.requestId(), request.webhookEndpointId());
+                (String) context.get("pipelineVersion"), reservationId, request.requestId());
             assetMapper.insertGenerationActionStep(stepId, accountId, taskId, "ACTION_" + actionCode, actionCode, attemptId);
             mapper.initializeSelection(accountId, versionId, actionCode);
             if (mapper.startGeneration(accountId, versionId, actionCode, request.expectedActionRevision(), attemptId) != 1
@@ -304,15 +299,12 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
     {
         if (accountId == null || accountId <= 0 || avatarId == null || avatarId <= 0 || request == null
             || request.requestId() == null || !request.requestId().matches("[A-Za-z0-9._:-]{1,64}")
-            || request.expectedAvatarRevision() == null || request.expectedAvatarRevision() <= 0
-            || request.webhookEndpointId() != null && request.webhookEndpointId() <= 0)
+            || request.expectedAvatarRevision() == null || request.expectedAvatarRevision() <= 0)
             throw new ServiceException("新版本参数无效", 400);
         if (request.baseVersionId() != null && (request.sourceFileId() != null || request.officialServiceId() != null))
             throw new ServiceException("继承旧版本与更换参考图/服务不能同时提交", 400);
         if (request.baseVersionId() == null && (request.sourceFileId() == null || request.officialServiceId() == null))
             throw new ServiceException("完整重新制作必须提供参考图和制作服务", 400);
-        if (request.baseVersionId() != null && request.webhookEndpointId() != null)
-            throw new ServiceException("继承版本不产生制作任务，不能选择 Webhook", 400);
         try {
             Map<String, Object> material = new LinkedHashMap<>();
             material.put("expectedAvatarRevision", request.expectedAvatarRevision());
@@ -320,11 +312,10 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
             material.put("sourceFileId", request.sourceFileId() == null ? null : request.sourceFileId().toString());
             material.put("officialServiceId", request.officialServiceId() == null ? null : request.officialServiceId().toString());
             material.put("expectedServiceRevision", request.expectedServiceRevision());
-            material.put("webhookEndpointId", request.webhookEndpointId() == null ? null : request.webhookEndpointId().toString());
             byte[] hash = operationHash(material);
             Map<String, Object> avatar = mapper.lockOwnedAvatar(accountId, avatarId);
             if (avatar == null) throw new ServiceException("无权为此角色创建版本", 403);
-            if ("OFFICIAL".equals(avatar.get("visibility")) && !SecurityUtils.isAdmin())
+            if (SecurityUtils.isAdmin() != "OFFICIAL".equals(avatar.get("visibility")))
                 throw new ServiceException("只有管理员可以制作官方角色的新版本", 403);
             Map<String, Object> previous = mapper.versionOperation(accountId, avatarId, request.requestId());
             if (previous != null) return previousOperation(previous, hash, "同一请求编号的新版本参数不同");
@@ -370,10 +361,9 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
                     "sourceSha256", java.util.HexFormat.of().formatHex(source.getSha256())));
                 mapper.insertCandidateVersion(versionId, accountId, avatarId, versionNo, source.getId(), PIPELINE_VERSION, recipe);
                 Long generationTaskId = nextId(), reservationId = nextId();
-                if (request.webhookEndpointId() != null) webhooks.requireActive(accountId, request.webhookEndpointId());
                 quota.reserve(accountId, generationTaskId, reservationId);
                 assetMapper.insertGenerationTask(generationTaskId, accountId, avatarId, versionId, source.getId(),
-                    generationService.getId(), snapshot, PIPELINE_VERSION, reservationId, request.requestId(), hash, request.webhookEndpointId());
+                    generationService.getId(), snapshot, PIPELINE_VERSION, reservationId, request.requestId(), hash);
                 for (String action : ACTIONS)
                     assetMapper.insertGenerationActionStep(nextId(), accountId, generationTaskId, "ACTION_" + action, action, nextId());
                 assetMapper.insertOutbox(nextId(), accountId, java.util.UUID.randomUUID().toString().replace("-", ""),
@@ -497,6 +487,8 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
         if (accountId == null || accountId <= 0) throw new ServiceException("未登录", 401);
         Map<String, Object> version = mapper.ownedVersion(accountId, avatarId, versionId);
         if (version == null) throw new ServiceException("无权管理此角色版本", 403);
+        if (SecurityUtils.isAdmin() != "OFFICIAL".equals(version.get("visibility")))
+            throw new ServiceException("角色发布范围与当前身份不匹配", 403);
         return new LinkedHashMap<>(version);
     }
 

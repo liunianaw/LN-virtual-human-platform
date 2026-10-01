@@ -16,6 +16,7 @@ public interface OfficialServiceMapper
     OfficialService selectByIdForUpdate(@Param("serviceId") Long serviceId);
     OfficialService selectResolvable(@Param("serviceId") Long serviceId, @Param("expectedRevision") Long expectedRevision,
         @Param("capability") String capability);
+    OfficialService selectDefaultResolvable(@Param("capability") String capability);
     OfficialSecret selectSecret(@Param("secretId") Long secretId);
     OfficialIdempotency selectIdempotencyForUpdate(@Param("accountId") Long accountId, @Param("scope") String scope, @Param("requestId") String requestId);
     int countGenerationBinding(@Param("serviceId") Long serviceId, @Param("revision") Long revision, @Param("taskId") Long taskId);

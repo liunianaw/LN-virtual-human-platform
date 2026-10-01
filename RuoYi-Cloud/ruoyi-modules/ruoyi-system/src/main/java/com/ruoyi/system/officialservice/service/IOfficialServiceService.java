@@ -16,10 +16,13 @@ public interface IOfficialServiceService
     Check check(long serviceId, String ifMatch, String idempotencyKey);
     View changeStatus(long serviceId, OfficialServiceStatusRequest request, String ifMatch, String idempotencyKey);
     ResolvedService resolve(long serviceId, long expectedRevision, String purpose, Long taskId, Long voiceVersionId);
+    DefaultResolvedService resolveDefault(String purpose);
     record Page(List<View> items, int total, int pageNum, int pageSize) { }
     record View(String serviceId, String name, String capability, String providerCode, String endpoint, String modelId,
                 Map<String, Object> parameters, String status, String revision, boolean credentialConfigured, String secretId) { }
     record Check(String checkedRevision, boolean configurationValid, boolean providerVerified, List<String> issues) { }
     /** Internal-only material; do not log, serialize to a public DTO, or cache beyond one provider request. */
     record ResolvedService(String providerCode, String endpoint, String modelId, Map<String, Object> parameters, String credential) { }
+    record DefaultResolvedService(String serviceId, String revision, String providerCode, String endpoint,
+        String modelId, Map<String, Object> parameters, String credential) { }
 }

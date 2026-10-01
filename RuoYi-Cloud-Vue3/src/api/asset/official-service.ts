@@ -1,7 +1,7 @@
 import request from '@/utils/request'
 import type { AjaxResult } from '@/types'
 
-export interface OfficialService { serviceId: string; name: string; capability: 'AVATAR_GENERATION' | 'TTS'; providerCode: string; endpoint: string; modelId: string; parameters: Record<string, unknown>; status: 'ACTIVE' | 'DISABLED'; revision: string; credentialConfigured: boolean; secretId?: string }
+export interface OfficialService { serviceId: string; name: string; capability: 'AVATAR_GENERATION' | 'TTS' | 'ASR'; providerCode: string; endpoint: string; modelId: string; parameters: Record<string, unknown>; status: 'ACTIVE' | 'DISABLED'; revision: string; credentialConfigured: boolean; secretId?: string }
 export interface OfficialServiceInput { name: string; capability: OfficialService['capability']; providerCode: string; endpoint: string; modelId: string; parameters: Record<string, unknown>; secretId?: string }
 const headers = (revision?: string) => ({ 'Idempotency-Key': crypto.randomUUID(), ...(revision ? { 'If-Match': revision } : {}) })
 export const listOfficialServices = (): Promise<AjaxResult<{ items: OfficialService[] }>> => request({ url: '/api/v1/admin/official-services', method: 'get' })

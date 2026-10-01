@@ -6,17 +6,16 @@ import org.apache.ibatis.annotations.Param;
 
 public interface BusinessSessionMapper
 {
-    Map<String, Object> snapshot(@Param("accountId") long accountId, @Param("applicationId") long applicationId,
-        @Param("configId") Long configId);
-    Map<String, Object> chatConfig(@Param("accountId") long accountId, @Param("applicationId") long applicationId,
-        @Param("configId") long configId, @Param("sessionId") long sessionId);
-    List<Long> chatSkills(@Param("accountId") long accountId, @Param("configId") long configId,
-        @Param("sessionId") long sessionId);
+    Map<String, Object> snapshot(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
+    List<Map<String, Object>> skills(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
     Map<String, Object> currentForUpdate(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
-    List<Map<String, Object>> resources(@Param("configId") long configId);
+    List<Map<String, Object>> resources(@Param("applicationId") long applicationId);
+    int availableSession(@Param("accountId") long accountId, @Param("applicationId") long applicationId,
+        @Param("sessionId") long sessionId);
+    Long maxRecordingBytes(@Param("accountId") long accountId);
     Integer maxSessionsForUpdate(@Param("accountId") long accountId);
     int occupiedSessions(@Param("accountId") long accountId, @Param("sessionId") long sessionId);
-    int availableConfig(@Param("accountId") long accountId, @Param("applicationId") long applicationId, @Param("configId") long configId);
+    int availableCurrent(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
     void reserve(@Param("accountId") long accountId, @Param("sessionId") long sessionId,
         @Param("operationId") String operationId, @Param("resourceType") String resourceType,
         @Param("resourceId") long resourceId);

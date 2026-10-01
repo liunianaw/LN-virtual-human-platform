@@ -2,9 +2,9 @@
 param(
     [switch]$SkipBuild,
     [switch]$SkipFrontend,
-    [switch]$SkipRelay,
     [switch]$SkipMediaWorker,
     [switch]$SkipNacosPublish,
+    [string]$SystemHostsFile = '',
     [ValidateRange(30, 300)]
     [int]$TimeoutSeconds = 120
 )
@@ -15,7 +15,7 @@ Starts the complete Windows development stack without duplicating healthy proces
 
 .DESCRIPTION
 Starts MySQL, Redis, Nacos, RabbitMQ, system, session, auth, gateway, media API,
-media Worker, the local Relay, and Vue in their dependency order. Existing listeners
+media Worker and Vue in their dependency order. Existing listeners
 are reused. Provider secrets are read only from ignored local configuration files and
 injected into child-process environments; they are never logged. The local official
 service master key is protected with the current Windows user's DPAPI so encrypted
@@ -32,7 +32,6 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $cloudRoot = Join-Path $repositoryRoot 'RuoYi-Cloud'
 $mediaRoot = Join-Path $repositoryRoot 'ruoyi-media'
-$relayRoot = Join-Path $repositoryRoot 'tools\local-relay'
 $webRoot = Join-Path $repositoryRoot 'RuoYi-Cloud-Vue3'
 $runtimeLogRoot = Join-Path $repositoryRoot '.m1-runtime-logs'
 $nacosBin = 'D:\BigData\Nacos3.2.4\nacos-server-3.2.4\nacos\bin'
@@ -363,12 +362,11 @@ try {
     $nacosUsername = if ($env:NACOS_USERNAME) { $env:NACOS_USERNAME } else { 'nacos' }
     $nacosPassword = if ($env:NACOS_PASSWORD) { $env:NACOS_PASSWORD } else { 'nacos' }
     $internalToken = Get-LocalServiceToken -FileName 'media-internal-token.dpapi'
-    $relayToken = Get-LocalServiceToken -FileName 'relay-access-token.dpapi'
     $systemToSessionBearer = Get-LocalServiceToken -FileName 'system-to-session-bearer.dpapi'
     $sessionToSystemBearer = Get-LocalServiceToken -FileName 'session-to-system-bearer.dpapi'
     $runtimeTokenSecret = Get-LocalServiceToken -FileName 'session-runtime-token-secret.dpapi'
     $commonEnvironment = @{
-        LN_RUNTIME_ALLOWED_ORIGINS = 'http://127.0.0.1'
+        LN_RUNTIME_ALLOWED_ORIGINS = 'http://127.0.0.1,http://localhost,http://127.0.0.1:5173,http://localhost:5173'
         NACOS_ADDR = $nacosAddress
         SPRING_CLOUD_NACOS_DISCOVERY_IP = '127.0.0.1'
         MANAGEMENT_HEALTH_SENTINEL_ENABLED = 'false'
@@ -455,6 +453,13 @@ try {
     }
 
     $systemEnvironment = @{} + $commonEnvironment + @{
+        # Clean builds do not package ignored application-local.yml; inject COS only at runtime.
+        PLATFORM_STORAGE_COS_ENABLED = 'true'
+        PLATFORM_STORAGE_COS_REGION = $cosEnvironment.RUOYI_MEDIA_COS_REGION
+        PLATFORM_STORAGE_COS_BUCKET = $cosEnvironment.RUOYI_MEDIA_COS_BUCKET
+        PLATFORM_STORAGE_COS_SECRETID = $cosEnvironment.RUOYI_MEDIA_COS_SECRET_ID
+        PLATFORM_STORAGE_COS_SECRETKEY = $cosEnvironment.RUOYI_MEDIA_COS_SECRET_KEY
+        PLATFORM_STORAGE_COS_SESSIONTOKEN = $cosEnvironment.RUOYI_MEDIA_COS_SESSION_TOKEN
         PLATFORM_DB_URL = 'jdbc:mysql://127.0.0.1:3306/platform_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai'
         PLATFORM_DB_USER = 'root'
         PLATFORM_DB_PASSWORD = '123456'
@@ -470,9 +475,6 @@ try {
         SESSION_DB_URL = 'jdbc:mysql://127.0.0.1:3306/session_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai'
         SESSION_DB_USER = 'root'
         SESSION_DB_PASSWORD = '123456'
-        LN_SESSION_TTS_RELAY_ENABLED = 'true'
-        LN_SESSION_TTS_RELAY_ENDPOINT = 'http://127.0.0.1:8024/ln-relay/v1'
-        LN_SESSION_TTS_RELAY_ACCESS_TOKEN = $relayToken
         LN_PUBLIC_RUNTIME_WS_URL = 'ws://127.0.0.1:8080/api/v1/realtime'
         LN_SESSION_TO_SYSTEM_URL = 'http://127.0.0.1:9201'
         LN_SESSION_TO_SYSTEM_INTERNAL_BEARER = $sessionToSystemBearer
@@ -492,8 +494,16 @@ try {
         }
         else {
             Assert-File -Path (Join-Path $service.Directory $service.Jar) -Description "$($service.Name) JAR"
+            $javaArguments = @('-Dfile.encoding=UTF-8')
+            if ($service.Name -eq 'system' -and $SystemHostsFile) {
+                Assert-File -Path $SystemHostsFile -Description 'Explicit acceptance DNS hosts file'
+                # Use an ASCII relative JVM path; Windows native argv can corrupt this workspace's Unicode name.
+                Copy-Item -LiteralPath $SystemHostsFile -Destination (Join-Path $service.Directory 'ln-acceptance-dns.hosts')
+                $javaArguments += '-Djdk.net.hosts.file=ln-acceptance-dns.hosts'
+            }
+            $javaArguments += @('-jar', $service.Jar)
             Start-DetachedProcess -Name $service.Name -FilePath 'java.exe' -WorkingDirectory $service.Directory `
-                -ArgumentList @('-Dfile.encoding=UTF-8', '-jar', $service.Jar) -Environment $service.Environment | Out-Null
+                -ArgumentList $javaArguments -Environment $service.Environment | Out-Null
         }
         try {
             Wait-HttpOk -Name $service.Name -Url $service.Health
@@ -541,24 +551,6 @@ try {
     }
     else {
         Write-Host '[reuse] media-worker Python process'
-    }
-
-    if (-not $SkipRelay) {
-        $relayPython = Join-Path $relayRoot '.venv\Scripts\python.exe'
-        Assert-File -Path $relayPython -Description 'Relay virtual-environment Python'
-        if (Test-TcpPort 8024) {
-            Write-Host '[reuse] ln-relay (8024)'
-        }
-        else {
-            $relayEnvironment = @{
-                RELAY_ACCESS_TOKEN = $relayToken
-                DASHSCOPE_API_KEY = [string]$providerConfig.api_key
-                LN_RELAY_PORT = '8024'
-            }
-            Start-DetachedProcess -Name 'ln-relay' -FilePath $relayPython -WorkingDirectory $relayRoot `
-                -ArgumentList @('app.py') -Environment $relayEnvironment | Out-Null
-            Wait-TcpPort -Name 'ln-relay' -Port 8024
-        }
     }
 
     if (-not $SkipFrontend) {

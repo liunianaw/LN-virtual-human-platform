@@ -38,12 +38,12 @@ public class RuntimeConnectionTicketService
         Instant expires = now.plus(30, ChronoUnit.SECONDS);
         VoiceRuntimeBinding voice = principal.voice();
         jdbc.update("insert into s_runtime_ticket (id,created_at,updated_at,ticket_hash,account_id,application_id,session_id," +
-                "config_version_id,voice_version_id,provider_kind,provider_voice_ref,relay_version_ref,official_service_id," +
+                "session_snapshot_id,voice_version_id,provider_kind,provider_voice_ref,official_service_id," +
                 "official_service_revision,purpose,status,expires_at,grant_id,expected_connection_epoch) " +
-                "values (uuid_short(),?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?,?)",
+                "values (uuid_short(),?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?,?)",
             now, now, hash(ticket), principal.accountId(), principal.applicationId(), principal.sessionId(),
-            principal.configVersionId(), voice.voiceVersionId(), voice.providerKind().name(), voice.providerVoiceRef(),
-            voice.relayVersionRef(), voice.officialServiceId(), voice.officialServiceRevision(), purpose, expires,
+            principal.snapshotId(), voice.voiceVersionId(), voice.providerKind().name(), voice.providerVoiceRef(),
+            voice.officialServiceId(), voice.officialServiceRevision(), purpose, expires,
             grant.id(), connectionEpoch);
         return new IssuedTicket(ticket, expires);
     }
@@ -52,7 +52,7 @@ public class RuntimeConnectionTicketService
     public ConsumedTicket consume(String ticket)
     {
         if (ticket == null || !ticket.matches("[A-Za-z0-9_-]{43}")) throw rejected();
-        TicketRow row = jdbc.query("select grant_id,account_id,application_id,session_id,config_version_id,voice_version_id," +
+        TicketRow row = jdbc.query("select grant_id,account_id,application_id,session_id,session_snapshot_id,voice_version_id," +
                 "purpose,expected_connection_epoch,status,expires_at from s_runtime_ticket where ticket_hash=? for update",
             rs -> rs.next() ? new TicketRow(rs.getObject(1) == null ? 0 : rs.getLong(1), rs.getLong(2), rs.getLong(3),
                 rs.getLong(4), rs.getLong(5), rs.getLong(6), rs.getString(7), rs.getObject(8) == null ? null : rs.getLong(8),
@@ -62,7 +62,7 @@ public class RuntimeConnectionTicketService
         RuntimeAuthorization.Grant grant = access.verify(row.grantId());
         RuntimePrincipal principal = grant.principal();
         if (principal.accountId() != row.accountId() || principal.applicationId() != row.applicationId()
-            || principal.sessionId() != row.sessionId() || principal.configVersionId() != row.configId()
+            || principal.sessionId() != row.sessionId() || principal.snapshotId() != row.snapshotId()
             || principal.voice().voiceVersionId() != row.voiceVersionId()) throw rejected();
         if (jdbc.update("update s_runtime_ticket set status='CONSUMED',consumed_at=utc_timestamp(3),updated_at=utc_timestamp(3) " +
             "where ticket_hash=? and status='ACTIVE'", hash(ticket)) != 1) throw rejected();
@@ -76,7 +76,7 @@ public class RuntimeConnectionTicketService
         try { return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)); }
         catch (Exception error) { throw new IllegalStateException("SHA-256 unavailable", error); }
     }
-    private record TicketRow(long grantId, long accountId, long applicationId, long sessionId, long configId,
+    private record TicketRow(long grantId, long accountId, long applicationId, long sessionId, long snapshotId,
         long voiceVersionId, String purpose, Long expectedEpoch, String status, Instant expiresAt) { }
     public record IssuedTicket(String ticket, Instant expiresAt) { }
     public record ConsumedTicket(RuntimeAuthorization.Grant grant, String purpose, Long expectedEpoch) { }

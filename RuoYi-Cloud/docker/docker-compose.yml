@@ -120,9 +120,6 @@ services:
       TTS_ENABLED: "${TTS_ENABLED:?Set TTS_ENABLED to true or false}"
       TTS_PROVIDER_ENDPOINT: "${TTS_PROVIDER_ENDPOINT:-}"
       TTS_PROVIDER_API_KEY: "${TTS_PROVIDER_API_KEY:-}"
-      RELAY_ENABLED: "${RELAY_ENABLED:?Set RELAY_ENABLED to true or false}"
-      RELAY_ENDPOINT: "${RELAY_ENDPOINT:-}"
-      RELAY_ACCESS_TOKEN: "${RELAY_ACCESS_TOKEN:-}"
     command:
       - /bin/sh
       - -ec
@@ -132,8 +129,6 @@ services:
         require_when_enabled M2_IMAGE_PROVIDER_ENABLED "$$M2_IMAGE_PROVIDER_ENABLED" "$$RUOYI_MEDIA_QWEN_API_KEY"
         require_when_enabled TTS_ENABLED "$$TTS_ENABLED" "$$TTS_PROVIDER_ENDPOINT"
         require_when_enabled TTS_ENABLED "$$TTS_ENABLED" "$$TTS_PROVIDER_API_KEY"
-        require_when_enabled RELAY_ENABLED "$$RELAY_ENABLED" "$$RELAY_ENDPOINT"
-        require_when_enabled RELAY_ENABLED "$$RELAY_ENABLED" "$$RELAY_ACCESS_TOKEN"
         exit 0
     restart: "no"
     logging: *container-logging
@@ -190,9 +185,6 @@ services:
       TTS_ENABLED: "${TTS_ENABLED:?Set TTS_ENABLED to true or false}"
       TTS_PROVIDER_ENDPOINT: "${TTS_PROVIDER_ENDPOINT:-}"
       TTS_PROVIDER_API_KEY: "${TTS_PROVIDER_API_KEY:-}"
-      RELAY_ENABLED: "${RELAY_ENABLED:?Set RELAY_ENABLED to true or false}"
-      RELAY_ENDPOINT: "${RELAY_ENDPOINT:-}"
-      RELAY_ACCESS_TOKEN: "${RELAY_ACCESS_TOKEN:-}"
     depends_on:
       ruoyi-mysql:
         condition: service_healthy

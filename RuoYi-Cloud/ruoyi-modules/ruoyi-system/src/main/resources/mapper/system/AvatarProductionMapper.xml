@@ -40,10 +40,10 @@
     <insert id="insertActionTask">
         insert into p_generation_task (id, created_at, updated_at, account_id, avatar_id, avatar_version_id,
             source_file_id, task_kind, status, internal_state, progress, official_service_id, service_snapshot,
-            pipeline_version, quota_reservation_id, request_id, reservation_no, webhook_endpoint_id)
+            pipeline_version, quota_reservation_id, request_id, reservation_no)
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{avatarId}, #{versionId}, #{sourceFileId},
             'REGENERATE', 'QUEUED', 'READY', 0, #{officialServiceId}, cast(#{serviceSnapshot} as json),
-            #{pipelineVersion}, #{reservationId}, #{requestId}, 1, #{webhookEndpointId})
+            #{pipelineVersion}, #{reservationId}, #{requestId}, 1)
     </insert>
     <insert id="initializeSelection">
         insert into p_avatar_action_selection (avatar_version_id, action_code, account_id, updated_at)
@@ -212,7 +212,7 @@
     </insert>
     <select id="ownedVersion" resultType="map">
         select cast(v.id as char) as versionId, cast(v.avatar_id as char) as avatarId,
-            v.status as versionStatus, v.candidate_revision as candidateRevision, v.assembly_revision as assemblyRevision
+            v.status as versionStatus, v.candidate_revision as candidateRevision, v.assembly_revision as assemblyRevision, a.visibility as visibility
         from p_avatar_version v join p_avatar a on a.id = v.avatar_id and a.account_id = v.account_id
         where v.id = #{versionId} and v.avatar_id = #{avatarId} and v.account_id = #{accountId}
           and a.status not in ('DELETING','DELETED','DISABLED') and v.status not in ('DELETING','DELETED')

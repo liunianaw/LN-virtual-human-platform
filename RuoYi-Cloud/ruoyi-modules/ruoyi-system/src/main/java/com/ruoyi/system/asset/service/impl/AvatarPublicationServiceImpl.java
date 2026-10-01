@@ -88,7 +88,7 @@ public class AvatarPublicationServiceImpl implements IAvatarPublicationService
             throw new ServiceException("必须确认人工视觉验收并填写不超过 500 字的验收备注");
         Map<String, Object> avatarAccess = publicationMapper.selectAccessibleAvatar(accountId, avatarId);
         if (avatarAccess == null || !asBoolean(avatarAccess.get("owned"))) throw forbidden("无权发布此 Avatar 版本");
-        if ("OFFICIAL".equals(avatarAccess.get("visibility")) && !SecurityUtils.isAdmin())
+        if (SecurityUtils.isAdmin() != "OFFICIAL".equals(avatarAccess.get("visibility")))
             throw forbidden("只有管理员可以发布官方公共角色");
         transactionTemplate.executeWithoutResult(status -> {
             AvatarVersionRecord version = publicationMapper.selectOwnedVersionForUpdate(accountId, avatarId, versionId);

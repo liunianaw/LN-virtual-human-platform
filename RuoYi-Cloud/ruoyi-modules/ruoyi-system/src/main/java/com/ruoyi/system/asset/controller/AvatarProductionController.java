@@ -28,6 +28,9 @@ public class AvatarProductionController
         this.productionService = productionService;
     }
 
+    @org.springframework.web.bind.annotation.ModelAttribute
+    public void consoleIdentity() { AssetConsoleIdentity.console(); }
+
     @GetMapping("/production")
     @RequiresPermissions("system:asset:list")
     public AjaxResult production(@PathVariable Long avatarId, @PathVariable Long versionId)

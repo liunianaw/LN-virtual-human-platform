@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Uses the fixed session-to-system identity; browser authorization never crosses this boundary. */
 @Component
@@ -18,7 +19,8 @@ public class SystemRuntimeClient
 {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     private final ObjectMapper json;
-    public SystemRuntimeClient(ObjectMapper json) { this.json = json; }
+    private final JdbcTemplate jdbc;
+    public SystemRuntimeClient(ObjectMapper json, JdbcTemplate jdbc) { this.json = json; this.jdbc = jdbc; }
 
     public Map<String, Object> avatarPackage(RuntimePrincipal principal)
     {
@@ -27,7 +29,11 @@ public class SystemRuntimeClient
         if (blank(baseUrl) || blank(bearer)) throw new RuntimeProblem(HttpStatus.SERVICE_UNAVAILABLE, "RUNTIME_AUTH_NOT_CONFIGURED", "Runtime package access is unavailable.");
         try
         {
-            String body = json.writeValueAsString(Map.of("accountId", principal.accountId(), "configVersionId", principal.configVersionId()));
+            Long avatarVersionId = jdbc.query("select avatar_version_id from s_session_snapshot where id=? and account_id=? and application_id=?",
+                rs -> rs.next() ? rs.getLong(1) : null, principal.snapshotId(), principal.accountId(), principal.applicationId());
+            if (avatarVersionId == null || avatarVersionId <= 0)
+                throw new RuntimeProblem(HttpStatus.CONFLICT, "AVATAR_PACKAGE_UNAVAILABLE", "The Session snapshot has no Avatar.");
+            String body = json.writeValueAsString(Map.of("accountId", principal.accountId(), "avatarVersionId", avatarVersionId));
             HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/internal/v1/runtime-avatar-packages"))
                 .timeout(Duration.ofSeconds(8)).header("Authorization", "Bearer " + bearer).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build();

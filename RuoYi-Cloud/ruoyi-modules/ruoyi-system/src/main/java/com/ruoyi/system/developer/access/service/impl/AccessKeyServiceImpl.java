@@ -5,7 +5,6 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -27,9 +26,7 @@ import com.ruoyi.system.developer.access.service.IAccessKeyService;
 @Service
 public class AccessKeyServiceImpl implements IAccessKeyService
 {
-    private static final Set<String> MANAGEMENT_SCOPES = Set.of("assets:read", "assets:write", "generation:read",
-        "generation:write", "config:read", "config:write", "keys:write", "usage:read", "webhooks:write");
-    private static final List<String> SESSION_SCOPES = List.of("sessions:create", "sessions:read", "sessions:grant", "sessions:end", "sessions:revoke");
+    private static final List<String> SESSION_SCOPES = List.of("sessions:create", "sessions:read", "sessions:grant", "sessions:end", "sessions:revoke", "skills:invoke");
     private static final SecureRandom RANDOM = new SecureRandom();
     private final AccessKeyMapper mapper;
     private final ObjectMapper json;
@@ -46,9 +43,9 @@ public class AccessKeyServiceImpl implements IAccessKeyService
     @Override
     public Principal authenticate(String authorization, String requiredType, String requiredScope)
     {
-        if (authorization == null || !authorization.matches("Bearer ln[ma]_[0-9a-f]{32}_[A-Za-z0-9_-]{43}")) throw unauthorized();
+        if (!"APPLICATION".equals(requiredType) || authorization == null
+            || !authorization.matches("Bearer lna_[0-9a-f]{32}_[A-Za-z0-9_-]{43}")) throw unauthorized();
         String raw = authorization.substring(7);
-        if (!("MANAGEMENT".equals(requiredType) ? raw.startsWith("lnm_") : raw.startsWith("lna_"))) throw unauthorized();
         Map<String, Object> row = mapper.byPublicId(raw.substring(4, 36));
         if (row == null || !"hmac-sha256-v1".equals(row.get("hashKeyVersion"))
             || !MessageDigest.isEqual((byte[]) row.get("secretHash"), digest(raw))
@@ -71,41 +68,10 @@ public class AccessKeyServiceImpl implements IAccessKeyService
     public List<Map<String, Object>> list(long accountId, String type, Long applicationId)
     {
         account(accountId, false);
-        if (!Set.of("MANAGEMENT", "APPLICATION").contains(type) || "APPLICATION".equals(type) && applicationId == null)
+        if (!"APPLICATION".equals(type) || applicationId == null)
             throw bad("凭证类型无效");
         if (applicationId != null) application(accountId, applicationId, false);
         return mapper.list(accountId, type, applicationId);
-    }
-
-    @Override
-    @Transactional
-    public Map<String, Object> createManagement(long accountId, String name, List<String> scopes, String key, Principal caller)
-    {
-        account(accountId, true);
-        String safeName = name(name);
-        List<String> safeScopes = scopes(scopes, caller);
-        byte[] requestHash = sha("create|" + safeName + "|" + String.join(",", safeScopes));
-        Long previous = previous(accountId, "key:create", key, requestHash);
-        if (previous != null) return summary(accountId, previous);
-        return issue(accountId, null, "MANAGEMENT", safeName, safeScopes, "key:create", key, requestHash, caller);
-    }
-
-    @Override
-    @Transactional
-    public Map<String, Object> rotateManagement(long accountId, long keyId, String key, Principal caller)
-    {
-        account(accountId, true);
-        String scope = "key:rotate:" + keyId;
-        byte[] requestHash = sha(scope);
-        Long previous = previous(accountId, scope, key, requestHash);
-        if (previous != null) return summary(accountId, previous);
-        Map<String, Object> old = ownedKey(accountId, keyId, "MANAGEMENT");
-        if (!"ACTIVE".equals(old.get("status"))) throw conflict("凭证已停用");
-        List<String> safeScopes = readScopes(old.get("scopes"));
-        if (caller != null && !caller.scopes().containsAll(safeScopes)) throw forbidden("不能提升管理 Key 权限");
-        mapper.changeStatus(keyId, "DISABLED");
-        event(accountId, keyId, "DISABLED", caller);
-        return issue(accountId, null, "MANAGEMENT", old.get("name").toString(), safeScopes, scope, key, requestHash, caller);
     }
 
     @Override
@@ -153,33 +119,13 @@ public class AccessKeyServiceImpl implements IAccessKeyService
         return summary(accountId, keyId);
     }
 
-    @Override
-    @Transactional
-    public Map<String, Object> changeStatus(long accountId, long keyId, String status, String key, Principal caller)
-    {
-        account(accountId, true);
-        if (!Set.of("DISABLED", "DELETED").contains(status)) throw bad("凭证状态无效");
-        String scope = "key:status:" + keyId;
-        byte[] requestHash = sha(scope + "|" + status);
-        Long previous = previous(accountId, scope, key, requestHash);
-        if (previous != null) return summary(accountId, previous);
-        Map<String, Object> old = ownedKey(accountId, keyId, "MANAGEMENT");
-        if (caller != null && caller.keyId() == keyId) throw forbidden("不能用当前 Key 停用自身");
-        if (!"ACTIVE".equals(old.get("status")) && !("DELETED".equals(status) && "DISABLED".equals(old.get("status"))))
-            throw conflict("凭证状态已变化");
-        mapper.changeStatus(keyId, status);
-        event(accountId, keyId, status, caller);
-        remember(accountId, scope, key, requestHash, keyId);
-        return summary(accountId, keyId);
-    }
-
     private Map<String, Object> issue(long accountId, Long applicationId, String type, String name, List<String> scopes,
         String scope, String requestId, byte[] requestHash, Principal caller)
     {
         byte[] identity = new byte[16], secretBytes = new byte[32];
         RANDOM.nextBytes(identity); RANDOM.nextBytes(secretBytes);
         String publicId = HexFormat.of().formatHex(identity);
-        String secret = ("MANAGEMENT".equals(type) ? "lnm_" : "lna_") + publicId + "_" + Base64.getUrlEncoder().withoutPadding().encodeToString(secretBytes);
+        String secret = "lna_" + publicId + "_" + Base64.getUrlEncoder().withoutPadding().encodeToString(secretBytes);
         long id = mapper.nextId();
         try
         {
@@ -199,8 +145,7 @@ public class AccessKeyServiceImpl implements IAccessKeyService
         String eventId = UUID.randomUUID().toString();
         mapper.outbox(mapper.nextId(), accountId, eventId, Long.toString(id),
             "{\"keyId\":\"" + id + "\",\"status\":\"" + status + "\"}", Instant.now());
-        mapper.audit(mapper.nextId(), accountId, id, caller == null ? "CONSOLE" : "MANAGEMENT",
-            caller == null ? null : caller.keyId(), status);
+        mapper.audit(mapper.nextId(), accountId, id, "CONSOLE", null, status);
     }
     private Long previous(long accountId, String operation, String key, byte[] hash)
     {
@@ -225,13 +170,6 @@ public class AccessKeyServiceImpl implements IAccessKeyService
     { Map<String, Object> row = lock ? mapper.applicationForUpdate(accountId, applicationId) : mapper.application(accountId, applicationId); if (row == null) throw forbidden("应用不存在或无权访问"); return row; }
     private static String name(String value)
     { if (value == null || value.isBlank() || value.trim().length() > 100) throw bad("凭证名称无效"); return value.trim(); }
-    private static List<String> scopes(List<String> requested, Principal caller)
-    {
-        if (requested == null || requested.isEmpty() || !MANAGEMENT_SCOPES.containsAll(requested)) throw bad("管理 Key 权限无效");
-        List<String> sorted = new ArrayList<>(Set.copyOf(requested)); sorted.sort(String::compareTo);
-        if (caller != null && !caller.scopes().containsAll(sorted)) throw forbidden("不能提升管理 Key 权限");
-        return sorted;
-    }
     private List<String> readScopes(Object value)
     { try { return json.readValue(value.toString(), new TypeReference<List<String>>() {}); } catch (Exception error) { throw forbidden("凭证权限无效"); } }
     private byte[] digest(String raw)

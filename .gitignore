@@ -8,6 +8,7 @@
 **/.env.*
 !**/.env.example
 RuoYi-Cloud/ruoyi-modules/ruoyi-system/src/main/resources/application-local.yml
+RuoYi-Cloud/sql/备份/
 validation/workspace/
 **/__pycache__/
 **/.venv/

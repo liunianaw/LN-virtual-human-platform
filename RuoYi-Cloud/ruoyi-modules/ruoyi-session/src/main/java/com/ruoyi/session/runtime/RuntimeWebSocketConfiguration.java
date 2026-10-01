@@ -30,21 +30,16 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
     private final BusinessSessionService business;
     private final TtsSubmissionService submissions;
     private final RuntimeEventPublisher events;
-    private final IChatRuntimeService chat;
-    private final ChatTurnStore chatStore;
-    private final ContextRuntimeService context;
     private final ObjectMapper json;
     private final RuntimeLimits limits;
 
     public RuntimeWebSocketConfiguration(RuntimeConnectionTicketService tickets, RuntimeAuthorization access,
         RuntimeConnectionEpochs epochs, PersistentRuntimeStore store, SpeakOnlyRuntimeService runtime,
         BusinessSessionService business, TtsSubmissionService submissions, RuntimeEventPublisher events,
-        ObjectMapper json, RuntimeLimits limits, IChatRuntimeService chat, ChatTurnStore chatStore,
-        ContextRuntimeService context)
+        ObjectMapper json, RuntimeLimits limits)
     {
         this.tickets = tickets; this.access = access; this.epochs = epochs; this.store = store;
         this.runtime = runtime; this.business = business; this.submissions = submissions; this.events = events; this.json = json; this.limits = limits;
-        this.chat = chat; this.chatStore = chatStore; this.context = context;
     }
 
     @org.springframework.context.annotation.Bean
@@ -132,8 +127,6 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
                 switch (node.path("type").asText())
                 {
                     case "speech.create" -> speech(session, fresh, epoch, node);
-                    case "chat.create" -> chat(session, fresh, epoch, node);
-                    case "guidance.result" -> guidance(session, fresh, epoch, node);
                     case "turn.stop" -> stop(session, fresh, epoch, node);
                     case "playback.report" -> playback(session, fresh, epoch, node);
                     default -> throw problem("CAPABILITY_NOT_ALLOWED");
@@ -159,11 +152,7 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             RuntimePrincipal principal = grant.principal();
             long epoch = (long) session.getAttributes().get("connectionEpoch");
             try { runtime.disconnect(principal, epoch); }
-            finally
-            {
-                try { chat.cancelSession(principal.sessionId(), epoch); }
-                finally { events.unregister(principal.sessionId(), session); }
-            }
+            finally { events.unregister(principal.sessionId(), session); }
         }
 
         private void authenticate(WebSocketSession session, JsonNode node) throws IOException
@@ -176,16 +165,13 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             if (!"CONNECT".equals(consumed.purpose()) || consumed.expectedEpoch() != null) throw problem("TICKET_INVALID");
             RuntimeAuthorization.Grant grant = consumed.grant();
             RuntimePrincipal principal = grant.principal();
-            long epoch = chatStore.openConnection(principal);
+            long epoch = store.openConnection(principal);
             epochs.advance(principal, epoch);
             runtime.replaceConnection(principal, epoch);
-            chat.cancelPrior(principal.sessionId(), epoch);
             session.getAttributes().put("runtimeGrant", grant);
             session.getAttributes().put("connectionEpoch", epoch);
             if (!events.register(principal, epoch, session)) { session.close(new CloseStatus(4009, "replaced")); return; }
             List<String> capabilities = new java.util.ArrayList<>(List.of("speech.create", "turn.stop", "playback.report"));
-            if (principal.scopes().contains("chat:write")) capabilities.add("chat.create");
-            if (principal.scopes().contains("context:capture")) capabilities.add("guidance.result");
             send(session, event("connection.ready", principal, epoch, null, node.path("requestId").asText(),
                 Map.of("connectionEpoch", Long.toString(epoch), "effectiveScopes", principal.scopes(),
                     "capabilities", capabilities,
@@ -201,7 +187,7 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
                 || next.principal().accountId() != current.principal().accountId()
                 || next.principal().applicationId() != current.principal().applicationId()
                 || next.principal().sessionId() != current.principal().sessionId()
-                || next.principal().configVersionId() != current.principal().configVersionId()
+                || next.principal().snapshotId() != current.principal().snapshotId()
                 || !next.source().equals(current.source())) throw problem("TICKET_INVALID");
             session.getAttributes().put("runtimeGrant", next);
             send(session, event("connection.reauthorized", next.principal(), epoch, null, node.path("requestId").asText(),
@@ -213,8 +199,6 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             RuntimePrincipal principal = grant.principal();
             principal.requireSpeakScope();
             String requestId = node.path("requestId").asText();
-            Long priorChat = chatStore.activeChat(principal);
-            if (priorChat != null) chat.stop(principal, priorChat, "REPLACED");
             SpeakOnlyRuntimeService.SpeechStarted started = runtime.start(principal, requestId, node.path("data").path("text").asText(), epoch);
             if ("BUSINESS_KEY".equals(grant.source())) business.successfulActivity(principal.sessionId());
             send(session, event("request.ack", principal, epoch, started.turnId(), requestId,
@@ -223,31 +207,6 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             submissions.submit(grant, epoch, started.initialWork());
         }
 
-        private void chat(WebSocketSession session, RuntimeAuthorization.Grant grant, long epoch, JsonNode node) throws IOException
-        {
-            String requestId = node.path("requestId").asText();
-            IChatRuntimeService.Started started = chat.start(grant, epoch, requestId,
-                node.path("data").path("text").asText(), node.path("data"));
-            if ("BUSINESS_KEY".equals(grant.source())) business.successfulActivity(grant.principal().sessionId());
-            send(session, event("request.ack", grant.principal(), epoch, Long.toString(started.turnId()), requestId,
-                Map.of("requestId", requestId, "turnId", Long.toString(started.turnId()), "status", "ACCEPTED")));
-            send(session, event("turn.started", grant.principal(), epoch, Long.toString(started.turnId()), requestId,
-                Map.of("mode", "CHAT")));
-            chat.launch(started.turnId());
-        }
-
-        private void guidance(WebSocketSession session, RuntimeAuthorization.Grant grant, long epoch, JsonNode node) throws IOException
-        {
-            String rawTurn = node.path("turnId").asText();
-            if (!rawTurn.matches("[1-9][0-9]{0,18}")) throw problem("INVALID_ARGUMENT");
-            long turnId;
-            try { turnId = Long.parseLong(rawTurn); }
-            catch (NumberFormatException error) { throw problem("INVALID_ARGUMENT"); }
-            context.guidanceResult(grant, epoch, turnId, node.path("data").path("guidanceId").asText(),
-                node.path("data").path("status").asText());
-            send(session, event("guidance.ack", grant.principal(), epoch, rawTurn,
-                node.path("requestId").asText(), Map.of("accepted", true)));
-        }
 
         private void stop(WebSocketSession session, RuntimeAuthorization.Grant grant, long epoch, JsonNode node) throws IOException
         {
@@ -260,11 +219,7 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             long parsedTurnId;
             try { parsedTurnId = Long.parseLong(turnId); }
             catch (NumberFormatException error) { throw problem("INVALID_ARGUMENT"); }
-            boolean chatTurn = chatStore.chatTurn(principal, parsedTurnId);
-            SpeakOnlyRuntimeService.StopResult stopped = runtime.hasTurn(turnId)
-                ? runtime.stop(principal, turnId) : chatTurn
-                ? new SpeakOnlyRuntimeService.StopResult(turnId, !chat.stop(principal, parsedTurnId, "USER_STOP"))
-                : runtime.stop(principal, turnId);
+            SpeakOnlyRuntimeService.StopResult stopped = runtime.stop(principal, turnId);
             if ("BUSINESS_KEY".equals(grant.source())) business.successfulActivity(principal.sessionId());
             Map<String, Object> state = new java.util.LinkedHashMap<>(store.turnState(principal, stopped.turnId()));
             state.put("alreadyStopped", stopped.alreadyStopped());

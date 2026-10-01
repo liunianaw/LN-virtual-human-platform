@@ -30,7 +30,6 @@ import com.ruoyi.system.asset.mapper.AssetMapper;
 import com.ruoyi.system.asset.service.IAssetService;
 import com.ruoyi.system.asset.service.IAssetStorageQuotaService;
 import com.ruoyi.system.asset.service.IGenerationQuotaService;
-import com.ruoyi.system.developer.webhook.service.IWebhookService;
 import com.ruoyi.system.storage.ObjectStorage;
 
 /** M2 参考图账本、账户授权和制作任务提交。 */
@@ -47,11 +46,10 @@ public class AssetServiceImpl implements IAssetService
     private final ObjectMapper objectMapper;
     private final IGenerationQuotaService quota;
     private final IAssetStorageQuotaService storageQuota;
-    private final IWebhookService webhooks;
 
     public AssetServiceImpl(AssetMapper assetMapper, ObjectProvider<ObjectStorage> storageProvider,
         TransactionTemplate transactionTemplate, ObjectMapper objectMapper, IGenerationQuotaService quota,
-        IAssetStorageQuotaService storageQuota, IWebhookService webhooks)
+        IAssetStorageQuotaService storageQuota)
     {
         this.assetMapper = assetMapper;
         this.storageProvider = storageProvider;
@@ -59,7 +57,6 @@ public class AssetServiceImpl implements IAssetService
         this.objectMapper = objectMapper;
         this.quota = quota;
         this.storageQuota = storageQuota;
-        this.webhooks = webhooks;
     }
 
     public AssetFileResponse uploadReference(Long accountId, MultipartFile multipartFile, String rightsNoticeVersion,
@@ -156,21 +153,14 @@ public class AssetServiceImpl implements IAssetService
     @Override
     public GenerationTaskResponse createGenerationTask(Long accountId, CreateGenerationTaskRequest request)
     {
-        return createGenerationTask(accountId, request, false);
-    }
-
-    @Override
-    public GenerationTaskResponse createOfficialGenerationTask(Long accountId, CreateGenerationTaskRequest request)
-    {
-        if (!SecurityUtils.isAdmin()) throw forbidden("仅管理员可以创建官方公共角色");
-        return createGenerationTask(accountId, request, true);
+        return createGenerationTask(accountId, request, SecurityUtils.isAdmin());
     }
 
     public GenerationTaskResponse readGenerationTask(Long accountId, Long taskId)
     {
         requireAccount(accountId);
         GenerationTask task = assetMapper.selectTaskByAccountAndId(accountId, taskId);
-        if (task == null) throw forbidden("无权访问此制作任务");
+        if (task == null || !matchesRole(task)) throw forbidden("无权访问此制作任务");
         return taskResponse(task);
     }
 
@@ -178,7 +168,7 @@ public class AssetServiceImpl implements IAssetService
     public List<GenerationTaskResponse> listGenerationTasks(Long accountId)
     {
         requireAccount(accountId);
-        return assetMapper.selectRecentTasksByAccount(accountId).stream().map(this::taskResponse).toList();
+        return assetMapper.selectRecentTasksByAccount(accountId).stream().filter(this::matchesRole).map(this::taskResponse).toList();
     }
 
     public Map<String, Object> pageGenerationTasks(Long accountId, int pageNum, int pageSize)
@@ -204,6 +194,11 @@ public class AssetServiceImpl implements IAssetService
         return assetMapper.selectActiveAvatarGenerationServices();
     }
 
+    private boolean matchesRole(GenerationTask task)
+    {
+        return SecurityUtils.isAdmin() == "OFFICIAL".equals(assetMapper.avatarVisibility(task.getAccountId(), task.getAvatarId()));
+    }
+
     private GenerationTaskResponse createGenerationTaskInTransaction(Long accountId, CreateGenerationTaskRequest request,
         String visibility, byte[] requestHash)
     {
@@ -215,7 +210,6 @@ public class AssetServiceImpl implements IAssetService
         if (service == null) throw new ServiceException("指定的 Avatar 制作服务不可用");
         if (service.getRevision() != request.getExpectedServiceRevision().longValue())
             throw new ServiceException("制作服务配置已变化，请重新选择", HttpStatus.CONFLICT);
-        if (request.getWebhookEndpointId() != null) webhooks.requireActive(accountId, request.getWebhookEndpointId());
         Long avatarId = nextId();
         Long avatarVersionId = nextId();
         Long taskId = nextId();
@@ -225,8 +219,7 @@ public class AssetServiceImpl implements IAssetService
         assetMapper.insertAvatarVersion(avatarVersionId, avatarId, accountId, sourceFile.getId(), PIPELINE_VERSION,
             json(Map.of("pipelineVersion", PIPELINE_VERSION, "sourceSha256", hex(sourceFile.getSha256()))));
         assetMapper.insertGenerationTask(taskId, accountId, avatarId, avatarVersionId, sourceFile.getId(), service.getId(),
-            serviceSnapshot(service), PIPELINE_VERSION, reservationId, request.getRequestId(), requestHash,
-            request.getWebhookEndpointId());
+            serviceSnapshot(service), PIPELINE_VERSION, reservationId, request.getRequestId(), requestHash);
         for (String action : List.of("idle", "speaking", "listening", "thinking", "nod", "shake_head", "wave", "happy"))
             assetMapper.insertGenerationActionStep(nextId(), accountId, taskId, "ACTION_" + action, action, nextId());
         String eventId = UUID.randomUUID().toString().replace("-", "");
@@ -290,8 +283,7 @@ public class AssetServiceImpl implements IAssetService
             || request.getExpectedServiceRevision() == null || request.getExpectedServiceRevision() <= 0
             || isBlank(request.getRequestId()) || request.getRequestId().length() > 64
             || !request.getRequestId().matches("[A-Za-z0-9._:-]+")
-            || isBlank(request.getName()) || request.getName().trim().length() > 100
-            || request.getWebhookEndpointId() != null && request.getWebhookEndpointId() <= 0)
+            || isBlank(request.getName()) || request.getName().trim().length() > 100)
             throw new ServiceException("制作任务参数无效");
     }
 
@@ -365,8 +357,7 @@ public class AssetServiceImpl implements IAssetService
             return MessageDigest.getInstance("SHA-256").digest(objectMapper.writeValueAsBytes(Map.of(
                 "accountId", accountId.toString(), "sourceFileId", request.getSourceFileId().toString(),
                 "officialServiceId", request.getOfficialServiceId().toString(), "name", request.getName().trim(),
-                "expectedServiceRevision", request.getExpectedServiceRevision(), "visibility", visibility,
-                "webhookEndpointId", request.getWebhookEndpointId() == null ? "" : request.getWebhookEndpointId().toString())));
+                "expectedServiceRevision", request.getExpectedServiceRevision(), "visibility", visibility)));
         }
         catch (Exception e) { throw new ServiceException("无法生成任务幂等摘要"); }
     }

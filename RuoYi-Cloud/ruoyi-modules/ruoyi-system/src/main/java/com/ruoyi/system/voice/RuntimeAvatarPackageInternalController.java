@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.ruoyi.common.core.exception.ServiceException;
 import com.ruoyi.system.asset.service.IAvatarPublicationService;
 
-/** Session-only bridge for the frozen application configuration's formal Avatar package. */
+/** Session-only bridge for the frozen Session snapshot's formal Avatar version. */
 @RestController
 @RequestMapping("/internal/v1/runtime-avatar-packages")
 public class RuntimeAvatarPackageInternalController
@@ -26,13 +26,14 @@ public class RuntimeAvatarPackageInternalController
     public Map<String, Object> read(@RequestHeader("Authorization") String authorization, @RequestBody Request body)
     {
         guard.requireSession(authorization);
-        if (body == null || body.accountId() <= 0 || body.configVersionId() <= 0) throw new ServiceException("运行时角色包请求无效", 400);
-        Binding binding = jdbc.query("select c.avatar_version_id,v.avatar_id from p_app_config c join p_avatar_version v on v.id=c.avatar_version_id where c.id=? and c.account_id=? and c.mode in ('SPEAK_ONLY','CHAT')",
-            rs -> rs.next() ? new Binding(rs.getLong(1), rs.getLong(2)) : null, body.configVersionId(), body.accountId());
+        if (body == null || body.accountId() <= 0 || body.avatarVersionId() <= 0) throw new ServiceException("运行时角色包请求无效", 400);
+        Binding binding = jdbc.query("select v.id,v.avatar_id from p_avatar_version v join p_avatar a on a.id=v.avatar_id " +
+            "where v.id=? and v.status='PUBLISHED' and (a.visibility='OFFICIAL' or a.account_id=?)",
+            rs -> rs.next() ? new Binding(rs.getLong(1), rs.getLong(2)) : null, body.avatarVersionId(), body.accountId());
         if (binding == null) throw new ServiceException("运行时配置不存在", 404);
         return avatars.runtimePackage(body.accountId(), binding.avatarId(), binding.avatarVersionId());
     }
 
     private record Binding(long avatarVersionId, long avatarId) { }
-    public record Request(long accountId, long configVersionId) { }
+    public record Request(long accountId, long avatarVersionId) { }
 }

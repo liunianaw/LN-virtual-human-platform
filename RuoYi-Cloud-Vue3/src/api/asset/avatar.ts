@@ -1,4 +1,6 @@
 import request from '@/utils/request'
+const assetBase = () => '/system/asset'
+const avatarBase = () => assetBase() + '/avatars'
 import type { AjaxResult } from '@/types'
 
 export interface AvatarReferenceFile {
@@ -16,7 +18,6 @@ export interface CreateAvatarGenerationTaskRequest {
   expectedServiceRevision: number
   requestId: string
   name: string
-  webhookEndpointId?: string
 }
 
 export interface AvatarGenerationService {
@@ -136,7 +137,7 @@ export interface AvatarReferences {
 
 export function uploadAvatarReference(data: FormData): Promise<AjaxResult<AvatarReferenceFile>> {
   return request({
-    url: '/system/asset/files',
+    url: assetBase() + '/files',
     method: 'post',
     headers: { 'Content-Type': 'multipart/form-data' },
     data
@@ -145,44 +146,38 @@ export function uploadAvatarReference(data: FormData): Promise<AjaxResult<Avatar
 
 export function createAvatarGenerationTask(data: CreateAvatarGenerationTaskRequest): Promise<AjaxResult<AvatarGenerationTask>> {
   return request({
-    url: '/system/asset/generation-tasks',
+    url: assetBase() + '/generation-tasks',
     method: 'post',
     data
   })
 }
 
-export function createOfficialAvatarGenerationTask(data: CreateAvatarGenerationTaskRequest): Promise<AjaxResult<AvatarGenerationTask>> {
-  return request({
-    url: '/system/asset/admin/public-generation-tasks',
-    method: 'post',
-    data
-  })
-}
+
 
 export function listAvatarGenerationTasks(): Promise<AjaxResult<AvatarGenerationTask[]>> {
   return request({
-    url: '/system/asset/generation-tasks',
+    url: assetBase() + '/generation-tasks',
     method: 'get'
   })
 }
 
 export function listAvatarGenerationServices(): Promise<AjaxResult<AvatarGenerationService[]>> {
   return request({
-    url: '/system/asset/generation-services',
+    url: assetBase() + '/generation-services',
     method: 'get'
   })
 }
 
 export function getAvatarGenerationTask(taskId: string): Promise<AjaxResult<AvatarGenerationTask>> {
   return request({
-    url: '/system/asset/generation-tasks/' + taskId,
+    url: assetBase() + '/generation-tasks/' + taskId,
     method: 'get'
   })
 }
 
 export function getAvatarVersionPreview(avatarId: string, versionId: string): Promise<AjaxResult<AvatarVersionPreview>> {
   return request({
-    url: '/system/asset/avatars/' + avatarId + '/versions/' + versionId + '/preview',
+    url: avatarBase() + '/' + avatarId + '/versions/' + versionId + '/preview',
     method: 'get'
   })
 }
@@ -193,38 +188,37 @@ export function publishAvatarVersion(
   data: PublishAvatarVersionRequest
 ): Promise<AjaxResult<AvatarVersionPreview>> {
   return request({
-    url: '/system/asset/avatars/' + avatarId + '/versions/' + versionId + '/publish',
+    url: avatarBase() + '/' + avatarId + '/versions/' + versionId + '/publish',
     method: 'post',
     data
   })
 }
 
 export function getAvatarProduction(avatarId: string, versionId: string): Promise<AjaxResult<AvatarProductionSnapshot>> {
-  return request({ url: `/system/asset/avatars/${avatarId}/versions/${versionId}/production`, method: 'get' })
+  return request({ url: `${avatarBase()}/${avatarId}/versions/${versionId}/production`, method: 'get' })
 }
 
 export function getAvatarActionResultPreview(avatarId: string, versionId: string, actionCode: string, resultId: string): Promise<AjaxResult<AvatarActionResultPreview>> {
-  return request({ url: `/system/asset/avatars/${avatarId}/versions/${versionId}/actions/${actionCode}/results/${resultId}/preview`, method: 'get' })
+  return request({ url: `${avatarBase()}/${avatarId}/versions/${versionId}/actions/${actionCode}/results/${resultId}/preview`, method: 'get' })
 }
 
 export function selectAvatarActionResult(avatarId: string, versionId: string, actionCode: string, data: {
   requestId: string; resultId: string; expectedActionRevision: number; visualAccepted: true
 }): Promise<AjaxResult> {
-  return request({ url: `/system/asset/avatars/${avatarId}/versions/${versionId}/actions/${actionCode}/selection`, method: 'post', data })
+  return request({ url: `${avatarBase()}/${avatarId}/versions/${versionId}/actions/${actionCode}/selection`, method: 'post', data })
 }
 
 export function regenerateAvatarAction(avatarId: string, versionId: string, actionCode: string, data: {
-  requestId: string; expectedActionRevision: number; acknowledgeUncertainCharge: boolean; supersedesAttemptId?: string;
-  webhookEndpointId?: string
+  requestId: string; expectedActionRevision: number; acknowledgeUncertainCharge: boolean; supersedesAttemptId?: string
 }): Promise<AjaxResult> {
-  return request({ url: `/system/asset/avatars/${avatarId}/versions/${versionId}/actions/${actionCode}/generations`, method: 'post', data })
+  return request({ url: `${avatarBase()}/${avatarId}/versions/${versionId}/actions/${actionCode}/generations`, method: 'post', data })
 }
 
 export function recoverAvatarActionAttempt(avatarId: string, versionId: string, actionCode: string, attemptId: string, data: {
   requestId: string; expectedActionRevision: number
 }): Promise<AjaxResult> {
   return request({
-    url: `/system/asset/avatars/${avatarId}/versions/${versionId}/actions/${actionCode}/attempts/${attemptId}/recovery`,
+    url: `${avatarBase()}/${avatarId}/versions/${versionId}/actions/${actionCode}/attempts/${attemptId}/recovery`,
     method: 'post', data
   })
 }
@@ -233,7 +227,7 @@ export function discardAvatarActionAttempt(avatarId: string, versionId: string, 
   requestId: string; expectedActionRevision: number; retainResultId: string
 }): Promise<AjaxResult> {
   return request({
-    url: `/system/asset/avatars/${avatarId}/versions/${versionId}/actions/${actionCode}/attempts/${attemptId}/discard`,
+    url: `${avatarBase()}/${avatarId}/versions/${versionId}/actions/${actionCode}/attempts/${attemptId}/discard`,
     method: 'post', data
   })
 }
@@ -241,14 +235,14 @@ export function discardAvatarActionAttempt(avatarId: string, versionId: string, 
 export function assembleAvatarVersion(avatarId: string, versionId: string, data: {
   requestId: string; expectedCandidateRevision: number; selectedResults: Array<{ actionCode: string; resultId: string }>
 }): Promise<AjaxResult> {
-  return request({ url: `/system/asset/avatars/${avatarId}/versions/${versionId}/assemble`, method: 'post', data })
+  return request({ url: `${avatarBase()}/${avatarId}/versions/${versionId}/assemble`, method: 'post', data })
 }
 
 export function createAvatarVersion(avatarId: string, data: {
   requestId: string; expectedAvatarRevision: number; baseVersionId?: string;
-  sourceFileId?: string; officialServiceId?: string; expectedServiceRevision?: number; webhookEndpointId?: string
+  sourceFileId?: string; officialServiceId?: string; expectedServiceRevision?: number
 }): Promise<AjaxResult<{ avatarId: string; versionId: string; candidateRevision: number; taskId?: string | null }>> {
-  return request({ url: `/system/asset/avatars/${avatarId}/versions`, method: 'post', data })
+  return request({ url: `${avatarBase()}/${avatarId}/versions`, method: 'post', data })
 }
 
 export function listPublicAvatars(pageNum = 1, pageSize = 20): Promise<AjaxResult<{ items: AvatarCatalogItem[]; total: number }>> {
@@ -260,7 +254,7 @@ export function listAdminPublicAvatars(pageNum = 1, pageSize = 20, status?: stri
 }
 
 export function getAvatarDetail(avatarId: string): Promise<AjaxResult<AvatarDetail>> {
-  return request({ url: `/system/asset/avatars/${avatarId}`, method: 'get' })
+  return request({ url: `${avatarBase()}/${avatarId}`, method: 'get' })
 }
 
 export function listOwnedAvatars(pageNum = 1, pageSize = 20, status?: string, keyword?: string): Promise<AjaxResult<{ items: AvatarCatalogItem[]; total: number }>> {
@@ -268,11 +262,11 @@ export function listOwnedAvatars(pageNum = 1, pageSize = 20, status?: string, ke
 }
 
 export function getAvatarReferences(avatarId: string): Promise<AjaxResult<AvatarReferences>> {
-  return request({ url: `/system/asset/avatars/${avatarId}/references`, method: 'get' })
+  return request({ url: `${avatarBase()}/${avatarId}/references`, method: 'get' })
 }
 
 export function deleteOwnedAvatar(avatarId: string, revision: string): Promise<AjaxResult<{ avatarId: string; status: string }>> {
-  return request({ url: `/system/asset/avatars/${avatarId}`, method: 'delete', headers: { 'If-Match': revision, 'Idempotency-Key': crypto.randomUUID() } })
+  return request({ url: `${avatarBase()}/${avatarId}`, method: 'delete', headers: { 'If-Match': revision, 'Idempotency-Key': crypto.randomUUID() } })
 }
 
 export function unpublishOfficialAvatar(avatarId: string, reason: string): Promise<AjaxResult> {
@@ -280,5 +274,5 @@ export function unpublishOfficialAvatar(avatarId: string, reason: string): Promi
 }
 
 export function disableOfficialAvatar(avatarId: string, reason: string): Promise<AjaxResult> {
-  return request({ url: `/system/asset/admin/avatars/${avatarId}/disable`, method: 'post', data: { reason } })
+  return request({ url: `/api/v1/admin/public-avatars/${avatarId}/disable`, method: 'post', data: { reason } })
 }

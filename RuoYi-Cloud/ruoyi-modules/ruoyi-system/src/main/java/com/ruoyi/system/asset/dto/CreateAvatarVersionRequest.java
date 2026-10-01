@@ -6,4 +6,4 @@ import jakarta.validation.constraints.Positive;
 
 public record CreateAvatarVersionRequest(@NotBlank @RequestId String requestId,
     @NotNull @Positive Long expectedAvatarRevision, @Positive Long baseVersionId, @Positive Long sourceFileId,
-    @Positive Long officialServiceId, @Positive Long expectedServiceRevision, @Positive Long webhookEndpointId) { }
+    @Positive Long officialServiceId, @Positive Long expectedServiceRevision) { }

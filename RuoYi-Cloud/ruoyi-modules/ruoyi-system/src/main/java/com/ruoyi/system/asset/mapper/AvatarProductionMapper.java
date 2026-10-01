@@ -17,7 +17,7 @@ public interface AvatarProductionMapper
         @Param("versionId") Long versionId, @Param("sourceFileId") Long sourceFileId,
         @Param("officialServiceId") Long officialServiceId, @Param("serviceSnapshot") String serviceSnapshot,
         @Param("pipelineVersion") String pipelineVersion, @Param("reservationId") Long reservationId,
-        @Param("requestId") String requestId, @Param("webhookEndpointId") Long webhookEndpointId);
+        @Param("requestId") String requestId);
     int saveSelection(@Param("accountId") Long accountId, @Param("versionId") Long versionId,
         @Param("actionCode") String actionCode, @Param("resultId") Long resultId, @Param("revision") Long revision);
     int initializeSelection(@Param("accountId") Long accountId, @Param("versionId") Long versionId, @Param("actionCode") String actionCode);

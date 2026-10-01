@@ -60,34 +60,15 @@ public class PersistentRuntimeStore
     }
 
     @Transactional
-    public void createChatAudio(RuntimePrincipal principal, long turnId, List<SegmentPlan> segments, long epoch)
-    {
-        int changed = jdbcTemplate.update("update s_turn t join s_session s on s.active_turn_id=t.id " +
-            "set t.text_status='COMPLETED',t.audio_status='RUNNING',t.playback_status='WAITING'," +
-            "t.updated_at=utc_timestamp(3) where t.id=? and t.account_id=? and t.session_id=? and t.turn_type='CHAT' " +
-            "and t.status='RUNNING' and s.connection_epoch=?", turnId, principal.accountId(), principal.sessionId(), epoch);
-        if (changed != 1) throw unavailable();
-        for (SegmentPlan segment : segments)
-        {
-            jdbcTemplate.update("insert into s_operation (id,created_at,updated_at,account_id,session_id,turn_id," +
-                "client_request_id,operation_type,ordinal,config_resource_id,status,playback_status,input_char_count,input_hash," +
-                "result_summary) values (uuid_short(),utc_timestamp(3),utc_timestamp(3),?,?,?,?,'TTS',?,?,'QUEUED'," +
-                "'WAITING',?,?,json_object('segmentId',?))", principal.accountId(), principal.sessionId(), turnId,
-                turnId + ":tts:" + segment.ordinal(), segment.ordinal(), principal.voice().voiceVersionId(),
-                (long) segment.text().codePointCount(0, segment.text().length()), hash(segment.text()), segment.segmentId());
-        }
-    }
-
-    @Transactional
     public void beginTts(RuntimePrincipal principal, TtsSynthesisWork work, long epoch, Long reservationId)
     {
         Operation operation = jdbcTemplate.query("select o.id,o.input_char_count,json_unquote(json_extract(o.result_summary,'$.segmentId')) " +
             "from s_operation o join s_session s on s.id=o.session_id and s.active_turn_id=o.turn_id " +
             "where o.turn_id=? and o.ordinal=? and o.operation_type='TTS' and o.status='QUEUED' " +
-            "and s.account_id=? and s.application_id=? and s.app_config_id=? and s.connection_epoch=? for update",
+            "and s.account_id=? and s.application_id=? and s.session_snapshot_id=? and s.connection_epoch=? for update",
             rs -> rs.next() ? new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)) : null,
             Long.parseLong(work.turnId()), work.ordinal(), principal.accountId(), principal.applicationId(),
-            principal.configVersionId(), epoch);
+            principal.snapshotId(), epoch);
         if (operation == null || !work.segmentId().equals(operation.segmentId())) throw unavailable();
         jdbcTemplate.update("update s_operation set status='RUNNING',quota_reservation_id=?,started_at=utc_timestamp(3)," +
             "updated_at=utc_timestamp(3) where id=? and status='QUEUED'", reservationId, operation.id());
@@ -197,9 +178,9 @@ public class PersistentRuntimeStore
         jdbcTemplate.update("update s_operation set playback_status = 'STOPPED', updated_at = ?, finished_at = ? where turn_id = ? and operation_type = 'TTS' and playback_status not in ('ENDED','FAILED','SKIPPED','STOPPED')",
                 now, now, turnId);
         jdbcTemplate.update("update s_turn set status = 'INTERRUPTED', " +
-            "text_status = case when turn_type = 'CHAT' and text_status = 'RUNNING' then 'INTERRUPTED' else text_status end, " +
-            "audio_status = case when turn_type = 'CHAT' and audio_status = 'NOT_REQUESTED' then audio_status when audio_status = 'COMPLETED' then 'COMPLETED' else 'INTERRUPTED' end, " +
-            "playback_status = case when turn_type = 'CHAT' and playback_status = 'NOT_REQUESTED' then playback_status when playback_status in ('COMPLETED','FAILED') then playback_status else 'STOPPED' end, " +
+            "text_status = 'NOT_REQUESTED', " +
+            "audio_status = case when audio_status = 'COMPLETED' then 'COMPLETED' else 'INTERRUPTED' end, " +
+            "playback_status = case when playback_status in ('COMPLETED','FAILED') then playback_status else 'STOPPED' end, " +
             "cancel_reason = ?, ended_at = coalesce(ended_at, ?), updated_at = ? where id = ? and status = 'RUNNING'",
                 reason, now, now, turnId);
         jdbcTemplate.update("update s_session set active_turn_id=null,updated_at=?,revision=revision+1 where active_turn_id=?", now, turnId);
@@ -240,8 +221,8 @@ public class PersistentRuntimeStore
     @Transactional
     public long openConnection(RuntimePrincipal principal)
     {
-        Long oldEpoch = jdbcTemplate.query("select connection_epoch from s_session where id = ? and account_id = ? and application_id = ? and app_config_id = ? and status = 'ACTIVE' and expires_at > utc_timestamp(3) for update",
-            rs -> rs.next() ? rs.getLong(1) : null, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId());
+        Long oldEpoch = jdbcTemplate.query("select connection_epoch from s_session where id = ? and account_id = ? and application_id = ? and session_snapshot_id = ? and status = 'ACTIVE' and expires_at > utc_timestamp(3) for update",
+            rs -> rs.next() ? rs.getLong(1) : null, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.snapshotId());
         if (oldEpoch == null) throw unavailable();
         Long priorTurnId = jdbcTemplate.query("select active_turn_id from s_session where id=?",
             rs -> rs.next() && rs.getObject(1) != null ? rs.getLong(1) : null, principal.sessionId());
@@ -253,21 +234,20 @@ public class PersistentRuntimeStore
 
     public boolean currentConnection(RuntimePrincipal principal, long epoch)
     {
-        Integer match = jdbcTemplate.queryForObject("select count(1) from s_session where id = ? and account_id = ? and application_id = ? and app_config_id = ? and status = 'ACTIVE' and expires_at > utc_timestamp(3) and connection_epoch = ?",
-            Integer.class, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId(), epoch);
+        Integer match = jdbcTemplate.queryForObject("select count(1) from s_session where id = ? and account_id = ? and application_id = ? and session_snapshot_id = ? and status = 'ACTIVE' and expires_at > utc_timestamp(3) and connection_epoch = ?",
+            Integer.class, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.snapshotId(), epoch);
         return match != null && match == 1;
     }
 
     public java.util.Map<String, Object> sessionState(RuntimePrincipal principal)
     {
         return jdbcTemplate.query("select s.status,s.expires_at,s.connection_epoch,s.active_turn_id,t.status,t.text_status,t.audio_status,t.playback_status "
-                + "from s_session s left join s_turn t on t.id=s.active_turn_id where s.id=? and s.account_id=? and s.application_id=? and s.app_config_id=?",
+                + "from s_session s left join s_turn t on t.id=s.active_turn_id where s.id=? and s.account_id=? and s.application_id=? and s.session_snapshot_id=?",
             rs -> {
                 if (!rs.next() || !"ACTIVE".equals(rs.getString(1))) throw unavailable();
                 java.util.Map<String, Object> state = new java.util.LinkedHashMap<>();
                 state.put("sessionId", Long.toString(principal.sessionId()));
                 state.put("applicationId", Long.toString(principal.applicationId()));
-                state.put("configVersionId", Long.toString(principal.configVersionId()));
                 state.put("status", rs.getString(1));
                 state.put("expiresAt", rs.getTimestamp(2).toInstant().toString());
                 state.put("connectionEpoch", Long.toString(rs.getLong(3)));
@@ -278,7 +258,7 @@ public class PersistentRuntimeStore
                     "status", rs.getString(5), "textStatus", rs.getString(6), "audioStatus", rs.getString(7),
                     "playbackStatus", rs.getString(8)));
                 return state;
-            }, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId());
+            }, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.snapshotId());
     }
 
     public java.util.Map<String, Object> turnState(RuntimePrincipal principal, String turnId)
@@ -293,8 +273,8 @@ public class PersistentRuntimeStore
     public boolean activeSession(RuntimePrincipal principal)
     {
         Integer count = jdbcTemplate.queryForObject("select count(1) from s_session where id=? and account_id=? " +
-            "and application_id=? and app_config_id=? and status='ACTIVE' and expires_at>utc_timestamp(3)",
-            Integer.class, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.configVersionId());
+            "and application_id=? and session_snapshot_id=? and status='ACTIVE' and expires_at>utc_timestamp(3)",
+            Integer.class, principal.sessionId(), principal.accountId(), principal.applicationId(), principal.snapshotId());
         return count != null && count == 1;
     }
 
@@ -306,12 +286,6 @@ public class PersistentRuntimeStore
             principal.sessionId(), principal.accountId(), mediaId);
         if (audio == null) throw new RuntimeProblem(HttpStatus.NOT_FOUND, "MEDIA_NOT_FOUND", "Audio is unavailable.");
         return audio;
-    }
-
-    public List<Long> expiredDebugRuntimeSessionIds()
-    {
-        return jdbcTemplate.queryForList("select s.id from s_session s where s.active_turn_id is not null and exists (select 1 from s_session_grant expired where expired.session_id = s.id and expired.grant_source = 'CONSOLE_DEBUG' and expired.status = 'ACTIVE' and expired.expires_at <= utc_timestamp(3)) and not exists (select 1 from s_session_grant active where active.session_id = s.id and active.grant_source = 'CONSOLE_DEBUG' and active.status = 'ACTIVE' and active.expires_at > utc_timestamp(3))",
-                Long.class);
     }
 
     public List<TemporaryAudioReference> cleanupCandidates(int limit)
@@ -333,45 +307,6 @@ public class PersistentRuntimeStore
         jdbcTemplate.update("update s_temp_object set status='DELETE_PENDING',delete_attempts=delete_attempts+1,next_delete_at=date_add(utc_timestamp(3),interval least(300,5 * pow(2,least(5,delete_attempts))) second),last_error_code=?,updated_at=utc_timestamp(3) where media_id=? and storage_provider=? and bucket=? and object_key=? and status in ('ACTIVE','DELETE_PENDING')",
             code, audio.mediaId(), audio.storageProvider(), audio.bucket(), audio.objectKey());
     }
-
-    public void verifyConsoleGrant(TrustedConsoleDebugGrantClaims claims)
-    {
-        Integer matches = jdbcTemplate.queryForObject("select count(1) from s_session_grant g join s_session s on s.id = g.session_id join s_principal p on p.id = g.principal_id where g.token_id = ? and g.grant_source = 'CONSOLE_DEBUG' and g.status = 'ACTIVE' and g.expires_at > utc_timestamp(3) and g.issuer_console_ref = unhex(?) and g.account_id = ? and g.application_id = ? and g.session_id = ? and g.account_epoch = ? and g.application_epoch = ? and g.principal_epoch = ? and g.session_epoch = ? and s.status = 'ACTIVE' and s.auth_epoch = ? and p.status = 'ACTIVE' and p.auth_epoch = ?",
-                Integer.class, claims.tokenId(), claims.issuerConsoleRef(), claims.accountId(), claims.applicationId(), claims.sessionId(), claims.accountEpoch(),
-                claims.applicationEpoch(), claims.principalEpoch(), claims.sessionEpoch(), claims.sessionEpoch(), claims.principalEpoch());
-        if (matches == null || matches != 1)
-        {
-            throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TOKEN_REVOKED", "The Console DEBUG Session Token is no longer valid.");
-        }
-    }
-
-    public ConsoleGrantMetadata consoleGrantMetadata(RuntimeTokenCodec.V2Claims claims)
-    {
-        if (!"CONSOLE_DEBUG".equals(claims.source()))
-            throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TOKEN_SOURCE_INVALID", "The Session Token source is invalid.");
-        ConsoleGrantMetadata row = jdbcTemplate.query(
-            "select lower(hex(g.issuer_console_ref)),g.runtime_binding,g.account_epoch,g.application_epoch,g.principal_epoch,g.session_epoch,g.created_at,g.expires_at,g.signing_key_version " +
-            "from s_session_grant g join s_session s on s.id=g.session_id where g.token_id=? and g.grant_source='CONSOLE_DEBUG' and g.account_id=? and g.application_id=? " +
-            "and g.session_id=? and s.app_config_id=? and g.status='ACTIVE' and g.expires_at>utc_timestamp(3) and s.status='ACTIVE'",
-            rs -> {
-                if (!rs.next()) return null;
-                try
-                {
-                    VoiceRuntimeBinding voice = json.readValue(rs.getString(2), VoiceRuntimeBinding.class);
-                    return new ConsoleGrantMetadata(rs.getString(1), voice, rs.getLong(3), rs.getLong(4), rs.getLong(5),
-                        rs.getLong(6), rs.getTimestamp(7).toInstant(), rs.getTimestamp(8).toInstant(), rs.getString(9));
-                }
-                catch (Exception error) { throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TOKEN_REVOKED", "The DEBUG grant is invalid."); }
-            }, claims.tokenId(), claims.accountId(), claims.applicationId(), claims.sessionId(), claims.configVersionId());
-        if (row == null || !row.issuedAt().equals(claims.issuedAt()) || !row.expiresAt().equals(claims.expiresAt())
-            || !row.signingVersion().equals(claims.keyVersion()))
-            throw new RuntimeProblem(HttpStatus.UNAUTHORIZED, "TOKEN_REVOKED", "The DEBUG grant is invalid.");
-        return row;
-    }
-
-    public record ConsoleGrantMetadata(String issuerConsoleRef, VoiceRuntimeBinding voice, long accountEpoch,
-        long applicationEpoch, long principalEpoch, long sessionEpoch, Instant issuedAt, Instant expiresAt,
-        String signingVersion) { }
 
     private long nextId()
     {

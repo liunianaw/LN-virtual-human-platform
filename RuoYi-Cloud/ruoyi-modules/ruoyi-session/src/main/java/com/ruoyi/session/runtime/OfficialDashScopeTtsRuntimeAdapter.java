@@ -57,25 +57,10 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
         AudioListener listener = null;
         try
         {
-            OfficialServiceResolver.Resolved config = resolver.resolve(work.voice());
-            Duration timeout = properties.getOfficial().getTimeout();
-            listener = new AudioListener(work.text(), configuredVoice(work), properties.getMaxAudioBytes());
-            completionSink.beforeExternal(work);
-            stage = "connect";
-            WebSocket socket = client.newWebSocketBuilder().header("Authorization", "Bearer " + config.credential())
-                    .header("User-Agent", "LN-Session/1").buildAsync(endpoint(config.endpoint(), config.model()), listener)
-                    .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-            try
-            {
-                stage = "receive";
-                byte[] audio = pcmToWav(listener.await(timeout), properties.getMaxAudioBytes());
-                stage = "store";
-                support.complete(work, completionSink, audio);
-            }
-            finally
-            {
-                socket.sendClose(WebSocket.NORMAL_CLOSURE, "complete");
-            }
+            byte[] audio = synthesizeAudio(work.voice(), work.text(), properties.getMaxAudioBytes(),
+                () -> completionSink.beforeExternal(work));
+            stage = "store";
+            support.complete(work, completionSink, audio);
         }
         catch (TimeoutException exception)
         {
@@ -99,6 +84,31 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
                     listener == null ? "none" : listener.stage(), safeCause(exception));
             support.fail(work, completionSink, "OFFICIAL_TTS_FAILED");
         }
+    }
+
+    /** Bounded administrator audition reuses the same provider protocol without a business Session. */
+    public byte[] audition(VoiceRuntimeBinding voice, String text, Runnable beforeExternal)
+        throws InterruptedException, ExecutionException, TimeoutException
+    {
+        if (text == null || text.isBlank() || text.length() > 200)
+            throw new IllegalArgumentException("Audition text is invalid");
+        return synthesizeAudio(voice, text, Math.min(properties.getMaxAudioBytes(), 1048576), beforeExternal);
+    }
+
+    private byte[] synthesizeAudio(VoiceRuntimeBinding voice, String text, long maximumBytes, Runnable beforeExternal)
+        throws InterruptedException, ExecutionException, TimeoutException
+    {
+        if (text == null || text.isBlank() || voice.providerVoiceRef() == null || voice.providerVoiceRef().isBlank())
+            throw new IllegalArgumentException("Audition text is invalid");
+        OfficialServiceResolver.Resolved config = resolver.resolve(voice);
+        Duration timeout = properties.getOfficial().getTimeout();
+        AudioListener listener = new AudioListener(text, voice.providerVoiceRef(), maximumBytes);
+        beforeExternal.run();
+        WebSocket socket = client.newWebSocketBuilder().header("Authorization", "Bearer " + config.credential())
+            .header("User-Agent", "LN-Session/1").buildAsync(endpoint(config.endpoint(), config.model()), listener)
+            .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        try { return pcmToWav(listener.await(timeout), maximumBytes); }
+        finally { socket.abort(); }
     }
 
     private static String safeCause(Exception exception)

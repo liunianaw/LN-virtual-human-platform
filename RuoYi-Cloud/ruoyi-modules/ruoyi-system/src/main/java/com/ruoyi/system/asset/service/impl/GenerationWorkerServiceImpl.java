@@ -19,7 +19,6 @@ import com.ruoyi.system.asset.service.IGenerationWorkerService;
 import com.ruoyi.system.asset.service.IAssetStorageQuotaService;
 import com.ruoyi.system.asset.service.IGenerationQuotaService;
 import com.ruoyi.system.operations.OperationsService;
-import com.ruoyi.system.developer.webhook.service.IWebhookService;
 import com.ruoyi.system.storage.ObjectStorage;
 
 /** ruoyi-media GenerationPlatform/ObjectWriter ports 的平台侧租约实现。 */
@@ -34,12 +33,11 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
     private final OperationsService callFacts;
     private final IGenerationQuotaService quota;
     private final IAssetStorageQuotaService storageQuota;
-    private final IWebhookService webhooks;
 
     public GenerationWorkerServiceImpl(GenerationWorkerMapper workerMapper, AssetMapper assetMapper,
         ObjectProvider<ObjectStorage> storageProvider,
         TransactionTemplate transactions, ObjectMapper objectMapper, OperationsService callFacts,
-        IGenerationQuotaService quota, IAssetStorageQuotaService storageQuota, IWebhookService webhooks)
+        IGenerationQuotaService quota, IAssetStorageQuotaService storageQuota)
     {
         this.workerMapper = workerMapper;
         this.assetMapper = assetMapper;
@@ -49,7 +47,6 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
         this.callFacts = callFacts;
         this.quota = quota;
         this.storageQuota = storageQuota;
-        this.webhooks = webhooks;
     }
 
     public Map<String, Object> claim(Long accountId, Long taskId, String workerId)
@@ -179,8 +176,7 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
                 || workerMapper.updateAttemptSuccess(attemptId, stepId, claim.getAttemptNo(), leaseEpoch, primaryFileId) != 1)
                 throw staleLease();
             workerMapper.updateTaskProgress(accountId, taskId);
-            if (workerMapper.markTaskSucceeded(accountId, taskId) == 1)
-            { quota.finish(accountId, taskId); webhooks.recordTerminal(accountId, taskId); }
+            if (workerMapper.markTaskSucceeded(accountId, taskId) == 1) quota.finish(accountId, taskId);
             callFacts.generation(attemptId, accountId, "SUCCEEDED", null, null);
         });
     }
@@ -202,8 +198,7 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
                 || workerMapper.finishTerminalAttempt(attemptId, stepId, claim.getAttemptNo(), leaseEpoch, state) != 1)
                 throw staleLease();
             workerMapper.updateTaskProgress(accountId, taskId);
-            if (workerMapper.markTaskFailed(accountId, taskId) == 1)
-            { quota.finish(accountId, taskId); webhooks.recordTerminal(accountId, taskId); }
+            if (workerMapper.markTaskFailed(accountId, taskId) == 1) quota.finish(accountId, taskId);
             callFacts.generation(attemptId, accountId, state, null, null);
         });
     }

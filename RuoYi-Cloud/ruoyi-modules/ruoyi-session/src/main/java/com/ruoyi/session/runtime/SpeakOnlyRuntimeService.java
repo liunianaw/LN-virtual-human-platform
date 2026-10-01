@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-/** In-memory DEBUG SPEAK_ONLY turns; each turn belongs to one connection epoch. */
+/** Speech playback turns; each turn belongs to one BUSINESS connection epoch. */
 @Service
 public class SpeakOnlyRuntimeService implements TtsCompletionSink
 {
@@ -50,24 +50,6 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
     }
 
     public boolean hasTurn(String turnId) { return turns.containsKey(turnId); }
-
-    /** Reuses the same CHAT turn so text completion and actual audio playback remain separate facts. */
-    public SpeechStarted startChatAudio(RuntimePrincipal principal, long turnId, String text, long connectionEpoch)
-    {
-        principal.requireSpeakScope();
-        if (text == null || text.isBlank() || text.length() > 65536 || properties.getMaxCodePointsPerSegment() <= 0
-            || properties.getMaxBufferedSegments() <= 0)
-            throw new RuntimeProblem(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT", "CHAT audio text is invalid.");
-        List<SegmentPlan> chunks = plans(splitSentences(text, Math.min(8000, properties.getMaxCodePointsPerSegment())));
-        if (chunks.size() > 512)
-            throw new RuntimeProblem(HttpStatus.BAD_REQUEST, "TTS_SEGMENT_LIMIT", "CHAT audio has too many sentences.");
-        persistentStore.createChatAudio(principal, turnId, chunks, connectionEpoch);
-        TurnState state = new TurnState(principal, turnId, chunks, connectionEpoch);
-        turns.put(state.turnId, state);
-        activeTurnBySession.put(principal.sessionId(), state.turnId);
-        synchronized (state)
-        { return new SpeechStarted(state.turnId, state.generation, state.segments.size(), state.dispatchAvailable()); }
-    }
 
     @Override
     public AudioReadyResult onAudioReady(RuntimePrincipal principal, AudioReadyInput input)
@@ -365,7 +347,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         private boolean belongsTo(RuntimePrincipal candidate)
         {
             return principal.accountId() == candidate.accountId() && principal.applicationId() == candidate.applicationId()
-                    && principal.sessionId() == candidate.sessionId() && principal.configVersionId() == candidate.configVersionId();
+                    && principal.sessionId() == candidate.sessionId() && principal.snapshotId() == candidate.snapshotId();
         }
 
         private List<TtsSynthesisWork> dispatchAvailable()

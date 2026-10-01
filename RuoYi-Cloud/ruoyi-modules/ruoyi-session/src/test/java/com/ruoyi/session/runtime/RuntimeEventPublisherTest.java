@@ -31,7 +31,7 @@ class RuntimeEventPublisherTest
         RuntimeEventPublisher publisher = new RuntimeEventPublisher(new ObjectMapper(), epochs, mock(PersistentRuntimeStore.class));
         RuntimePrincipal principal = new RuntimePrincipal(1, 2, 3, 4,
             java.util.Set.of("session:read", "avatar:read", "speak:write"),
-            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", null, 6L, 1L));
+            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", 6L, 1L));
         WebSocketSession old = socket("old");
         publisher.register(principal, 1, old);
         Map<String, Object> ack = new HashMap<>(Map.of("v", 1, "type", "request.ack", "sessionId", "3",
@@ -72,7 +72,7 @@ class RuntimeEventPublisherTest
         RuntimeEventPublisher publisher = new RuntimeEventPublisher(new ObjectMapper(), epochs, store);
         RuntimePrincipal principal = new RuntimePrincipal(1, 2, 3, 4,
             java.util.Set.of("session:read"),
-            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", null, 6L, 1L));
+            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", 6L, 1L));
         WebSocketSession old = socket("old");
         old.getAttributes().put("lastFrameAt", Instant.now().minusSeconds(61));
         publisher.register(principal, 1, old);
@@ -90,7 +90,7 @@ class RuntimeEventPublisherTest
         RuntimeEventPublisher publisher = new RuntimeEventPublisher(new ObjectMapper(), epochs, mock(PersistentRuntimeStore.class));
         RuntimePrincipal principal = new RuntimePrincipal(1, 2, 3, 4,
             java.util.Set.of("session:read"),
-            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", null, 6L, 1L));
+            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", 6L, 1L));
         WebSocketSession newer = socket("newer");
         WebSocketSession older = socket("older");
 

@@ -28,8 +28,9 @@ import com.ruoyi.system.officialservice.service.OfficialSecretCrypto;
 @Service
 public class OfficialServiceServiceImpl implements IOfficialServiceService
 {
-    private static final String IMAGE = "DASHSCOPE_IMAGE", TTS = "DASHSCOPE_BEIJING";
-    private static final String IMAGE_MODEL = "qwen-image-3.0-pro", TTS_MODEL = "qwen3-tts-flash-realtime";
+    private static final String IMAGE = "DASHSCOPE_IMAGE", REALTIME = "DASHSCOPE_BEIJING";
+    private static final String IMAGE_MODEL = "qwen-image-3.0-pro", TTS_MODEL = "qwen3-tts-flash-realtime",
+        ASR_MODEL = "qwen3-asr-flash";
     private static final Set<String> IMAGE_PARAMETERS = Set.of("n", "size", "prompt_extend", "watermark", "seed");
     private static final Set<String> TTS_PARAMETERS = Set.of("speed", "rate", "pitch", "volume");
     private final OfficialServiceMapper mapper;
@@ -96,6 +97,17 @@ public class OfficialServiceServiceImpl implements IOfficialServiceService
         return new ResolvedService(service.getProviderCode(), service.getEndpoint(), service.getModelId(), parameters(service.getParameters()), crypto.decrypt(mapper.selectSecret(service.getSecretId())));
     }
 
+    @Override public DefaultResolvedService resolveDefault(String purpose)
+    {
+        if (!"ASR".equals(purpose)) throw bad("内部默认服务用途无效");
+        OfficialService service = mapper.selectDefaultResolvable("ASR");
+        if (service == null) throw new ServiceException("默认官方 ASR 未配置", HttpStatus.SERVICE_UNAVAILABLE.value());
+        validateStored(service);
+        return new DefaultResolvedService(text(service.getId()), text(service.getRevision()), service.getProviderCode(),
+            service.getEndpoint(), service.getModelId(), parameters(service.getParameters()),
+            crypto.decrypt(mapper.selectSecret(service.getSecretId())));
+    }
+
     private OfficialService build(long id, long accountId, OfficialServiceInput input, long secretId, String status, long revision)
     { OfficialService service = new OfficialService(); service.setId(id); service.setAccountId(accountId); service.setName(input.getName().trim()); service.setCapability(input.getCapability()); service.setProviderCode(input.getProviderCode()); service.setEndpoint(input.getEndpoint().trim()); service.setModelId(input.getModelId().trim()); service.setParameters(write(input.getParameters())); service.setSecretId(secretId); service.setStatus(status); service.setRevision(revision); service.setCreatedAt(Instant.now()); service.setUpdatedAt(Instant.now()); return service; }
     private void validate(OfficialServiceInput input) { if (input == null) throw bad("服务参数无效"); validateStored(build(1L, 1L, input, input.getSecretId() == null ? 1L : input.getSecretId(), "DISABLED", 1L)); }
@@ -104,10 +116,12 @@ public class OfficialServiceServiceImpl implements IOfficialServiceService
         try
         {
             URI endpoint = URI.create(service.getEndpoint()); boolean image = "AVATAR_GENERATION".equals(service.getCapability());
+            boolean asr = "ASR".equals(service.getCapability());
             if (endpoint.getUserInfo() != null || endpoint.getPort() > 0 || endpoint.getQuery() != null || endpoint.getFragment() != null || !"dashscope.aliyuncs.com".equals(endpoint.getHost())) throw bad("服务地址不在官方白名单");
             if (image && (!IMAGE.equals(service.getProviderCode()) || !IMAGE_MODEL.equals(service.getModelId()) || !"https".equalsIgnoreCase(endpoint.getScheme()))) throw bad("图像服务适配器或模型不受支持");
-            if (!image && (!TTS.equals(service.getProviderCode()) || !TTS_MODEL.equals(service.getModelId()) || !"wss".equalsIgnoreCase(endpoint.getScheme()))) throw bad("TTS 服务适配器或模型不受支持");
-            Map<String, Object> values = parameters(service.getParameters()); Set<String> allowed = image ? IMAGE_PARAMETERS : TTS_PARAMETERS;
+            if (asr && (!REALTIME.equals(service.getProviderCode()) || !ASR_MODEL.equals(service.getModelId()) || !"https".equalsIgnoreCase(endpoint.getScheme()) || !"/compatible-mode/v1/chat/completions".equals(endpoint.getPath()))) throw bad("ASR 服务适配器或模型不受支持");
+            if (!image && !asr && (!REALTIME.equals(service.getProviderCode()) || !TTS_MODEL.equals(service.getModelId()) || !"wss".equalsIgnoreCase(endpoint.getScheme()))) throw bad("TTS 服务适配器或模型不受支持");
+            Map<String, Object> values = parameters(service.getParameters()); Set<String> allowed = image ? IMAGE_PARAMETERS : asr ? Set.of("language") : TTS_PARAMETERS;
             if (!allowed.containsAll(values.keySet())) throw bad("服务参数不在适配器白名单");
         }
         catch (IllegalArgumentException e) { throw bad("服务地址或参数无效"); }
@@ -122,7 +136,7 @@ public class OfficialServiceServiceImpl implements IOfficialServiceService
     private void complete(long accountId, String action, String key, byte[] hash, long resourceId) { mapper.insertIdempotency(id(), accountId, scope(action), key, hash, resourceId); }
     private static byte[] digest(String text) { try { return MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)); } catch (Exception e) { throw new IllegalStateException("请求摘要不可用", e); } }
     private static String scope(String action) { byte[] bytes = digest(action); StringBuilder value = new StringBuilder(64); for (byte item : bytes) value.append(String.format("%02x", item)); return value.toString(); }
-    private static boolean invalidFilter(String capability, String status) { return capability != null && !Set.of("AVATAR_GENERATION", "TTS").contains(capability) || status != null && !Set.of("ACTIVE", "DISABLED").contains(status); }
+    private static boolean invalidFilter(String capability, String status) { return capability != null && !Set.of("AVATAR_GENERATION", "TTS", "ASR").contains(capability) || status != null && !Set.of("ACTIVE", "DISABLED").contains(status); }
     private static void requireKey(String key) { if (key == null || !key.matches("[A-Za-z0-9._:-]{1,64}")) throw bad("Idempotency-Key 无效"); }
     private static void requireMatch(String value, OfficialService service) { if (value == null || value.isBlank()) throw new ServiceException("缺少 If-Match", 428); if (!text(service.getRevision()).equals(value.trim())) throw stale(); }
     private static String suffix(String key) { String value = key.trim(); return value.length() <= 4 ? value : value.substring(value.length() - 4); }

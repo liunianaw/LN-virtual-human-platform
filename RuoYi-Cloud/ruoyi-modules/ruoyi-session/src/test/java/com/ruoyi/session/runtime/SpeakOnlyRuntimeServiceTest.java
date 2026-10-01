@@ -31,7 +31,7 @@ class SpeakOnlyRuntimeServiceTest
         PersistentRuntimeStore store = mock(PersistentRuntimeStore.class);
         RuntimePrincipal principal = new RuntimePrincipal(1, 2, 3, 4,
             Set.of("session:read", "speak:write"),
-            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", null, 6L, 1L));
+            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", 6L, 1L));
         when(store.createSpeakTurn(eq(principal), eq("request"), anyList(), eq(2L))).thenReturn(10L);
         SpeakOnlyRuntimeService runtime = new SpeakOnlyRuntimeService(new VoiceRuntimeProperties(),
             mock(TemporaryAudioCleanupQueue.class), store, mock(RuntimeEventPublisher.class));
@@ -49,7 +49,7 @@ class SpeakOnlyRuntimeServiceTest
         PersistentRuntimeStore store = mock(PersistentRuntimeStore.class);
         RuntimePrincipal principal = new RuntimePrincipal(1, 2, 3, 4,
             Set.of("session:read", "speak:write"),
-            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", null, 6L, 1L));
+            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", 6L, 1L));
         when(store.createSpeakTurn(eq(principal), eq("request"), anyList(), eq(2L))).thenReturn(10L);
         SpeakOnlyRuntimeService runtime = new SpeakOnlyRuntimeService(new VoiceRuntimeProperties(),
             mock(TemporaryAudioCleanupQueue.class), store, mock(RuntimeEventPublisher.class));
@@ -68,7 +68,7 @@ class SpeakOnlyRuntimeServiceTest
         TemporaryAudioCleanupQueue cleanup = mock(TemporaryAudioCleanupQueue.class);
         RuntimePrincipal principal = new RuntimePrincipal(1, 2, 3, 4,
             Set.of("session:read", "speak:write"),
-            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", null, 6L, 1L));
+            new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", 6L, 1L));
         when(store.createSpeakTurn(eq(principal), eq("request"), anyList(), eq(2L))).thenReturn(10L);
         SpeakOnlyRuntimeService runtime = new SpeakOnlyRuntimeService(new VoiceRuntimeProperties(),
             cleanup, store, mock(RuntimeEventPublisher.class));

@@ -140,16 +140,6 @@ public class RuntimeEventPublisher
         }
     }
 
-    public void chat(RuntimePrincipal principal, long turnEpoch, long turnId, String requestId,
-        String type, Map<String, Object> data)
-    {
-        Connection connection = connections.get(principal.sessionId());
-        if (connection == null || connection.epoch() != turnEpoch) return;
-        send(connection, Map.of("v", 1, "type", type, "sessionId", Long.toString(principal.sessionId()),
-            "connectionEpoch", Long.toString(turnEpoch), "turnId", Long.toString(turnId),
-            "requestId", requestId, "occurredAt", Instant.now().toString(), "data", data));
-    }
-
     public void audioSegment(RuntimePrincipal principal, long turnEpoch, AudioSegmentEvent event)
     {
         Connection connection = connections.get(principal.sessionId());

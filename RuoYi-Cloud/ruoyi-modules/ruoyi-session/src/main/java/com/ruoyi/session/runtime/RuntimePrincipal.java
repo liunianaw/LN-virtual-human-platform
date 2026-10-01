@@ -5,22 +5,22 @@ import java.util.Set;
 import org.springframework.http.HttpStatus;
 
 /**
- * Trusted output of the Console DEBUG token verifier.  Browser request bodies
+ * Trusted output of the BUSINESS Session token verifier.  Browser request bodies
  * never carry these ownership fields or a Voice binding.
  */
-public record RuntimePrincipal(long accountId, long applicationId, long sessionId, long configVersionId,
+public record RuntimePrincipal(long accountId, long applicationId, long sessionId, long snapshotId,
         Set<String> scopes, VoiceRuntimeBinding voice)
 {
     public RuntimePrincipal
     {
-        if (accountId <= 0 || applicationId <= 0 || sessionId <= 0 || configVersionId <= 0)
+        if (accountId <= 0 || applicationId <= 0 || sessionId <= 0 || snapshotId <= 0)
         {
             throw new IllegalArgumentException("Runtime principal identifiers must be positive");
         }
         scopes = Set.copyOf(scopes);
         if (voice == null)
         {
-            throw new IllegalArgumentException("SPEAK_ONLY runtime requires a Voice binding");
+            throw new IllegalArgumentException("Speech runtime requires a Voice binding");
         }
     }
 

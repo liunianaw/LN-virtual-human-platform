@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,47 +32,45 @@ public class ApplicationController
     @GetMapping
     public AjaxResult list(@RequestParam(required = false) Integer pageNum, @RequestParam(required = false) Integer pageSize,
         @RequestParam(required = false) String status)
-    { return AjaxResult.success(applications.list(login().getUserid(), pageNum, pageSize, status)); }
+    { return AjaxResult.success(applications.list(developer().getUserid(), pageNum, pageSize, status)); }
 
     @RequiresPermissions("platform:application:read")
-    @GetMapping("/resources")
-    public AjaxResult choices() { return AjaxResult.success(applications.choices(login().getUserid())); }
+    @GetMapping("/{applicationId}/resources")
+    public AjaxResult choices(@PathVariable long applicationId)
+    { return AjaxResult.success(applications.choices(developer().getUserid(), applicationId)); }
 
     @RequiresPermissions("platform:application:read")
     @GetMapping("/{applicationId}")
     public AjaxResult detail(@PathVariable long applicationId)
-    { return AjaxResult.success(applications.detail(login().getUserid(), applicationId)); }
-
-    @RequiresPermissions("platform:application:read")
-    @GetMapping("/{applicationId}/config-versions/{configVersionId}")
-    public AjaxResult config(@PathVariable long applicationId, @PathVariable long configVersionId)
-    { return AjaxResult.success(applications.config(login().getUserid(), applicationId, configVersionId)); }
+    { return AjaxResult.success(applications.detail(developer().getUserid(), applicationId)); }
 
     @RequiresPermissions("platform:application:write")
     @PostMapping
     public AjaxResult create(@Valid @RequestBody CreateApplicationRequest request,
         @RequestHeader(value = "Idempotency-Key", required = false) String key)
-    { return AjaxResult.success(applications.create(login().getUserid(), request, key)); }
+    { return AjaxResult.success(applications.create(developer().getUserid(), request, key)); }
 
     @RequiresPermissions("platform:application:write")
-    @PostMapping("/{applicationId}/config-versions")
-    public AjaxResult publish(@PathVariable long applicationId, @Valid @RequestBody ApplicationConfigRequest request,
+    @PutMapping("/{applicationId}")
+    public AjaxResult update(@PathVariable long applicationId, @Valid @RequestBody ApplicationConfigRequest request,
         @RequestHeader(value = "If-Match", required = false) String ifMatch,
         @RequestHeader(value = "Idempotency-Key", required = false) String key)
-    { return AjaxResult.success(applications.publish(login().getUserid(), applicationId, request, ifMatch, key)); }
+    { return AjaxResult.success(applications.update(developer().getUserid(), applicationId, request, ifMatch, key)); }
 
     @RequiresPermissions("platform:application:write")
     @PostMapping("/{applicationId}/status")
     public AjaxResult status(@PathVariable long applicationId, @Valid @RequestBody ApplicationStatusRequest request,
         @RequestHeader(value = "If-Match", required = false) String ifMatch,
         @RequestHeader(value = "Idempotency-Key", required = false) String key)
-    { return AjaxResult.success(applications.changeStatus(login().getUserid(), applicationId, request, ifMatch, key)); }
+    { return AjaxResult.success(applications.changeStatus(developer().getUserid(), applicationId, request, ifMatch, key)); }
 
-    private static LoginUser login()
+    private static LoginUser developer()
     {
         LoginUser login = SecurityUtils.getLoginUser();
         if (login == null || login.getUserid() == null || login.getUserid() <= 0 || login.getToken() == null)
             throw new ServiceException("当前后台登录无效", 401);
+        if (SecurityUtils.isAdmin() || login.getRoles() == null || !login.getRoles().contains("developer"))
+            throw new ServiceException("仅开发者账号可管理 Application", 403);
         return login;
     }
 }

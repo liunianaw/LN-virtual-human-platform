@@ -18,8 +18,6 @@ public class CreateGenerationTaskRequest
     private String requestId;
     @NotBlank @Size(max = 100)
     private String name;
-    @Positive
-    private Long webhookEndpointId;
 
     public Long getSourceFileId() { return sourceFileId; }
     public void setSourceFileId(Long value) { sourceFileId = value; }
@@ -31,6 +29,4 @@ public class CreateGenerationTaskRequest
     public void setRequestId(String value) { requestId = value; }
     public String getName() { return name; }
     public void setName(String value) { name = value; }
-    public Long getWebhookEndpointId() { return webhookEndpointId; }
-    public void setWebhookEndpointId(Long value) { webhookEndpointId = value; }
 }

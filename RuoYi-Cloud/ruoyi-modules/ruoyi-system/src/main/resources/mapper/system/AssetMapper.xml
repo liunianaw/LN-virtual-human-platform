@@ -295,10 +295,10 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     <insert id="insertGenerationTask">
         insert into p_generation_task (id, created_at, updated_at, account_id, avatar_id, avatar_version_id,
             source_file_id, task_kind, status, internal_state, progress, official_service_id, service_snapshot,
-            pipeline_version, quota_reservation_id, request_id, request_hash, webhook_endpoint_id, reservation_no)
+            pipeline_version, quota_reservation_id, request_id, request_hash, reservation_no)
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{avatarId}, #{avatarVersionId},
             #{sourceFileId}, 'GENERATE', 'QUEUED', 'READY', 0, #{officialServiceId}, cast(#{serviceSnapshot} as json),
-            #{pipelineVersion}, #{quotaReservationId}, #{requestId}, #{requestHash}, #{webhookEndpointId}, 1)
+            #{pipelineVersion}, #{quotaReservationId}, #{requestId}, #{requestHash}, 1)
     </insert>
 
     <insert id="insertGenerationActionStep">
@@ -314,4 +314,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         values (#{id}, utc_timestamp(3), utc_timestamp(3), #{accountId}, #{eventId}, #{eventType}, #{aggregateType},
             #{aggregateId}, 1, #{traceId}, cast(#{payload} as json), 'PENDING', 0, utc_timestamp(3))
     </insert>
+    <select id="avatarVisibility" resultType="string">
+        select visibility from p_avatar where id=#{avatarId} and account_id=#{accountId}
+    </select>
 </mapper>

@@ -7,7 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
-import com.ruoyi.system.voice.SessionDebugClient;
+import com.ruoyi.system.developer.session.SessionLifecycleClient;
 
 /**
  * Local Outbox consumer for emergency disable.  An inbox row is written only
@@ -21,9 +21,9 @@ public class PublicAssetRevocationWorker
     private static final String CONSUMER = "public-asset-session-revoker";
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
-    private final SessionDebugClient sessions;
+    private final SessionLifecycleClient sessions;
 
-    public PublicAssetRevocationWorker(JdbcTemplate jdbc, TransactionTemplate transactions, SessionDebugClient sessions)
+    public PublicAssetRevocationWorker(JdbcTemplate jdbc, TransactionTemplate transactions, SessionLifecycleClient sessions)
     { this.jdbc = jdbc; this.transactions = transactions; this.sessions = sessions; }
 
     @Scheduled(fixedDelayString = "${platform.asset.lifecycle.revocation-delay-ms:5000}")

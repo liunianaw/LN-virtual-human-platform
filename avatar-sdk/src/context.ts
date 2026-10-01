@@ -1,5 +1,5 @@
 /** Optional browser page capture. Importing the core SDK does not load the renderer. */
-export type ContextSource = "PAGE" | "HYBRID";
+export type ContextSource = "ELEMENT" | "PAGE" | "HYBRID";
 export type ContextCoverage = "VIEWPORT" | "FULL_PAGE";
 export type ContextStatus = "SUCCESS" | "FAILED" | "NOT_REQUESTED";
 
@@ -19,6 +19,7 @@ export interface ContextRequest {
   coverage: ContextCoverage;
   resultMode: "PARTIAL" | "STRICT";
   deadlineAt: string;
+  elementSelector?: string;
   fixedPolicy: ContextPolicy;
   currentPolicy: ContextPolicy;
 }
@@ -35,6 +36,14 @@ export interface ContextCapture {
 
 function query(selectors: string[]): Element[] {
   return selectors.flatMap(selector => Array.from(document.querySelectorAll(selector)));
+}
+
+function visible(element: Element): boolean {
+  for (let current: Element | null = element; current; current = current.parentElement) {
+    const style = getComputedStyle(current);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+  }
+  return true;
 }
 
 function within(element: Element, allowed: string[], denied: string[]): boolean {
@@ -60,15 +69,44 @@ function deniedCapture(request: ContextRequest, connectionEpoch: string): Contex
   }, images: [] };
 }
 
+export interface CaptureOptions {
+  source: ContextSource;
+  elementSelector?: string;
+  coverage?: ContextCoverage;
+  deny?: string[];
+  screenshot?: boolean;
+}
+
+const privateSelectors = ['input[type="password"]', 'input[type="hidden"]', '[hidden]', '[data-ln-private]', '[data-ln-deny]'];
+
 export class PageContext {
+  private lastCaptureAt = 0;
+
+  /** Explicit local capture. Only the developer application receives its result. */
+  async captureLocal(options: CaptureOptions, signal?: AbortSignal): Promise<ContextCapture> {
+    if (Date.now() - this.lastCaptureAt < 1000) throw new Error("CONTEXT_RATE_LIMIT");
+    if (options.source === "ELEMENT" && !options.elementSelector) throw new Error("ELEMENT_REQUIRED");
+    this.lastCaptureAt = Date.now();
+    const denied = [...privateSelectors, ...(options.deny ?? [])];
+    const policy: ContextPolicy = {
+      enabled: true, sources: ["ELEMENT", "PAGE", "HYBRID"],
+      captureScope: { allow: [], deny: denied, allowViewport: true },
+      dom: { allow: [], deny: denied, excludePassword: true },
+      fullPageEnabled: true, highlightMode: "AUTO", allowScroll: false,
+    };
+    return this.capture({ captureRequestId: crypto.randomUUID(), turnId: "", source: options.source,
+      elementSelector: options.elementSelector, coverage: options.coverage ?? "VIEWPORT", resultMode: "PARTIAL",
+      deadlineAt: new Date(Date.now() + 12000).toISOString(), fixedPolicy: policy, currentPolicy: policy }, "local", signal, options.screenshot !== false);
+  }
+
   private refs = new Map<string, { element: Element; node: Text; text: string;
     captureRequestId: string; policies: ContextPolicy[];
     root: Element | null; box: Box; coverage: ContextCoverage; scrollX: number; scrollY: number; url: string }>();
   private marked?: { element: HTMLElement; outline: string; outlineOffset: string };
 
-  async capture(request: ContextRequest, connectionEpoch: string, signal?: AbortSignal): Promise<ContextCapture> {
+  async capture(request: ContextRequest, connectionEpoch: string, signal?: AbortSignal, screenshot = true): Promise<ContextCapture> {
     this.clear();
-    if (request.source !== "PAGE" && request.source !== "HYBRID") throw new Error("CONTEXT_SOURCE_DENIED");
+    if (!["ELEMENT", "PAGE", "HYBRID"].includes(request.source)) throw new Error("CONTEXT_SOURCE_DENIED");
     if (Date.parse(request.deadlineAt) <= Date.now()) throw new Error("CONTEXT_TIMEOUT");
     const policies = [request.fixedPolicy, request.currentPolicy];
     if (policies.some(policy => !policy.enabled || !policy.sources.includes(request.source)
@@ -79,10 +117,10 @@ export class PageContext {
     const allowed = policies.flatMap(policy => policy.captureScope.allow);
     let root: Element | null = null;
     try {
-      root = allowed.length ? query(allowed).find(element => policies.every(policy =>
+      root = request.source === "ELEMENT" ? document.querySelector(request.elementSelector ?? "") : allowed.length ? query(allowed).find(element => policies.every(policy =>
         within(element, policy.captureScope.allow, policy.captureScope.deny))) ?? null : null;
     } catch { return deniedCapture(request, connectionEpoch); }
-    if (allowed.length && !root) return deniedCapture(request, connectionEpoch);
+    if ((allowed.length || request.source === "ELEMENT") && !root) return deniedCapture(request, connectionEpoch);
     const rect = root?.getBoundingClientRect();
     const box: Box = rect ? { left: Math.max(coverage === "VIEWPORT" ? 0 : -scrollX, rect.left),
       top: Math.max(coverage === "VIEWPORT" ? 0 : -scrollY, rect.top),
@@ -95,18 +133,15 @@ export class PageContext {
     if (totalWidth < 1 || totalHeight < 1) return deniedCapture(request, connectionEpoch);
     const width = Math.min(4096, totalWidth), height = Math.min(4096, totalHeight);
     const truncated = width < totalWidth || height < totalHeight;
+    box.right = box.left + width; box.bottom = box.top + height;
     const metadata: ContextCapture["metadata"] = {
       captureRequestId: request.captureRequestId, turnId: request.turnId, connectionEpoch,
       source: request.source, coverage: { mode: coverage, x: Math.floor(scrollX + box.left),
         y: Math.floor(scrollY + box.top), width, height, truncated },
-      screenshot: { status: "FAILED", parts: [] }, dom: { status: request.source === "PAGE" ? "NOT_REQUESTED" : "FAILED" },
+      screenshot: { status: screenshot ? "FAILED" : "NOT_REQUESTED", parts: [] }, dom: { status: request.source === "PAGE" ? "NOT_REQUESTED" : "FAILED" },
     };
     const images: Blob[] = [];
-    try {
-      for (const policy of policies) {
-        if (query(policy.captureScope.deny).some(element => intersects(element.getBoundingClientRect(), box)))
-          throw new Error("CONTEXT_SCOPE_DENIED");
-      }
+    if (screenshot) try {
       for (const element of Array.from(document.querySelectorAll("img,iframe"))) {
         if (!intersects(element.getBoundingClientRect(), box)) continue;
         const address = element instanceof HTMLImageElement ? element.currentSrc || element.src
@@ -123,6 +158,15 @@ export class PageContext {
           x: Math.floor(scrollX + box.left), y: Math.floor(scrollY + box.top) + y,
           width, height: partHeight, scale: 1, useCORS: false, allowTaint: false, logging: false,
           backgroundColor: "#ffffff",
+          onclone: clone => {
+            // Mask excluded regions without collapsing layout or changing the crop.
+            clone.documentElement.style.setProperty("scroll-behavior", "auto", "important");
+            clone.defaultView?.scrollTo(metadata.coverage.x - box.left, metadata.coverage.y - box.top);
+            for (const element of Array.from(clone.querySelectorAll<HTMLElement>(
+              [...privateSelectors, ...policies.flatMap(policy => policy.captureScope.deny)]
+                .flatMap(selector => [selector, `${selector} *`]).join(","))))
+              element.style.setProperty("visibility", "hidden", "important");
+          },
         });
         const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("SCREENSHOT_FAILED")), "image/jpeg", 0.75));
         if (blob.size > 1_200_000 || images.reduce((sum, item) => sum + item.size, 0) + blob.size > 1_200_000)
@@ -138,22 +182,27 @@ export class PageContext {
         && ["CONTEXT_SCOPE_DENIED", "CONTEXT_CANCELLED", "CONTEXT_TIMEOUT", "CROSS_ORIGIN", "PIXEL_LIMIT"].includes(error.message)
         ? error.message : "SCREENSHOT_FAILED";
     }
-    if (request.source === "HYBRID") {
+    if (request.source === "HYBRID" || request.source === "ELEMENT") {
       try {
         const pieces: string[] = [];
         const elements: { ref: string; text: string }[] = [];
         let bytes = 0, excludedCount = 0;
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        const range = document.createRange();
         while (walker.nextNode()) {
           if (signal?.aborted) throw new Error("CONTEXT_CANCELLED");
+          if (Date.parse(request.deadlineAt) <= Date.now()) throw new Error("CONTEXT_TIMEOUT");
           const text = walker.currentNode.textContent?.trim();
           if (!text) continue;
           const element = walker.currentNode.parentElement;
+          range.selectNodeContents(walker.currentNode);
           if (!element || !element.getClientRects().length || root && !root.contains(element)
-            || !intersects(element.getBoundingClientRect(), box) || ["SCRIPT", "STYLE", "NOSCRIPT"].includes(element.tagName)
+            || !Array.from(range.getClientRects()).some(rect => intersects(rect, box))
+            || ["SCRIPT", "STYLE", "NOSCRIPT"].includes(element.tagName)
             || policies.some(policy => !within(element, policy.dom.allow, policy.dom.deny)
               || !within(element, policy.captureScope.allow, policy.captureScope.deny)
-              || element.closest('input[type="password"]'))) { excludedCount++; continue; }
+              || privateSelectors.some(selector => element.closest(selector))
+              || !visible(element))) { excludedCount++; continue; }
           const next = new TextEncoder().encode(text).length + (pieces.length ? 1 : 0);
           if (bytes + next > 32768) break;
           bytes += next;
@@ -172,6 +221,7 @@ export class PageContext {
         metadata.dom = { status: "FAILED", reason: "FILTER_FAILED" };
       }
     }
+    if (signal?.aborted || Date.parse(request.deadlineAt) <= Date.now()) { this.clear(); throw new Error("CONTEXT_CANCELLED_OR_TIMEOUT"); }
     return { metadata, images };
   }
 
@@ -182,7 +232,7 @@ export class PageContext {
       || entry.node.textContent?.trim() !== entry.text
       || entry.url !== location.href || entry.root && !entry.root.contains(entry.element)
       || entry.coverage === "VIEWPORT" && (entry.scrollX !== scrollX || entry.scrollY !== scrollY)
-      || !intersects(entry.element.getBoundingClientRect(), entry.box)
+      || !visible(entry.element) || !intersects(entry.element.getBoundingClientRect(), entry.box)
       || entry.policies.some(policy => !within(entry.element, policy.dom.allow, policy.dom.deny)
         || !within(entry.element, policy.captureScope.allow, policy.captureScope.deny))) return "TARGET_STALE";
     if (entry.policies.some(policy => policy.highlightMode !== "AUTO")) return "EVENT_ONLY";

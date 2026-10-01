@@ -1,99 +1,98 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.ruoyi.system.skill.mapper.SkillMapper">
-    <sql id="skillColumns">s.id as skillId,s.account_id as accountId,s.visibility,s.name,s.description,
-        s.status,s.current_version_id as currentVersionId,s.revision,s.created_at as createdAt,s.updated_at as updatedAt</sql>
-    <sql id="versionColumns">v.id as versionId,v.account_id as accountId,v.skill_id as skillId,
-        v.version_no as versionNo,v.skill_type as skillType,v.tool_name as toolName,
-        v.instructions,v.context_requirements as contextRequirements,v.tool_url as toolUrl,
-        v.http_method as httpMethod,v.input_schema as inputSchema,v.output_schema as outputSchema,
-        v.tool_secret_id as toolSecretId,v.requires_user_credential as requiresUserCredential,
-        v.identity_binding as identityBinding,v.frontend_fields as frontendFields,
-        v.timeout_ms as timeoutMs,v.max_result_bytes as maxResultBytes,
-        v.max_calls_per_turn as maxCallsPerTurn,v.import_format as importFormat,v.created_at as createdAt,
-        sec.display_suffix as tokenSuffix</sql>
-    <select id="nextId" resultType="long">select uuid_short()</select>
-    <select id="lockAccount" resultType="int">select 1 from sys_user where user_id=#{accountId}
-        and status='0' and del_flag='0' for update</select>
-    <select id="page" resultType="map">select <include refid="skillColumns"/>
-        from p_skill s where s.status!='DELETED' and (s.account_id=#{accountId} or s.visibility='OFFICIAL')
-        order by s.visibility asc,s.created_at desc,s.id desc limit #{limit} offset #{offset}</select>
-    <select id="count" resultType="int">select count(*) from p_skill
-        where status!='DELETED' and (account_id=#{accountId} or visibility='OFFICIAL')</select>
-    <select id="candidates" resultType="map">select <include refid="skillColumns"/>
-        from p_skill s where s.status='PUBLISHED' and s.current_version_id is not null
-        and (s.account_id=#{accountId} or s.visibility='OFFICIAL')
-        order by s.visibility desc,s.name,s.id</select>
-    <select id="skill" resultType="map">select <include refid="skillColumns"/>
-        from p_skill s where s.id=#{skillId} and s.status!='DELETED'
-        and (s.account_id=#{accountId} or s.visibility='OFFICIAL')</select>
-    <select id="anySkill" resultType="map">select <include refid="skillColumns"/>
-        from p_skill s where s.id=#{skillId} and s.account_id=#{accountId}</select>
-    <select id="lockSkill" resultType="map">select <include refid="skillColumns"/>
-        from p_skill s where s.id=#{skillId} and s.account_id=#{accountId} and s.status!='DELETED' for update</select>
-    <select id="version" resultType="map">select <include refid="versionColumns"/>
-        from p_skill_version v left join p_secret sec on sec.id=v.tool_secret_id
-        where v.id=#{versionId} and (v.account_id=#{accountId}
-        or exists (select 1 from p_skill s where s.id=v.skill_id and s.visibility='OFFICIAL'))</select>
-    <select id="versions" resultType="map">select <include refid="versionColumns"/>
-        from p_skill_version v left join p_secret sec on sec.id=v.tool_secret_id
-        where v.skill_id=#{skillId} order by v.version_no desc</select>
-    <select id="nextVersionNo" resultType="int">select coalesce(max(version_no),0)+1 from p_skill_version where skill_id=#{skillId}</select>
-    <select id="toolNameCount" resultType="int">select count(*) from p_skill_version v
-        join p_skill s on s.current_version_id=v.id
-        where s.id!=#{skillId} and (s.account_id=#{accountId} or s.visibility='OFFICIAL')
-        and s.status in ('PUBLISHED','UNLISTED') and v.tool_name=#{toolName}</select>
-    <select id="referenceCount" resultType="int">select
-        (select count(*) from p_app_skill a join p_skill_version v on v.id=a.skill_version_id where v.skill_id=#{skillId})
-        + (select count(*) from p_resource_reference r join p_skill_version v on v.id=r.resource_id
-            where r.resource_type='SKILL_VERSION' and r.state in ('RESERVED','CONFIRMED') and v.skill_id=#{skillId})</select>
-    <select id="runtimeBindingCount" resultType="int">select count(*) from p_resource_reference r
-        join p_app_config c on c.id=r.resource_id and c.application_id=#{applicationId}
-        join p_application a on a.id=c.application_id and a.account_id=#{accountId}
-          and a.status='ACTIVE' and a.admin_disabled=0
-        join sys_user u on u.user_id=a.account_id and u.status='0' and u.del_flag='0'
-        join p_app_skill x on x.app_config_id=c.id and x.skill_version_id=#{versionId} and x.enabled=1
-        where r.account_id=#{accountId} and r.holder_type='SESSION' and r.holder_id=#{sessionId}
-          and r.resource_type='APP_CONFIG' and r.state='CONFIRMED'</select>
-    <select id="idempotency" resultType="map">select request_hash as requestHash,resource_id as resourceId,status
-        from p_api_idempotency where account_id=#{accountId} and scope=#{scope} and request_id=#{requestId}</select>
-    <insert id="insertIdempotency">insert into p_api_idempotency
-        (id,created_at,updated_at,account_id,scope,request_id,request_hash,resource_type,resource_id,status,expires_at)
-        values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{scope},#{requestId},#{hash},'SKILL',
-        #{skillId},'SUCCEEDED',date_add(utc_timestamp(3),interval 24 hour))</insert>
-    <insert id="insertSkill">insert into p_skill
-        (id,created_at,updated_at,account_id,visibility,name,description,status,revision)
-        values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{visibility},#{name},#{description},'DRAFT',1)</insert>
-    <insert id="insertVersion">insert into p_skill_version
-        (id,created_at,updated_at,account_id,skill_id,version_no,skill_type,tool_name,instructions,
-        context_requirements,tool_url,http_method,input_schema,output_schema,tool_secret_id,
-        requires_user_credential,identity_binding,frontend_fields,timeout_ms,max_result_bytes,
-        max_calls_per_turn,import_format,content_hash,created_by)
-        values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{skillId},#{versionNo},
-        #{skillType},#{toolName},#{instructions},cast(#{context} as json),#{toolUrl},#{httpMethod},
-        cast(#{inputSchema} as json),cast(#{outputSchema} as json),#{secretId},#{userCredential},
-        cast(#{identityBinding} as json),cast(#{frontendFields} as json),#{timeoutMs},
-        #{maxResultBytes},#{maxCallsPerTurn},#{importFormat},#{hash},#{actorId})</insert>
-    <update id="publish">update p_skill set current_version_id=#{versionId},status='PUBLISHED',revision=revision+1,
-        updated_at=utc_timestamp(3) where id=#{skillId} and account_id=#{accountId} and revision=#{revision}
-        and status not in ('DISABLED','DELETED')</update>
-    <update id="setStatus">update p_skill set status=#{status},revision=revision+1,
-        deleted_at=case when #{status}='DELETED' then utc_timestamp(3) else deleted_at end,
-        updated_at=utc_timestamp(3) where id=#{skillId} and account_id=#{accountId} and revision=#{revision}
-        and status!='DELETED'</update>
-    <resultMap id="Secret" type="com.ruoyi.system.officialservice.domain.OfficialSecret">
-        <id property="id" column="id"/><result property="ciphertext" column="ciphertext"/>
-        <result property="nonce" column="nonce"/><result property="authTag" column="auth_tag"/>
-        <result property="keyVersion" column="key_version"/><result property="algorithm" column="algorithm"/>
-        <result property="status" column="status"/>
-    </resultMap>
-    <select id="secret" resultMap="Secret">select id,ciphertext,nonce,auth_tag,key_version,algorithm,status
-        from p_secret where id=#{secretId} and account_id=#{accountId} and purpose='TOOL_ACCESS' and status='ACTIVE'</select>
-    <insert id="insertSecret">insert into p_secret
-        (id,created_at,updated_at,account_id,purpose,name,ciphertext,nonce,auth_tag,key_version,algorithm,display_suffix,status,revision)
-        values (#{secret.id},utc_timestamp(3),utc_timestamp(3),#{accountId},'TOOL_ACCESS',#{name},
-        #{secret.ciphertext},#{secret.nonce},#{secret.authTag},#{secret.keyVersion},#{secret.algorithm},#{suffix},'ACTIVE',1)</insert>
-    <update id="disableSecrets">update p_secret sec join p_skill_version v on v.tool_secret_id=sec.id
-        set sec.status='DISABLED',sec.updated_at=utc_timestamp(3)
-        where v.skill_id=#{skillId} and sec.purpose='TOOL_ACCESS' and sec.status='ACTIVE'</update>
+  <sql id="columns">s.id skillId,s.account_id accountId,s.visibility,s.name,s.description,s.status,s.revision,
+    s.skill_type skillType,s.tool_name toolName,s.instructions,s.context_requirements contextRequirements,
+    s.tool_url toolUrl,s.http_method httpMethod,s.input_schema inputSchema,s.output_schema outputSchema,
+    s.tool_secret_id toolSecretId,s.requires_user_credential requiresUserCredential,
+    s.identity_binding identityBinding,s.frontend_fields frontendFields,s.timeout_ms timeoutMs,
+    s.max_result_bytes maxResultBytes,s.max_calls_per_session maxCallsPerSession,s.import_format importFormat,
+    s.created_at createdAt,s.updated_at updatedAt,sec.display_suffix tokenSuffix</sql>
+  <select id="nextId" resultType="long">select uuid_short()</select>
+  <select id="lockAccount" resultType="int">select 1 from sys_user where user_id=#{accountId} and status='0' and del_flag='0' for update</select>
+  <select id="page" resultType="map">select <include refid="columns"/> from p_skill s
+    left join p_secret sec on sec.id=s.tool_secret_id where s.status!='DELETED'
+    and s.account_id=#{accountId} and s.visibility='PRIVATE'
+    order by s.visibility,s.created_at desc,s.id desc limit #{limit} offset #{offset}</select>
+  <select id="count" resultType="int">select count(*) from p_skill
+    where status!='DELETED' and account_id=#{accountId} and visibility='PRIVATE'</select>
+  <select id="pageOfficial" resultType="map">select <include refid="columns"/> from p_skill s
+    left join p_secret sec on sec.id=s.tool_secret_id where s.status!='DELETED'
+    and s.account_id=#{accountId} and s.visibility='OFFICIAL'
+    order by s.created_at desc,s.id desc limit #{limit} offset #{offset}</select>
+  <select id="countOfficial" resultType="int">select count(*) from p_skill
+    where status!='DELETED' and account_id=#{accountId} and visibility='OFFICIAL'</select>
+  <select id="candidates" resultType="map">select <include refid="columns"/> from p_skill s
+    left join p_secret sec on sec.id=s.tool_secret_id where s.status='PUBLISHED'
+    and (s.account_id=#{accountId} or s.visibility='OFFICIAL') order by s.visibility desc,s.name,s.id</select>
+  <select id="skill" resultType="map">select <include refid="columns"/> from p_skill s
+    left join p_secret sec on sec.id=s.tool_secret_id where s.id=#{skillId} and s.status!='DELETED'
+    and (s.account_id=#{accountId} or s.visibility='OFFICIAL')</select>
+  <select id="officialSkill" resultType="map">select <include refid="columns"/> from p_skill s
+    left join p_secret sec on sec.id=s.tool_secret_id where s.id=#{skillId} and s.status!='DELETED'
+    and s.account_id=#{accountId} and s.visibility='OFFICIAL'</select>
+  <select id="anySkill" resultType="map">select <include refid="columns"/> from p_skill s
+    left join p_secret sec on sec.id=s.tool_secret_id where s.id=#{skillId} and s.account_id=#{accountId}</select>
+  <select id="lockSkill" resultType="map">select <include refid="columns"/> from p_skill s
+    left join p_secret sec on sec.id=s.tool_secret_id where s.id=#{skillId} and s.account_id=#{accountId}
+    and s.visibility=#{visibility} and s.status!='DELETED' for update</select>
+  <select id="toolNameCount" resultType="int">select count(*) from p_skill where id!=#{skillId}
+    and (account_id=#{accountId} or visibility='OFFICIAL') and status in ('PUBLISHED','UNLISTED')
+    and tool_name=#{toolName}</select>
+  <select id="referenceCount" resultType="int">select
+    (select count(*) from p_application_skill where skill_id=#{skillId})
+    + (select count(*) from p_resource_reference where resource_type='SKILL' and resource_id=#{skillId}
+      and state in ('RESERVED','CONFIRMED'))</select>
+  <select id="runtimeBindingCount" resultType="int">select count(*) from p_resource_reference r
+    join p_application a on a.id=#{applicationId} and a.account_id=#{accountId} and a.status='ACTIVE' and a.admin_disabled=0
+    join p_skill s on s.id=r.resource_id and s.status in ('PUBLISHED','UNLISTED')
+    where r.account_id=#{accountId} and r.holder_type='SESSION' and r.holder_id=#{sessionId}
+      and r.resource_type='SKILL' and r.resource_id=#{skillId} and r.state='CONFIRMED'</select>
+  <select id="idempotency" resultType="map">select request_hash requestHash,resource_id resourceId,status
+    from p_api_idempotency where account_id=#{accountId} and scope=#{scope} and request_id=#{requestId}</select>
+  <insert id="insertIdempotency">insert into p_api_idempotency
+    (id,created_at,updated_at,account_id,scope,request_id,request_hash,resource_type,resource_id,status,expires_at)
+    values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{scope},#{requestId},#{hash},'SKILL',
+    #{skillId},'SUCCEEDED',date_add(utc_timestamp(3),interval 24 hour))</insert>
+  <insert id="insertSkill">insert into p_skill
+    (id,created_at,updated_at,account_id,visibility,name,description,status,revision,skill_type,tool_name,
+    instructions,context_requirements,tool_url,http_method,input_schema,output_schema,tool_secret_id,
+    requires_user_credential,identity_binding,frontend_fields,timeout_ms,max_result_bytes,max_calls_per_session,
+    import_format,content_hash)
+    values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{visibility},#{name},#{description},'PUBLISHED',1,
+    #{skillType},#{toolName},#{instructions},cast(#{context} as json),#{toolUrl},#{httpMethod},
+    cast(#{inputSchema} as json),cast(#{outputSchema} as json),#{secretId},#{userCredential},
+    cast(#{identityBinding} as json),cast(#{frontendFields} as json),#{timeoutMs},#{maxResultBytes},
+    #{maxCallsPerSession},#{importFormat},#{hash})</insert>
+  <update id="updateSkill">update p_skill set name=#{name},description=#{description},skill_type=#{skillType},
+    tool_name=#{toolName},instructions=#{instructions},context_requirements=cast(#{context} as json),
+    tool_url=#{toolUrl},http_method=#{httpMethod},input_schema=cast(#{inputSchema} as json),
+    output_schema=cast(#{outputSchema} as json),tool_secret_id=#{secretId},
+    requires_user_credential=#{userCredential},identity_binding=cast(#{identityBinding} as json),
+    frontend_fields=cast(#{frontendFields} as json),timeout_ms=#{timeoutMs},max_result_bytes=#{maxResultBytes},
+    max_calls_per_session=#{maxCallsPerSession},import_format=#{importFormat},content_hash=#{hash},
+    revision=revision+1,updated_at=utc_timestamp(3)
+    where id=#{skillId} and account_id=#{accountId} and visibility=#{visibility}
+      and revision=#{revision} and status not in ('DISABLED','DELETED')</update>
+  <update id="setStatus">update p_skill set status=#{status},revision=revision+1,
+    deleted_at=case when #{status}='DELETED' then utc_timestamp(3) else deleted_at end,
+    updated_at=utc_timestamp(3) where id=#{skillId} and account_id=#{accountId}
+    and visibility=#{visibility} and revision=#{revision} and status!='DELETED'</update>
+  <insert id="insertSecret">insert into p_secret
+    (id,created_at,updated_at,account_id,purpose,name,ciphertext,nonce,auth_tag,key_version,algorithm,display_suffix,status,revision)
+    values (#{secret.id},utc_timestamp(3),utc_timestamp(3),#{accountId},'TOOL_ACCESS',#{name},
+    #{secret.ciphertext},#{secret.nonce},#{secret.authTag},#{secret.keyVersion},#{secret.algorithm},#{suffix},'ACTIVE',1)</insert>
+  <resultMap id="Secret" type="com.ruoyi.system.officialservice.domain.OfficialSecret">
+    <id property="id" column="id"/><result property="ciphertext" column="ciphertext"/>
+    <result property="nonce" column="nonce"/><result property="authTag" column="auth_tag"/>
+    <result property="keyVersion" column="key_version"/><result property="algorithm" column="algorithm"/>
+    <result property="status" column="status"/>
+  </resultMap>
+  <select id="secret" resultMap="Secret">select id,ciphertext,nonce,auth_tag,key_version,algorithm,status
+    from p_secret where id=#{secretId} and account_id=#{accountId} and purpose='TOOL_ACCESS' and status='ACTIVE'</select>
+  <update id="disableSecret">update p_secret set status='DELETED',revision=revision+1,updated_at=utc_timestamp(3)
+    where id=#{secretId} and purpose='TOOL_ACCESS' and status!='DELETED'</update>
+  <update id="disableSecrets">update p_secret sec join p_skill s on s.tool_secret_id=sec.id
+    set sec.status='DELETED',sec.revision=sec.revision+1,sec.updated_at=utc_timestamp(3)
+    where s.id=#{skillId} and sec.purpose='TOOL_ACCESS' and sec.status!='DELETED'</update>
 </mapper>

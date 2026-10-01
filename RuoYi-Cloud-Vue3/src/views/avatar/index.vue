@@ -67,12 +67,6 @@
                 class="mt8"
               />
             </el-form-item>
-            <el-form-item label="Webhook">
-              <el-select v-model="taskForm.webhookEndpointId" clearable class="full-width" placeholder="不通知">
-                <el-option v-for="endpoint in webhookEndpoints" :key="endpoint.endpointId" :label="endpoint.name" :value="endpoint.endpointId" />
-              </el-select>
-              <div class="form-tip">可选，任务终态投递到当前账号启用的 Endpoint。</div>
-            </el-form-item>
             <el-form-item v-if="!isAdmin" label="角色归属" required>
               <el-radio-group v-model="taskForm.visibility">
                 <el-radio value="PRIVATE">本人私有</el-radio>
@@ -141,9 +135,6 @@
           <el-tag :type="production.versionStatus === 'REVIEW' ? 'success' : 'warning'">{{ production.versionStatus }}</el-tag>
           <el-button link type="primary" :loading="productionLoading" @click="loadProduction()">刷新</el-button>
         </div>
-        <el-select v-model="regenerationWebhookEndpointId" clearable placeholder="重做动作时不发送 Webhook" class="mb12" style="width: 300px">
-          <el-option v-for="endpoint in webhookEndpoints" :key="endpoint.endpointId" :label="endpoint.name" :value="endpoint.endpointId" />
-        </el-select>
         <el-row :gutter="12">
           <el-col v-for="action in production.actions" :key="action.actionCode" :xs="24" :sm="12" :lg="6">
             <el-card shadow="never" class="action-card">
@@ -265,7 +256,6 @@ import {
   assembleAvatarVersion,
   createAvatarGenerationTask,
   createAvatarVersion,
-  createOfficialAvatarGenerationTask,
   discardAvatarActionAttempt,
   getAvatarActionResultPreview,
   getAvatarDetail,
@@ -289,7 +279,6 @@ import {
 } from '@/api/asset/avatar'
 import ActionPreview from './ActionPreview.vue'
 import useUserStore from '@/store/modules/user'
-import { listWebhooks, type WebhookEndpoint } from '@/api/developer/webhook'
 
 const { proxy } = getCurrentInstance()
 const userStore = useUserStore()
@@ -301,8 +290,6 @@ const rightsNoticeVersion = ref('avatar-reference-v1')
 const uploading = ref(false)
 const creating = ref(false)
 const generationServicesLoading = ref(false)
-const webhookEndpoints = ref<WebhookEndpoint[]>([])
-const regenerationWebhookEndpointId = ref<string>()
 const querying = ref(false)
 const publishing = ref(false)
 const assembling = ref(false)
@@ -326,7 +313,6 @@ let productionPollFailures = 0
 const taskForm = reactive({
   name: '',
   officialServiceId: undefined as string | undefined,
-  webhookEndpointId: undefined as string | undefined,
   visibility: 'PRIVATE' as 'PRIVATE' | 'OFFICIAL'
 })
 
@@ -373,13 +359,9 @@ function createTask() {
     officialServiceId: taskForm.officialServiceId,
     expectedServiceRevision: selectedService.revision,
     requestId: crypto.randomUUID(),
-    name: taskForm.name.trim(),
-    webhookEndpointId: taskForm.webhookEndpointId
+    name: taskForm.name.trim()
   }
-  const createCall = isAdmin.value && taskForm.visibility === 'OFFICIAL'
-    ? createOfficialAvatarGenerationTask
-    : createAvatarGenerationTask
-  createCall(createRequest).then(response => {
+  createAvatarGenerationTask(createRequest).then(response => {
     if (!response.data?.taskId) throw new Error('制作接口未返回任务 ID')
     upsertTask(response.data)
     proxy?.$modal.msgSuccess('制作任务已受理。')
@@ -551,7 +533,7 @@ async function regenerateAction(action: AvatarProductionAction) {
   }
   regenerateAvatarAction(production.value.avatarId, production.value.versionId, action.actionCode, {
     requestId: crypto.randomUUID(), expectedActionRevision: action.actionRevision,
-    acknowledgeUncertainCharge, supersedesAttemptId, webhookEndpointId: regenerationWebhookEndpointId.value
+    acknowledgeUncertainCharge, supersedesAttemptId
   }).then(() => {
     proxy?.$modal.msgSuccess(`已提交${actionLabel(action.actionCode)}重做。`)
     loadProduction()
@@ -671,7 +653,6 @@ onMounted(() => {
   if (isAdmin.value) taskForm.visibility = 'OFFICIAL'
   loadTasks()
   loadGenerationServices()
-  listWebhooks(1, 100).then(response => { webhookEndpoints.value = (response.data?.items || []).filter(item => item.status === 'ACTIVE') })
 })
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)

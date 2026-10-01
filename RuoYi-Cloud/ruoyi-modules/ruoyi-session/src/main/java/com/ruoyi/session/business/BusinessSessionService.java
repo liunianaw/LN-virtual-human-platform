@@ -1,5 +1,7 @@
 package com.ruoyi.session.business;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ruoyi.session.runtime.RuntimeProblem;
 import com.ruoyi.session.runtime.RuntimeTokenCodec;
 import com.ruoyi.session.runtime.SpeakOnlyRuntimeService;
@@ -20,13 +22,14 @@ public class BusinessSessionService
     private final BusinessCredentialStore credentials;
     private final com.ruoyi.session.runtime.RuntimeEventPublisher events;
     private final org.springframework.context.ApplicationEventPublisher publisher;
+    private final ObjectMapper json;
 
     public BusinessSessionService(BusinessSystemClient system, BusinessSessionStore store, RuntimeTokenCodec tokens,
         SpeakOnlyRuntimeService runtime, BusinessCredentialStore credentials,
         com.ruoyi.session.runtime.RuntimeEventPublisher events,
-        org.springframework.context.ApplicationEventPublisher publisher)
+        org.springframework.context.ApplicationEventPublisher publisher, ObjectMapper json)
     { this.system = system; this.store = store; this.tokens = tokens; this.runtime = runtime;
-      this.credentials = credentials; this.events = events; this.publisher = publisher; }
+      this.credentials = credentials; this.events = events; this.publisher = publisher; this.json = json; }
 
     public View create(String secret, String externalUserId, String idempotencyKey, String queryCredential)
     {
@@ -34,26 +37,25 @@ public class BusinessSessionService
         if (externalUserId.startsWith("__ln_debug__:"))
             throw problem(HttpStatus.BAD_REQUEST, "EXTERNAL_USER_INVALID");
         validKey(idempotencyKey);
-        BusinessSystemClient.Snapshot snapshot = system.authenticate(secret, "sessions:create", null);
+        BusinessSystemClient.Snapshot snapshot = system.authenticate(secret, "sessions:create");
         byte[] requestHash = credentials.fingerprint(queryCredential);
-        BusinessSessionStore.Preparation prepared = store.prepare(snapshot.accountId(), snapshot.applicationId(), snapshot.configId(),
-            externalUserId, idempotencyKey, requestHash);
+        BusinessSessionStore.Preparation prepared = store.prepare(snapshot, externalUserId, idempotencyKey, requestHash);
         BusinessSessionStore.Session row = prepared.session();
         boolean creating = "CREATING".equals(row.status());
         if (creating) resumeCreate(row);
-        else system.check(row.accountId(), row.applicationId(), row.configId());
+        else system.check(row.accountId(), row.applicationId(), row.id());
         if (creating && queryCredential != null)
         {
             try { credentials.put(row.id(), queryCredential, row.expiresAt()); }
             catch (RuntimeProblem error) { end(store.find(row.id())); throw error; }
         }
-        return view(store.find(row.id()));
+        return view(store.find(row.id()), true);
     }
 
     public View read(String secret, long sessionId, String externalUserId)
     {
         validUser(externalUserId);
-        BusinessSystemClient.Snapshot key = system.authenticate(secret, "sessions:read", null);
+        BusinessSystemClient.Snapshot key = system.authenticate(secret, "sessions:read");
         BusinessSessionStore.Session row = store.owned(key.accountId(), key.applicationId(), sessionId, externalUserId);
         if ("DELETED".equals(row.status()) || "FAILED".equals(row.status())) throw problem(HttpStatus.GONE, "SESSION_ENDED");
         if (!row.expiresAt().isAfter(Instant.now()))
@@ -61,8 +63,8 @@ public class BusinessSessionService
             end(row);
             throw problem(HttpStatus.GONE, "SESSION_ENDED");
         }
-        system.check(row.accountId(), row.applicationId(), row.configId());
-        return view(row);
+        system.check(row.accountId(), row.applicationId(), row.id());
+        return view(row, false);
     }
 
     public BusinessSessionStore.IssuedGrant mint(String secret, long sessionId, String externalUserId,
@@ -70,14 +72,15 @@ public class BusinessSessionService
     {
         validUser(externalUserId);
         validKey(idempotencyKey);
-        BusinessSystemClient.Snapshot key = system.authenticate(secret, "sessions:grant", null);
+        BusinessSystemClient.Snapshot key = system.authenticate(secret, "sessions:grant");
         BusinessSessionStore.Session row = store.owned(key.accountId(), key.applicationId(), sessionId, externalUserId);
-        BusinessSystemClient.Snapshot snapshot = system.authenticate(secret, "sessions:grant", row.configId());
-        system.check(row.accountId(), row.applicationId(), row.configId());
+        BusinessSystemClient.Snapshot snapshot = system.authenticate(secret, "sessions:grant");
+        system.check(row.accountId(), row.applicationId(), row.id());
         if (requestedScopes != null && requestedScopes.stream().anyMatch(java.util.Objects::isNull))
             throw problem(HttpStatus.BAD_REQUEST, "SCOPE_INVALID");
-        List<String> scopes = requestedScopes == null || requestedScopes.isEmpty() ? snapshot.allowedScopes() : List.copyOf(requestedScopes);
-        if (scopes.isEmpty() || scopes.size() != Set.copyOf(scopes).size() || !snapshot.allowedScopes().containsAll(scopes))
+        List<String> scopes = snapshot.allowedScopes();
+        if (requestedScopes != null && !requestedScopes.isEmpty()
+            && (!requestedScopes.equals(scopes) || requestedScopes.size() != Set.copyOf(requestedScopes).size()))
             throw problem(HttpStatus.BAD_REQUEST, "SCOPE_INVALID");
         return store.mint(row, snapshot, idempotencyKey, scopes, tokens);
     }
@@ -87,26 +90,26 @@ public class BusinessSessionService
         validUser(externalUserId);
         if (idempotencyKey == null || idempotencyKey.isBlank()) validRevision(ifMatch);
         else validKey(idempotencyKey);
-        BusinessSystemClient.Snapshot key = system.authenticate(secret, "sessions:end", null);
+        BusinessSystemClient.Snapshot key = system.authenticate(secret, "sessions:end");
         BusinessSessionStore.Session row = store.owned(key.accountId(), key.applicationId(), sessionId, externalUserId);
         if (ifMatch != null && !ifMatch.isBlank() && !ifMatch.equals(Long.toString(row.revision())))
             throw problem(HttpStatus.PRECONDITION_FAILED, "REVISION_MISMATCH");
         if (idempotencyKey != null && !idempotencyKey.isBlank())
         {
             BusinessSessionStore.ActionClaim claim = store.claimAction(row.accountId(), row.id(), "end", idempotencyKey, externalUserId);
-            if (claim.completed()) return view(store.find(sessionId));
+            if (claim.completed()) return view(store.find(sessionId), false);
         }
         end(row);
         if (idempotencyKey != null && !idempotencyKey.isBlank())
             store.finishAction(row.accountId(), row.id(), "end", idempotencyKey, 1);
-        return view(store.find(sessionId));
+        return view(store.find(sessionId), false);
     }
 
     public int revoke(String secret, long sessionId, String externalUserId, String idempotencyKey, boolean allSessions)
     {
         validUser(externalUserId);
         validKey(idempotencyKey);
-        BusinessSystemClient.Snapshot key = system.authenticate(secret, "sessions:revoke", null);
+        BusinessSystemClient.Snapshot key = system.authenticate(secret, "sessions:revoke");
         BusinessSessionStore.Session row = store.owned(key.accountId(), key.applicationId(), sessionId, externalUserId);
         BusinessSessionStore.ActionClaim claim = store.claimAction(row.accountId(), row.id(), "revoke", idempotencyKey, externalUserId + ":" + allSessions);
         if (claim.completed()) return claim.count();
@@ -128,22 +131,30 @@ public class BusinessSessionService
         RuntimeTokenCodec.V2Claims claims = tokens.decodeV2(authorization);
         if (!"BUSINESS_KEY".equals(claims.source())) throw problem(HttpStatus.UNAUTHORIZED, "TOKEN_SOURCE_INVALID");
         BusinessSessionStore.VerifiedGrant grant = store.verify(claims);
-        BusinessSystemClient.Snapshot current = system.check(claims.accountId(), claims.applicationId(), claims.configVersionId());
+        BusinessSystemClient.Snapshot current = system.check(claims.accountId(), claims.applicationId(), claims.sessionId());
         if (grant.applicationEpoch() != current.applicationEpoch()) throw problem(HttpStatus.UNAUTHORIZED, "TOKEN_REVOKED");
         List<String> effectiveScopes = grant.scopes().stream().filter(current.allowedScopes()::contains).toList();
         return new VerifiedRuntime(claims.accountId(), claims.applicationId(), claims.sessionId(),
-            claims.configVersionId(), effectiveScopes);
+            grant.snapshotId(), effectiveScopes);
     }
 
     /** Only successful user actions extend idle time; heartbeats and token issuance do not. */
     public void successfulActivity(long sessionId) { store.touchSuccessfulActivity(sessionId); }
 
+    public void forceClose(long accountId, long sessionId)
+    {
+        BusinessSessionStore.Session row = store.find(sessionId);
+        if (row == null || row.accountId() != accountId) throw problem(HttpStatus.NOT_FOUND, "SESSION_NOT_FOUND");
+        end(row);
+    }
+
     private void resumeCreate(BusinessSessionStore.Session row)
     {
         try
         {
-            system.reserve(row.accountId(), row.applicationId(), row.configId(), row.id(), row.referenceOperationId());
-            system.confirm(row.accountId(), row.applicationId(), row.configId(), row.id(), row.referenceOperationId());
+            long revision = requireSnapshot(row).applicationRevision();
+            system.reserve(row.accountId(), row.applicationId(), revision, row.id(), row.referenceOperationId());
+            system.confirm(row.accountId(), row.applicationId(), revision, row.id(), row.referenceOperationId());
             store.activate(row.id());
         }
         catch (RuntimeProblem error)
@@ -151,7 +162,8 @@ public class BusinessSessionService
             if (error.status().is4xxClientError())
             {
                 store.failCreate(row.id());
-                system.release(row.accountId(), row.applicationId(), row.configId(), row.id(), row.referenceOperationId());
+                long revision = requireSnapshot(row).applicationRevision();
+                system.release(row.accountId(), row.applicationId(), revision, row.id(), row.referenceOperationId());
                 store.finishFailed(row.id());
             }
             throw error;
@@ -168,7 +180,8 @@ public class BusinessSessionService
         runtime.revokeSession(row.id());
         events.revokeSession(row.id());
         credentials.remove(row.id());
-        system.release(row.accountId(), row.applicationId(), row.configId(), row.id(), row.referenceOperationId());
+        long revision = requireSnapshot(row).applicationRevision();
+        system.release(row.accountId(), row.applicationId(), revision, row.id(), row.referenceOperationId());
         store.finishClose(row.id());
     }
 
@@ -185,7 +198,8 @@ public class BusinessSessionService
                 else if ("DELETING".equals(row.status())) end(row);
                 else if ("FAILED".equals(row.status()))
                 {
-                    system.release(row.accountId(), row.applicationId(), row.configId(), row.id(), row.referenceOperationId());
+                    long revision = requireSnapshot(row).applicationRevision();
+                    system.release(row.accountId(), row.applicationId(), revision, row.id(), row.referenceOperationId());
                     store.finishFailed(row.id());
                 }
                 else if ("ACTIVE".equals(row.status()) && !row.expiresAt().isAfter(Instant.now())) end(row);
@@ -194,10 +208,22 @@ public class BusinessSessionService
         }
     }
 
-    private static View view(BusinessSessionStore.Session row)
+    private View view(BusinessSessionStore.Session row, boolean includeDeveloperConfig)
     {
-        return new View(Long.toString(row.id()), Long.toString(row.applicationId()), Long.toString(row.configId()),
-            row.status(), row.createdAt(), row.lastActivityAt(), row.expiresAt(), Long.toString(row.revision()));
+        JsonNode developer = null;
+        if (includeDeveloperConfig)
+        {
+            try { developer = json.readTree(requireSnapshot(row).developerConfig()); }
+            catch (Exception error) { throw problem(HttpStatus.INTERNAL_SERVER_ERROR, "SESSION_SNAPSHOT_INVALID"); }
+        }
+        return new View(Long.toString(row.id()), Long.toString(row.applicationId()), row.externalUserId(),
+            row.status(), row.createdAt(), row.lastActivityAt(), row.expiresAt(), Long.toString(row.revision()), developer);
+    }
+    private BusinessSessionStore.Snapshot requireSnapshot(BusinessSessionStore.Session row)
+    {
+        BusinessSessionStore.Snapshot snapshot = store.snapshot(row.snapshotId());
+        if (snapshot == null) throw problem(HttpStatus.CONFLICT, "SESSION_SNAPSHOT_MISSING");
+        return snapshot;
     }
     private static void validUser(String user)
     {
@@ -214,7 +240,7 @@ public class BusinessSessionService
     }
     private static RuntimeProblem problem(HttpStatus status, String code) { return new RuntimeProblem(status, code, code); }
 
-    public record View(String sessionId, String applicationId, String configVersionId, String status,
-        Instant createdAt, Instant lastActivityAt, Instant expiresAt, String revision) { }
-    public record VerifiedRuntime(long accountId, long applicationId, long sessionId, long configVersionId, List<String> scopes) { }
+    public record View(String sessionId, String applicationId, String externalUserId, String status,
+        Instant createdAt, Instant lastActivityAt, Instant expiresAt, String revision, JsonNode developerConfig) { }
+    public record VerifiedRuntime(long accountId, long applicationId, long sessionId, long snapshotId, List<String> scopes) { }
 }

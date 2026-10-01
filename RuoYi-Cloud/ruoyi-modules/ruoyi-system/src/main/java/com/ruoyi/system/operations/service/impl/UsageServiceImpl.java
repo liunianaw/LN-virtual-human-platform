@@ -18,7 +18,7 @@ import com.ruoyi.common.security.utils.SecurityUtils;
 @Service
 public class UsageServiceImpl implements IUsageService
 {
-    private static final Set<String> CAPABILITIES = Set.of("GENERATION","LLM","ASR","TTS","TOOL","CONTEXT");
+    private static final Set<String> CAPABILITIES = Set.of("GENERATION","ASR","TTS","TOOL");
     private final UsageMapper mapper;
     public UsageServiceImpl(UsageMapper mapper) { this.mapper = mapper; }
 

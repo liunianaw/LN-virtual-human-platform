@@ -3,7 +3,6 @@ package com.ruoyi.session.runtime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ruoyi.session.business.BusinessSessionService;
-import com.ruoyi.session.business.BusinessSystemClient;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -11,22 +10,26 @@ import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-/** A single manual recording request; the audio and recognized text are never persisted here. */
+/** One explicit recording request against the administrator-configured default official ASR. */
 @Service
 public class AsrRuntimeService
 {
-    private final ChatTurnStore store;
-    private final BusinessSystemClient system;
+    private final RuntimeOperationStore store;
+    private final OfficialServiceResolver official;
     private final BusinessSessionService business;
     private final PinnedHttps https;
     private final RuntimeAuthorization access;
     private final ObjectMapper json;
+    private final com.ruoyi.session.business.BusinessSystemClient system;
 
-    public AsrRuntimeService(ChatTurnStore store, BusinessSystemClient system, BusinessSessionService business,
-        PinnedHttps https, RuntimeAuthorization access, ObjectMapper json)
-    { this.store = store; this.system = system; this.business = business; this.https = https; this.access = access; this.json = json; }
+    public AsrRuntimeService(RuntimeOperationStore store, OfficialServiceResolver official,
+        BusinessSessionService business, PinnedHttps https, RuntimeAuthorization access, ObjectMapper json,
+        com.ruoyi.session.business.BusinessSystemClient system)
+    { this.store = store; this.official = official; this.business = business; this.https = https;
+      this.access = access; this.json = json; this.system = system; }
 
-    public Result transcribe(RuntimeAuthorization.Grant grant, String requestId, String mimeType, byte[] audio, String language)
+    public Result transcribe(RuntimeAuthorization.Grant grant, String requestId,
+        String mimeType, byte[] audio, String language)
     {
         RuntimePrincipal principal = grant.principal();
         if (!principal.scopes().contains("asr:write")) throw problem(HttpStatus.FORBIDDEN, "SCOPE_DENIED");
@@ -35,74 +38,60 @@ public class AsrRuntimeService
             || audio.length > 1_900_000 || !java.util.Set.of("audio/webm", "audio/mp4", "audio/ogg", "audio/wav").contains(mimeType)
             || language != null && !language.matches("[A-Za-z]{2,8}(?:-[A-Za-z]{2,8})?"))
             throw problem(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT");
-        JsonNode config = system.chatConfig(principal.accountId(), principal.applicationId(),
-            principal.configVersionId(), principal.sessionId());
-        long relayVersionId = config.path("asrRelayVersionId").asLong();
-        if (relayVersionId <= 0) throw problem(HttpStatus.FORBIDDEN, "ASR_NOT_CONFIGURED");
-        String externalUserId = "CONSOLE_DEBUG".equals(grant.source())
-            ? "__ln_debug__:" + principal.sessionId() : store.externalUserId(principal);
-        if (externalUserId == null || externalUserId.isBlank()) throw problem(HttpStatus.CONFLICT, "SESSION_NOT_READY");
-        JsonNode relay = system.resolveAsrRelay(principal.accountId(), principal.applicationId(),
-            principal.sessionId(), relayVersionId, externalUserId);
-        long operationId = store.beginAsr(principal, requestId, relayVersionId, audio);
+        if (audio.length > system.recordingLimit(principal.accountId(), principal.applicationId()))
+            throw problem(HttpStatus.PAYLOAD_TOO_LARGE, "RECORDING_LIMIT_EXCEEDED");
+        OfficialServiceResolver.DefaultResolved service = official.resolveDefaultAsr();
+        long operationId = store.beginAsr(principal, requestId, service.serviceId(), audio);
         java.util.concurrent.atomic.AtomicBoolean submitted = new java.util.concurrent.atomic.AtomicBoolean();
-        String boundary = "ln-" + operationId;
-        byte[] body = multipart(boundary, audio, mimeType, operationId, principal, externalUserId, language);
-        Result recognized;
-        String providerRequestId;
-        Long durationMs;
-        try (PinnedHttps.Response response = https.request(
-            URI.create(relay.path("baseUrl").asText() + "/audio/transcriptions"),
-            relay.path("pinnedAddress").asText(), "POST",
-            Map.of("Authorization", "Bearer " + relay.path("accessToken").asText(),
-                "X-LN-Protocol-Version", "1", "X-Request-Id", Long.toString(operationId),
-                "Content-Type", "multipart/form-data; boundary=" + boundary),
-            body, relay.path("timeoutMs").asInt(30000), Math.min(65536, relay.path("maxResponseBytes").asLong(65536)),
-            () -> { access.verify(grant.id()); submitted.set(true); }))
+        byte[] body = payload(audio, mimeType, service.model(), language);
+        URI endpoint = URI.create(service.endpoint());
+        try (PinnedHttps.Response response = https.request(endpoint, publicAddress(endpoint), "POST",
+            Map.of("Authorization", "Bearer " + service.credential(),
+                "Content-Type", "application/json"),
+            body, 30000, 65536, () -> { access.verify(grant.id()); submitted.set(true); }))
         {
             if (!response.contentType().startsWith("application/json")) throw new IOException("Invalid ASR content type");
-            JsonNode result = json.readTree(response.body());
-            String text = result.path("text").asText();
+            JsonNode value = json.readTree(response.body());
+            String text = value.path("choices").path(0).path("message").path("content").asText();
             if (text.isBlank() || text.length() > 4096) throw new IOException("Invalid ASR text");
-            providerRequestId = result.path("providerRequestId").asText(null);
-            if (providerRequestId != null && !providerRequestId.matches("[A-Za-z0-9._:-]{1,128}"))
-                throw new IOException("Invalid ASR request ID");
-            durationMs = result.path("durationMs").canConvertToLong() ? result.path("durationMs").asLong() : null;
-            if (durationMs != null && (durationMs < 0 || durationMs > 600000)) throw new IOException("Invalid ASR duration");
-            recognized = new Result(Long.toString(operationId), text, result.path("language").asText(null));
+            String providerRequestId = value.path("id").asText(null);
+            Long durationMs = value.path("usage").path("seconds").isNumber()
+                ? Math.round(value.path("usage").path("seconds").asDouble() * 1000) : null;
+            access.verify(grant.id());
+            store.endAsr(principal, operationId, "SUCCEEDED", null, providerRequestId, durationMs);
+            if ("BUSINESS_KEY".equals(grant.source())) business.successfulActivity(principal.sessionId());
+            return new Result(Long.toString(operationId), text, value.path("language").asText(language));
         }
         catch (Exception error)
         {
-            store.endAsr(principal, operationId, submitted.get() ? "UNKNOWN" : "FAILED", "ASR_UPSTREAM_FAILED", null, null);
+            store.endAsr(principal, operationId, submitted.get() ? "UNKNOWN" : "FAILED",
+                "ASR_UPSTREAM_FAILED", null, null);
             throw problem(HttpStatus.BAD_GATEWAY, "ASR_UPSTREAM_FAILED");
         }
-        store.endAsr(principal, operationId, "SUCCEEDED", null, providerRequestId, durationMs);
-        if ("BUSINESS_KEY".equals(grant.source())) business.successfulActivity(principal.sessionId());
-        return recognized;
     }
 
-    private static byte[] multipart(String boundary, byte[] audio, String mimeType, long operationId,
-        RuntimePrincipal principal, String externalUserId, String language)
+    private byte[] payload(byte[] audio, String mimeType, String model, String language)
     {
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-        field(out, boundary, "requestId", Long.toString(operationId));
-        field(out, boundary, "applicationId", Long.toString(principal.applicationId()));
-        field(out, boundary, "sessionId", Long.toString(principal.sessionId()));
-        field(out, boundary, "externalUserId", externalUserId);
-        if (language != null) field(out, boundary, "language", language);
-        write(out, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"recording\"\r\n" +
-            "Content-Type: " + mimeType + "\r\n\r\n");
-        out.writeBytes(audio);
-        write(out, "\r\n--" + boundary + "--\r\n");
-        return out.toByteArray();
+        try
+        {
+            Map<String, Object> options = new java.util.LinkedHashMap<>();
+            options.put("enable_itn", true);
+            if (language != null) options.put("language", language.split("-")[0]);
+            return json.writeValueAsBytes(Map.of("model", model, "stream", false, "asr_options", options,
+                "messages", java.util.List.of(Map.of("role", "user", "content", java.util.List.of(
+                    Map.of("type", "input_audio", "input_audio", Map.of("data",
+                        "data:" + mimeType + ";base64," + java.util.Base64.getEncoder().encodeToString(audio))))))));
+        }
+        catch (Exception error) { throw problem(HttpStatus.BAD_REQUEST, "INVALID_ARGUMENT"); }
     }
-
-    private static void field(java.io.ByteArrayOutputStream out, String boundary, String name, String value)
+    private static String publicAddress(URI endpoint) throws IOException
     {
-        write(out, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + name + "\"\r\n\r\n" + value + "\r\n");
+        java.net.InetAddress address = java.net.InetAddress.getByName(endpoint.getHost());
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
+            || address.isSiteLocalAddress() || address.isMulticastAddress())
+            throw new IOException("Official ASR resolved to a non-public address");
+        return address.getHostAddress();
     }
-    private static void write(java.io.ByteArrayOutputStream out, String value)
-    { out.writeBytes(value.getBytes(StandardCharsets.UTF_8)); }
     private static RuntimeProblem problem(HttpStatus status, String code)
     { return new RuntimeProblem(status, code, code); }
     public record Result(String operationId, String text, String language) { }

@@ -3,7 +3,7 @@
     <el-alert title="服务检查只验证地址、参数和凭证可解析，不会调用厂商或产生费用。保存的密钥不会再显示。" type="info" :closable="false" class="mb16" />
     <el-card header="官方服务配置" class="mb16"><el-form inline label-width="90px">
       <el-form-item label="名称"><el-input v-model="form.name" maxlength="100" /></el-form-item>
-      <el-form-item label="能力"><el-select v-model="form.capability" @change="preset"><el-option label="角色制作" value="AVATAR_GENERATION" /><el-option label="官方 TTS" value="TTS" /></el-select></el-form-item>
+      <el-form-item label="能力"><el-select v-model="form.capability" @change="preset"><el-option label="角色制作" value="AVATAR_GENERATION" /><el-option label="官方 TTS" value="TTS" /><el-option label="默认 ASR" value="ASR" /></el-select></el-form-item>
       <el-form-item label="适配器"><el-input v-model="form.providerCode" readonly /></el-form-item>
       <el-form-item label="模型"><el-input v-model="form.modelId" readonly /></el-form-item>
       <el-form-item label="使用凭证">
@@ -26,10 +26,10 @@ const form = reactive({ name: '', capability: 'AVATAR_GENERATION' as OfficialSer
 const editing = ref<OfficialService>()
 const credentialOptions = computed(() => Array.from(new Map(items.value.filter((item: OfficialService) => item.credentialConfigured && item.secretId).map((item: OfficialService) => [item.secretId!, { value: item.secretId!, label: `${item.name}（已配置）` }])).values()))
 function selectDefaultCredential() { if (!form.secretId && credentialOptions.value.length === 1) form.secretId = credentialOptions.value[0].value }
-function preset() { const tts = form.capability === 'TTS'; form.providerCode = tts ? 'DASHSCOPE_BEIJING' : 'DASHSCOPE_IMAGE'; form.endpoint = tts ? 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime' : 'https://dashscope.aliyuncs.com'; form.modelId = tts ? 'qwen3-tts-flash-realtime' : 'qwen-image-3.0-pro' }
+function preset() { const tts = form.capability === 'TTS', asr = form.capability === 'ASR'; form.providerCode = tts || asr ? 'DASHSCOPE_BEIJING' : 'DASHSCOPE_IMAGE'; form.endpoint = tts ? 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime' : asr ? 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' : 'https://dashscope.aliyuncs.com'; form.modelId = tts ? 'qwen3-tts-flash-realtime' : asr ? 'qwen3-asr-flash' : 'qwen-image-3.0-pro' }
 function reload() { loading.value = true; listOfficialServices().then(r => { items.value = r.data?.items || []; selectDefaultCredential() }).finally(() => loading.value = false) }
 function resetForm() { Object.assign(form, { name: '', capability: 'AVATAR_GENERATION', providerCode: 'DASHSCOPE_IMAGE', endpoint: 'https://dashscope.aliyuncs.com', modelId: 'qwen-image-3.0-pro', secretId: '' }); editing.value = undefined; selectDefaultCredential() }
-function edit(row: OfficialService) { editing.value = row; Object.assign(form, { name: row.name, capability: row.capability, providerCode: row.capability === 'TTS' ? 'DASHSCOPE_BEIJING' : 'DASHSCOPE_IMAGE', endpoint: row.endpoint, modelId: row.modelId, secretId: row.secretId || '' }) }
+function edit(row: OfficialService) { editing.value = row; Object.assign(form, { name: row.name, capability: row.capability, providerCode: row.capability === 'AVATAR_GENERATION' ? 'DASHSCOPE_IMAGE' : 'DASHSCOPE_BEIJING', endpoint: row.endpoint, modelId: row.modelId, secretId: row.secretId || '' }) }
 function cancelEdit() { resetForm() }
 function save() { if (!form.name.trim() || !form.secretId) return proxy?.$modal.msgWarning('请填写名称并选择已保存的凭证。'); const data = { ...form, name: form.name.trim(), parameters: editing.value?.parameters || {} }; const request = editing.value ? updateOfficialService(editing.value.serviceId, editing.value.revision, data) : createOfficialService(data); request.then(() => { proxy?.$modal.msgSuccess(editing.value ? '服务配置已更新。' : '已保存为停用配置。'); resetForm(); reload() }) }
 function check(row: OfficialService) { checkOfficialService(row.serviceId, row.revision).then(r => r.data?.configurationValid ? proxy?.$modal.msgSuccess('配置检查通过；未调用厂商。') : proxy?.$modal.msgError(r.data?.issues?.join('；') || '配置检查未通过')) }

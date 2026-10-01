@@ -11,3 +11,4 @@ export {
   type AvatarManifest,
 } from "./manifest.js";
 export { SessionClient, SessionClientError, type SessionClientEvent, type SessionClientOptions, type SessionState, type SessionToken } from "./session-client.js";
+export type { CaptureOptions, ContextCapture, ContextSource } from "./context.js";

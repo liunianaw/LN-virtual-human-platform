@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Current authorization is checked for each new Tool action. */
+/** Current status is checked for each new Tool action; the Session binding is frozen by skill ID. */
 @RestController
 @RequestMapping("/internal/v1/skills")
 public class SkillInternalController

@@ -28,6 +28,11 @@
         select <include refid="serviceColumns"/> from p_official_service s join p_secret ps on ps.id=s.secret_id and ps.status='ACTIVE'
         where s.id=#{serviceId} and s.revision=#{expectedRevision} and s.capability=#{capability} and s.status='ACTIVE'
     </select>
+    <select id="selectDefaultResolvable" resultMap="Service">
+        select <include refid="serviceColumns"/> from p_official_service s
+        join p_secret ps on ps.id=s.secret_id and ps.status='ACTIVE'
+        where s.capability=#{capability} and s.status='ACTIVE' order by s.updated_at desc,s.id desc limit 1
+    </select>
     <select id="selectSecret" resultMap="Secret">select id,ciphertext,nonce,auth_tag,key_version,algorithm,status from p_secret where id=#{secretId} and status='ACTIVE'</select>
     <select id="selectIdempotencyForUpdate" resultMap="Idempotency">select request_hash,resource_id from p_api_idempotency where account_id=#{accountId} and scope=#{scope} and request_id=#{requestId} for update</select>
     <select id="countGenerationBinding" resultType="int">select count(*) from p_generation_task where id=#{taskId} and official_service_id=#{serviceId} and cast(json_unquote(json_extract(service_snapshot,'$.revision')) as unsigned)=#{revision}</select>
