@@ -9,6 +9,9 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface PointBillingMapper
 {
+    record TtsPrice(long rateVersionId, long unitPriceCent, Long applicationId) { }
+    TtsPrice ttsPrice(@Param("accountId") long accountId, @Param("requestKey") String requestKey);
+    Long ttsReservationId(@Param("accountId") long accountId, @Param("businessId") String businessId);
     Map<String,Object> currentRate();
     Map<String,Object> latestRateForUpdate();
     List<Map<String,Object>> rates();
@@ -33,7 +36,8 @@ public interface PointBillingMapper
         @Param("businessType") String businessType,@Param("businessId") String businessId,
         @Param("reservationNo") int reservationNo,@Param("billingItem") String billingItem,
         @Param("measuredUnits") long measuredUnits,@Param("unitPriceCent") long unitPriceCent,
-        @Param("rateVersionId") long rateVersionId,@Param("reservedCent") long reservedCent);
+        @Param("rateVersionId") long rateVersionId,@Param("reservedCent") long reservedCent,
+        @Param("requestKey") String requestKey,@Param("applicationId") Long applicationId);
     int finishReservation(@Param("id") long id,@Param("fromState") String fromState,@Param("state") String state,
         @Param("settledCent") long settledCent);
     int reviewReservation(@Param("id") long id);

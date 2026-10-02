@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.session.runtime.mapper.TtsLifecycleMapper">
+  <update id="prepare">
+    update s_operation o join s_session s on s.id=o.session_id and s.active_turn_id=o.turn_id
+    set o.tts_dispatch_state='PREPARED',o.tts_owner=#{owner},o.tts_deadline_at=#{deadline}
+    where o.turn_id=#{turn} and o.ordinal=#{ordinal} and o.operation_type='TTS'
+      and o.account_id=#{account} and o.session_id=#{session} and o.status='QUEUED'
+      and o.tts_dispatch_state='NONE' and s.status='ACTIVE' and s.expires_at &gt; utc_timestamp(3)
+      and s.connection_epoch=#{epoch} and json_unquote(json_extract(o.result_summary,'$.segmentId'))=#{segment}
+  </update>
+  <update id="reserved">
+    update s_operation set quota_reservation_id=nullif(#{reservation},0),tts_reservation_known=true
+    where turn_id=#{turn} and ordinal=#{ordinal} and operation_type='TTS'
+      and tts_dispatch_state!='NONE' and tts_reservation_known=false
+  </update>
+  <update id="dispatch">
+    update s_operation o join s_session s on s.id=o.session_id and s.active_turn_id=o.turn_id
+    set o.tts_dispatch_state='DISPATCHING'
+    where o.turn_id=#{turn} and o.ordinal=#{ordinal} and o.operation_type='TTS' and o.tts_owner=#{owner}
+      and o.tts_dispatch_state='PREPARED' and o.status='RUNNING' and o.settlement_status='NONE'
+      and o.tts_deadline_at &gt; utc_timestamp(3) and s.status='ACTIVE'
+      and s.expires_at &gt; utc_timestamp(3) and s.connection_epoch=#{epoch}
+  </update>
+  <update id="finish">
+    update s_operation set
+      settlement_outcome=case when #{success} then 'SETTLE' when tts_dispatch_state='PREPARED' then 'RELEASE' else 'REVIEW' end,
+      tts_dispatch_state=case when #{success} then 'SUCCEEDED' else 'FAILED' end,
+      settlement_status='PENDING',settlement_next_at=utc_timestamp(3),settlement_attempts=0,settlement_error=null
+    where turn_id=#{turn} and ordinal=#{ordinal} and operation_type='TTS' and tts_owner=#{owner}
+      and ((#{success} and tts_dispatch_state='DISPATCHING')
+        or (not #{success} and tts_dispatch_state in ('PREPARED','DISPATCHING'))
+        or (#{success} and settlement_outcome='REVIEW' and tts_dispatch_state='FAILED'))
+  </update>
+  <update id="recover">
+    update s_operation set
+      settlement_outcome=case when tts_dispatch_state='PREPARED' then 'RELEASE' else 'REVIEW' end,
+      tts_dispatch_state='FAILED',settlement_status='PENDING',settlement_next_at=utc_timestamp(3),
+      error_code='TTS_RECOVERY_REQUIRED'
+    where tts_dispatch_state in ('PREPARED','DISPATCHING') and settlement_status='NONE'
+      and (tts_owner != #{owner} or tts_deadline_at &lt;= utc_timestamp(3))
+    order by tts_deadline_at,id limit #{limit}
+  </update>
+  <select id="pending" resultType="com.ruoyi.session.runtime.mapper.TtsLifecycleMapper$Finalization">
+    select o.id,o.account_id accountId,s.application_id applicationId,o.turn_id turnId,o.ordinal,
+      o.input_char_count inputChars,o.quota_reservation_id reservationId,o.tts_reservation_known reservationKnown,o.settlement_outcome outcome,
+      o.settlement_attempts attempts
+    from s_operation o join s_session s on s.id=o.session_id
+    where o.settlement_status='PENDING' and o.settlement_next_at &lt;= utc_timestamp(3)
+    order by o.settlement_next_at,o.id limit #{limit}
+  </select>
+  <update id="done">
+    update s_operation set settlement_status='DONE',settlement_error=null,settlement_next_at=null
+    where id=#{id} and settlement_status='PENDING' and settlement_outcome=#{outcome}
+  </update>
+  <select id="factsToRecover" resultType="long">
+    select id from s_operation where operation_type='TTS' and settlement_outcome is not null
+      and (tts_owner != #{owner} or tts_deadline_at &lt;= utc_timestamp(3))
+      and status != case settlement_outcome when 'SETTLE' then 'SUCCEEDED' when 'RELEASE' then 'CANCELLED' else 'UNKNOWN' end
+    order by tts_deadline_at,id limit #{limit}
+  </select>
+  <update id="retry">
+    update s_operation set settlement_attempts=settlement_attempts+1,settlement_error=#{code},
+      settlement_status=case when settlement_attempts &gt;= 12 then 'REVIEW_REQUIRED' else 'PENDING' end,
+      settlement_next_at=date_add(utc_timestamp(3),interval least(300,5 * pow(2,least(6,settlement_attempts))) second)
+    where id=#{id} and settlement_status='PENDING' and settlement_outcome=#{outcome}
+  </update>
+</mapper>

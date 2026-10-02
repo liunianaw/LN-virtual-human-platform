@@ -1,6 +1,9 @@
 package com.ruoyi.session.runtime;
 
 import com.ruoyi.session.business.BusinessSystemClient;
+import com.ruoyi.session.runtime.mapper.TtsLifecycleMapper;
+import java.time.Instant;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 /** Rechecks authority and reserves official quota before each new provider side effect. */
@@ -13,11 +16,17 @@ public class TtsSubmissionService
     private final BusinessSystemClient system;
     private final TtsRuntimeAdapterRegistry adapters;
     private final SpeakOnlyRuntimeService runtime;
+    private final TtsLifecycleMapper lifecycle;
+    private final VoiceRuntimeProperties properties;
+    private final String owner = UUID.randomUUID().toString();
 
     public TtsSubmissionService(RuntimeAuthorization access, RuntimeConnectionEpochs epochs,
         PersistentRuntimeStore store, BusinessSystemClient system, TtsRuntimeAdapterRegistry adapters,
-        SpeakOnlyRuntimeService runtime)
-    { this.access = access; this.epochs = epochs; this.store = store; this.system = system; this.adapters = adapters; this.runtime = runtime; }
+        SpeakOnlyRuntimeService runtime, TtsLifecycleMapper lifecycle, VoiceRuntimeProperties properties)
+    { this.access = access; this.epochs = epochs; this.store = store; this.system = system; this.adapters = adapters;
+      this.runtime = runtime; this.lifecycle = lifecycle; this.properties = properties; }
+
+    String owner() { return owner; }
 
     public void submit(RuntimeAuthorization.Grant grant, long epoch, Iterable<TtsSynthesisWork> work)
     {
@@ -28,21 +37,30 @@ public class TtsSubmissionService
     {
         RuntimePrincipal principal = work.principal();
         String businessId = work.turnId() + ":" + work.ordinal();
-        long reservationId = 0;
-        boolean started = false;
-        final java.util.concurrent.atomic.AtomicBoolean submitted = new java.util.concurrent.atomic.AtomicBoolean();
+        long turn = Long.parseLong(work.turnId());
         try
         {
-            RuntimeAuthorization.Grant fresh = access.verify(grant.id());
-            if (!fresh.tokenId().equals(grant.tokenId()) || !epochs.current(principal, epoch))
-                throw new RuntimeProblem(org.springframework.http.HttpStatus.CONFLICT, "CONNECTION_REPLACED", "Connection was replaced.");
+            RuntimeAuthorization.Grant fresh=access.verify(grant.id());
+            if (!fresh.tokenId().equals(grant.tokenId()) || !epochs.current(principal,epoch))
+                throw new RuntimeProblem(org.springframework.http.HttpStatus.CONFLICT,"CONNECTION_REPLACED","Connection was replaced.");
+        }
+        catch (RuntimeException error)
+        {
+            runtime.onAudioFailed(principal,work,error instanceof RuntimeProblem problem?problem.code():"TTS_AUTH_UNAVAILABLE");
+            return;
+        }
+        // Claim before reserve HTTP: a lost response can be reconciled by the same business key.
+        if (lifecycle.prepare(principal.accountId(), principal.sessionId(), turn, work.ordinal(), work.segmentId(),
+            epoch, owner, Instant.now().plus(properties.getOfficial().getQueueTimeout())
+                .plus(properties.getOfficial().getTimeout()).plusSeconds(30)) != 1) return;
+        try
+        {
             if ("BUSINESS_KEY".equals(grant.source()) && principal.voice().providerKind() != TtsProviderKind.OFFICIAL)
                 throw new RuntimeProblem(org.springframework.http.HttpStatus.FORBIDDEN, "OFFICIAL_VOICE_REQUIRED", "Official Voice is required.");
-            reservationId = system.reserveTts(principal.accountId(), principal.applicationId(), businessId,
+            long reservationId = system.reserveTts(principal.accountId(), principal.applicationId(), businessId,
                 work.text().codePointCount(0, work.text().length()));
+            lifecycle.reserved(turn, work.ordinal(), reservationId);
             store.beginTts(principal, work, epoch, reservationId == 0 ? null : reservationId);
-            started = true;
-            final long reserved = reservationId;
             adapters.requireAdapter(principal.voice()).submit(work, new TtsCompletionSink()
             {
                 @Override public void beforeExternal(TtsSynthesisWork item)
@@ -50,35 +68,35 @@ public class TtsSubmissionService
                     RuntimeAuthorization.Grant current = access.verify(grant.id());
                     if (!current.tokenId().equals(grant.tokenId()) || !epochs.current(principal, epoch))
                         throw new RuntimeProblem(org.springframework.http.HttpStatus.CONFLICT, "CONNECTION_REPLACED", "Connection was replaced.");
-                    submitted.set(true);
+                    if (lifecycle.dispatch(turn, work.ordinal(), owner, epoch) != 1)
+                        throw new RuntimeProblem(org.springframework.http.HttpStatus.CONFLICT, "VOICE_CANCELLED", "Speech is no longer active.");
                 }
                 @Override public AudioReadyResult onAudioReady(RuntimePrincipal ignored, AudioReadyInput input)
                 {
-                    if (reserved > 0) finishQuota(principal.accountId(), businessId, "SETTLE");
+                    // Persist success before playback or remote billing; duplicates cannot downgrade it.
+                    if (lifecycle.finish(turn, work.ordinal(), owner, true) != 1) return AudioReadyResult.ignored();
                     AudioReadyResult result = runtime.onAudioReady(principal, input);
                     if (!result.accepted()) store.markLateAudioSucceeded(principal, work, input.durationMs());
                     return result;
                 }
                 @Override public void onAudioFailed(RuntimePrincipal ignored, TtsSynthesisWork failed, String code)
                 {
-                    if (reserved > 0) finishQuota(principal.accountId(), businessId, submitted.get() ? "REVIEW" : "RELEASE");
-                    if (!submitted.get()) store.cancelNotSubmitted(principal, failed);
-                    runtime.onAudioFailed(principal, failed, submitted.get() ? code : "TTS_NOT_SUBMITTED");
+                    lifecycle.finish(turn, work.ordinal(), owner, false);
+                    store.cancelNotSubmitted(principal, failed);
+                    runtime.onAudioFailed(principal, failed, code);
                 }
             });
         }
         catch (RuntimeException error)
         {
-            if (reservationId != 0) finishQuota(principal.accountId(), businessId, submitted.get() ? "REVIEW" : "RELEASE");
-            if (!submitted.get()) store.cancelNotSubmitted(principal, work);
-            runtime.onAudioFailed(principal, work, started && !submitted.get() ? "TTS_NOT_SUBMITTED"
-                : error instanceof RuntimeProblem problem ? problem.code() : "TTS_SUBMIT_FAILED");
+            // Explicit pre-admission rejection has no reservation; transport failures remain unconfirmed.
+            if (error instanceof RuntimeProblem problem && "BUSINESS_AUTH_REJECTED".equals(problem.code())
+                && java.util.Set.of(400,401,403,404,429).contains(problem.status().value()))
+                lifecycle.reserved(turn,work.ordinal(),0);
+            lifecycle.finish(turn, work.ordinal(), owner, false);
+            store.cancelNotSubmitted(principal, work);
+            runtime.onAudioFailed(principal, work, error instanceof RuntimeProblem problem ? problem.code() : "TTS_SUBMIT_FAILED");
         }
     }
 
-    private void finishQuota(long accountId, String businessId, String outcome)
-    {
-        try { system.finishTts(accountId, businessId, outcome); }
-        catch (RuntimeException ignored) { /* Reservation remains held for reconciliation. */ }
-    }
 }

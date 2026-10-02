@@ -23,11 +23,21 @@ public class TtsQuotaInternalController
     { this.guard = guard; this.quota = quota; }
 
     @PostMapping("/reserve")
-    public Map<String, String> reserve(@RequestHeader(HttpHeaders.AUTHORIZATION) String bearer, @RequestBody Request body)
+    public Reservation reserve(@RequestHeader(HttpHeaders.AUTHORIZATION) String bearer, @RequestBody Request body)
     {
         guard.requireSession(bearer);
-        return Map.of("reservationId", Long.toString(quota.reserve(body.accountId(), body.applicationId(), body.businessId(), body.units())));
+        return new Reservation(Long.toString(quota.reserve(body.accountId(), body.applicationId(), body.businessId(), body.units())));
     }
+
+    @PostMapping("/lookup")
+    public Reservation lookup(@RequestHeader(HttpHeaders.AUTHORIZATION) String bearer, @RequestBody Request body)
+    {
+        guard.requireSession(bearer);
+        Long id=quota.findReservation(body.accountId(),body.businessId());
+        return new Reservation(id==null?null:Long.toString(id));
+    }
+
+    public record Reservation(String reservationId) { }
 
     @PostMapping("/finish")
     public void finish(@RequestHeader(HttpHeaders.AUTHORIZATION) String bearer, @RequestBody Request body)

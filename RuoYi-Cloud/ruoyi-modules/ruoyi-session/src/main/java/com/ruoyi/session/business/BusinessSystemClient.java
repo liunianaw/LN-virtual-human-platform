@@ -69,6 +69,15 @@ public class BusinessSystemClient
     public void finishTts(long accountId, String businessId, String outcome)
     { post("/internal/v1/tts-quota/finish", new TtsQuota(accountId, 0, businessId, 0, outcome)); }
 
+    public long lookupTts(long accountId, String businessId)
+    {
+        JsonNode response=post("/internal/v1/tts-quota/lookup",new TtsQuota(accountId,0,businessId,0,null));
+        long id=number(response,"reservationId");
+        // Absence is not proof that an in-flight reserve transaction never happened.
+        if(id<=0) throw problem(HttpStatus.SERVICE_UNAVAILABLE,"TTS_RESERVATION_UNCONFIRMED");
+        return id;
+    }
+
     private JsonNode post(String path, Object body)
     {
         String base = System.getenv("LN_SESSION_TO_SYSTEM_URL");

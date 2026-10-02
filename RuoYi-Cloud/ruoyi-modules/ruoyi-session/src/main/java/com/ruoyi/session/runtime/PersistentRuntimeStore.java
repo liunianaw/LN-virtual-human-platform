@@ -80,7 +80,7 @@ public class PersistentRuntimeStore
     public void cancelNotSubmitted(RuntimePrincipal principal, TtsSynthesisWork work)
     {
         String prior = jdbcTemplate.query("select status from s_operation where turn_id=? and ordinal=? " +
-            "and operation_type='TTS' and account_id=? and session_id=? for update",
+            "and operation_type='TTS' and account_id=? and session_id=? and settlement_outcome='RELEASE' for update",
             rs -> rs.next() ? rs.getString(1) : null, Long.parseLong(work.turnId()), work.ordinal(),
             principal.accountId(), principal.sessionId());
         if (prior == null || !java.util.Set.of("QUEUED", "RUNNING", "UNKNOWN").contains(prior)) return;
@@ -126,12 +126,12 @@ public class PersistentRuntimeStore
         long turnId = Long.parseLong(work.turnId());
         Operation operation = jdbcTemplate.query("select id,input_char_count,json_unquote(json_extract(result_summary,'$.segmentId')) " +
             "from s_operation where turn_id=? and ordinal=? and operation_type='TTS' and account_id=? " +
-            "and session_id=? and status='UNKNOWN' and playback_status='STOPPED' for update",
+            "and session_id=? and status in ('UNKNOWN','CANCELLED','FAILED') and tts_dispatch_state='SUCCEEDED' for update",
             rs -> rs.next() ? new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)) : null,
             turnId, work.ordinal(), principal.accountId(), principal.sessionId());
         if (operation == null || !work.segmentId().equals(operation.segmentId())) return;
         if (jdbcTemplate.update("update s_operation set status='SUCCEEDED',error_code=null,updated_at=utc_timestamp(3) " +
-            "where id=? and status='UNKNOWN' and playback_status='STOPPED'", operation.id()) == 1)
+            "where id=? and status in ('UNKNOWN','CANCELLED','FAILED') and tts_dispatch_state='SUCCEEDED'", operation.id()) == 1)
             callOutbox(principal.accountId(), turnId, operation.segmentId(), operation.id(), "SUCCEEDED",
                 operation.inputChars(), durationMs, null, null);
     }
@@ -144,6 +144,10 @@ public class PersistentRuntimeStore
             rs -> rs.next() ? rs.getString(1) : null, turnId, ordinal);
         if (!"QUEUED".equals(prior) && !"RUNNING".equals(prior)) return;
         String terminal = "TTS_NOT_SUBMITTED".equals(failureCode) ? "CANCELLED" : "FAILED";
+        String synthesis = jdbcTemplate.query("select tts_dispatch_state,settlement_outcome from s_operation where turn_id=? and ordinal=? and operation_type='TTS'",
+            rs -> rs.next() ? ("SUCCEEDED".equals(rs.getString(1)) ? "SUCCEEDED" : "REVIEW".equals(rs.getString(2)) ? "UNKNOWN" : null) : null,
+            turnId, ordinal);
+        if (synthesis != null) terminal = synthesis;
         int changed = jdbcTemplate.update("update s_operation set status = ?, result_summary = json_set(coalesce(result_summary,json_object()),'$.failureCode', ?), updated_at = ?, finished_at = ? where turn_id = ? and ordinal = ? and operation_type = 'TTS' and status = 'RUNNING'",
                 terminal, failureCode, now, now, turnId, ordinal);
         if ("QUEUED".equals(prior)) changed = jdbcTemplate.update("update s_operation set status='FAILED',error_code=?,updated_at=?,finished_at=? where turn_id=? and ordinal=? and operation_type='TTS' and status='QUEUED'",
@@ -323,6 +327,22 @@ public class PersistentRuntimeStore
         Long account = jdbcTemplate.queryForObject("select account_id from s_turn where id=?", Long.class, turnId);
         if (account == null) throw new IllegalStateException("TTS operation no longer has an account");
         return account;
+    }
+
+    /** Repairs a crash between durable synthesis outcome and playback/call-fact persistence. */
+    @Transactional
+    public void reconcileTtsFact(long operationId)
+    {
+        record Fact(long account, long turn, String segment, long characters, String outcome, String status) { }
+        Fact fact=jdbcTemplate.query("select account_id,turn_id,json_unquote(json_extract(result_summary,'$.segmentId')),input_char_count,settlement_outcome,status " +
+            "from s_operation where id=? and operation_type='TTS' and settlement_outcome is not null for update",
+            rs->rs.next()?new Fact(rs.getLong(1),rs.getLong(2),rs.getString(3),rs.getLong(4),rs.getString(5),rs.getString(6)):null,operationId);
+        if(fact==null) return;
+        String target=switch(fact.outcome()){case "SETTLE"->"SUCCEEDED";case "RELEASE"->"CANCELLED";default->"UNKNOWN";};
+        if(target.equals(fact.status())) return;
+        jdbcTemplate.update("update s_operation set status=?,finished_at=coalesce(finished_at,utc_timestamp(3)),updated_at=utc_timestamp(3) where id=?",
+            target,operationId);
+        callOutbox(fact.account(),fact.turn(),fact.segment(),operationId,target,fact.characters(),null,"TTS_RECOVERED",null);
     }
 
     private void callOutbox(long accountId, long turnId, String segmentId, long operationId, String status,

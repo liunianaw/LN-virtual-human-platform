@@ -16,6 +16,7 @@ public class LocalTemporaryAudioCleanupWorker
     @Scheduled(fixedDelayString = "${LN_SESSION_RUNTIME_CLEANUP_SWEEP_MS:30000}")
     public void cleanup()
     {
+        storage.cleanupExpiredFiles();
         for (TemporaryAudioReference audio : store.cleanupCandidates(64))
         {
             try { storage.delete(audio); store.markDeleted(audio); }

@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.ruoyi.system.operations.mapper.PointBillingMapper">
+  <select id="ttsReservationId" resultType="long">
+    select id from p_point_reservation where account_id=#{accountId} and business_type='TTS_SEGMENT'
+      and business_id=#{businessId} and reservation_no=1
+  </select>
+  <select id="ttsPrice" resultType="com.ruoyi.system.operations.mapper.PointBillingMapper$TtsPrice">
+    select rate_version_id rateVersionId,unit_price_cent unitPriceCent,tts_application_id applicationId
+    from p_point_reservation where account_id=#{accountId} and tts_request_key=#{requestKey}
+      and business_type='TTS_SEGMENT' and billing_item='TTS_CHARACTER'
+    order by id limit 1 for update
+  </select>
   <sql id="rateColumns">id,version_no versionNo,generation_action_cent generationActionCent,
     tts_character_cent ttsCharacterCent,storage_byte_cent storageByteCent,effective_at effectiveAt,created_at createdAt</sql>
   <sql id="reservationColumns">id,account_id accountId,business_type businessType,business_id businessId,
@@ -29,7 +39,7 @@
   <select id="activeAccountForUpdate" resultType="long">select user_id from sys_user
     where user_id=#{accountId} and status='0' and del_flag='0' for update</select>
   <select id="reservation" resultType="map">select <include refid="reservationColumns"/> from p_point_reservation
-    where account_id=#{accountId} and business_type=#{businessType} and business_id=#{businessId} and reservation_no=#{reservationNo}</select>
+    where account_id=#{accountId} and business_type=#{businessType} and business_id=#{businessId} and reservation_no=#{reservationNo} for update</select>
   <select id="latestReservationForUpdate" resultType="map">select <include refid="reservationColumns"/> from p_point_reservation
     where account_id=#{accountId} and business_type=#{businessType} and business_id=#{businessId}
     order by reservation_no desc limit 1 for update</select>
@@ -37,9 +47,9 @@
   <select id="reservationByIdForUpdate" resultType="map">select <include refid="reservationColumns"/> from p_point_reservation where id=#{id} for update</select>
   <insert id="insertReservation">insert into p_point_reservation
     (id,created_at,updated_at,account_id,business_type,business_id,reservation_no,billing_item,measured_units,
-     unit_price_cent,rate_version_id,reserved_cent,settled_cent,state)
+     unit_price_cent,rate_version_id,reserved_cent,settled_cent,state,tts_request_key,tts_application_id)
     values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{businessType},#{businessId},#{reservationNo},
-      #{billingItem},#{measuredUnits},#{unitPriceCent},#{rateVersionId},#{reservedCent},0,'RESERVED')</insert>
+      #{billingItem},#{measuredUnits},#{unitPriceCent},#{rateVersionId},#{reservedCent},0,'RESERVED',#{requestKey},#{applicationId})</insert>
   <update id="finishReservation">update p_point_reservation set state=#{state},settled_cent=#{settledCent},
     settled_at=case when #{state}='SETTLED' then utc_timestamp(3) else settled_at end,
     released_at=case when #{state}='RELEASED' then utc_timestamp(3) else released_at end,updated_at=utc_timestamp(3)

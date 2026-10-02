@@ -10,4 +10,8 @@ public interface TtsRuntimeAdapter
     TtsProviderKind providerKind();
 
     void submit(TtsSynthesisWork work, TtsCompletionSink completionSink);
+
+    default byte[] audition(VoiceRuntimeBinding voice, String text, Runnable beforeExternal)
+        throws InterruptedException, java.util.concurrent.ExecutionException, java.util.concurrent.TimeoutException
+    { throw new UnsupportedOperationException("Audition is not supported by this adapter"); }
 }

@@ -26,8 +26,7 @@ public class OfficialVoiceAuditionClient
             HttpRequest request = HttpRequest.newBuilder(URI.create(base + "/internal/v1/official-voice-auditions"))
                 .timeout(Duration.ofSeconds(65)).header("Authorization", "Bearer " + bearer)
                 .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(
-                    json.writeValueAsString(Map.of("voiceVersionId", versionId, "serviceId", serviceId,
-                        "serviceRevision", revision, "voiceAlias", alias, "text", text)))).build();
+                    json.writeValueAsString(new Audition(versionId,serviceId,revision,alias,text)))).build();
             HttpResponse<java.io.InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
             try (var stream = response.body())
             {
@@ -42,4 +41,5 @@ public class OfficialVoiceAuditionClient
         { Thread.currentThread().interrupt(); throw new ServiceException("官方声音试听中断", 503); }
         catch (Exception error) { throw new ServiceException("官方声音试听不可用", 503); }
     }
+    private record Audition(long voiceVersionId,long serviceId,long serviceRevision,String voiceAlias,String text) { }
 }

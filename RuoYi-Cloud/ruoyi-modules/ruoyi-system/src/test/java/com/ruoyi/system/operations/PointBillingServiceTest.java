@@ -16,7 +16,7 @@ class PointBillingServiceTest
     {
         PointBillingMapper mapper=mock(PointBillingMapper.class);
         PointBillingService service=new PointBillingService(mapper);
-        when(mapper.reservation(7L,"TTS_SEGMENT","11:1",1)).thenReturn(null,null,
+        when(mapper.reservation(7L,"TTS_SEGMENT","11:1",1)).thenReturn(null,
             Map.of("id",21L,"measuredUnits",100L,"billingItem","TTS_CHARACTER","state","RESERVED"));
         when(mapper.currentRate()).thenReturn(Map.of("id",3L,"ttsCharacterCent",1L));
         when(mapper.balanceForUpdate(7L)).thenReturn(Map.of("grantedCent",1000L));
@@ -26,6 +26,6 @@ class PointBillingServiceTest
         assertEquals(21L,service.reserve(7L,21L,"TTS_SEGMENT","11:1",1,"TTS_CHARACTER",100));
         assertEquals(21L,service.reserve(7L,99L,"TTS_SEGMENT","11:1",1,"TTS_CHARACTER",100));
 
-        verify(mapper).insertReservation(21L,7L,"TTS_SEGMENT","11:1",1,"TTS_CHARACTER",100L,1L,3L,100L);
+        verify(mapper).insertReservation(21L,7L,"TTS_SEGMENT","11:1",1,"TTS_CHARACTER",100L,1L,3L,100L,null,null);
     }
 }

@@ -147,16 +147,15 @@ public class VoiceService
     {
         requireIdempotency(key);
         if (!com.ruoyi.common.security.utils.SecurityUtils.isAdmin()) throw forbidden("仅管理员可试听官方声音");
-        if (text == null || text.isBlank() || text.length() > 200) throw badRequest("试听文本限 1～200 字符");
+        if (text == null || text.isBlank() || text.codePointCount(0,text.length()) > 200) throw badRequest("试听文本限 1～200 字符");
         VoiceHead head = officialHead(voiceId, false);
         if (Set.of("DISABLED", "DELETING", "DELETED").contains(head.status())) throw conflict("官方声音不可用");
-        Map<String, Object> version = jdbc.query("select official_service_id,voice_code,official_config_snapshot " +
+        AuditionVersion version = jdbc.query("select official_service_id,voice_code,official_config_snapshot " +
             "from p_voice_version where voice_id=? and id=? and service_type='OFFICIAL'",
-            rs -> rs.next() ? Map.of("serviceId", rs.getLong(1), "alias", rs.getString(2),
-                "snapshot", rs.getString(3)) : null, voiceId, versionId);
+            rs -> rs.next() ? new AuditionVersion(rs.getLong(1),rs.getString(2),rs.getString(3)) : null, voiceId, versionId);
         if (version == null) throw forbidden("官方声音版本不存在");
-        long serviceId = (Long) version.get("serviceId");
-        Long revision = snapshotRevision((String) version.get("snapshot"));
+        long serviceId = version.serviceId();
+        Long revision = snapshotRevision(version.snapshot());
         OfficialService service = officialService(serviceId, false);
         if (revision == null || revision != service.revision()) throw conflict("官方服务已变更，请保存新候选");
         String auditionScope = scope("official-voice:audition:" + voiceId + ":" + versionId);
@@ -167,20 +166,21 @@ public class VoiceService
             administratorId, auditionScope, key, hash, versionId);
         if (claimed != 1) throw conflict("该试听请求已受理，请勿重复付费提交");
         String operation = "audition-" + java.util.UUID.randomUUID();
-        auditionFact(administratorId, operation, "STARTED", text.length(), null);
+        int characters=text.codePointCount(0,text.length());
+        auditionFact(administratorId, operation, "STARTED", characters, null);
         try
         {
-            byte[] audio = auditions.audition(versionId, serviceId, revision, (String) version.get("alias"), text);
+            byte[] audio = auditions.audition(versionId, serviceId, revision, version.alias(), text);
             jdbc.update("update p_api_idempotency set status='SUCCEEDED',updated_at=utc_timestamp(3) " +
                 "where account_id=? and scope=? and request_id=? and status='PROCESSING'", administratorId, auditionScope, key);
-            auditionFact(administratorId, operation, "SUCCEEDED", text.length(), null);
+            auditionFact(administratorId, operation, "SUCCEEDED", characters, null);
             return audio;
         }
         catch (Exception error)
         {
             jdbc.update("update p_api_idempotency set status='FAILED',updated_at=utc_timestamp(3) " +
                 "where account_id=? and scope=? and request_id=? and status='PROCESSING'", administratorId, auditionScope, key);
-            auditionFact(administratorId, operation, "UNKNOWN", text.length(), "AUDITION_UNAVAILABLE");
+            auditionFact(administratorId, operation, "UNKNOWN", characters, "AUDITION_UNAVAILABLE");
             throw error;
         }
     }
@@ -311,6 +311,7 @@ public class VoiceService
     private static ServiceException conflict(String message) { return new ServiceException(message, HttpStatus.CONFLICT.value()); }
 
     private record OfficialService(long id, String name, String providerCode, String modelId, long revision) { }
+    private record AuditionVersion(long serviceId, String alias, String snapshot) { }
     private record VoiceHead(long id, String name, String description, String status, Long currentVersionId, long revision, String updatedAt) { }
     private record OfficialVersionRow(long officialServiceId, String snapshot) { }
     private record Idempotency(byte[] hash, long resourceId) { }
