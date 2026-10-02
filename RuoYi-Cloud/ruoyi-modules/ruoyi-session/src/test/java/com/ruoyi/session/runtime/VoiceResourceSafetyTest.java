@@ -60,6 +60,54 @@ class VoiceResourceSafetyTest
         assertThrows(IllegalStateException.class,()->storage.store(wav()));
     }
 
+    @Test void failedAudioRegistrationEndsTheTurnAndRemovesTheUnregisteredFile() throws Exception
+    {
+        var properties=new VoiceRuntimeProperties();properties.setTemporaryAudioDirectory(directory.toString());
+        var storage=new TemporaryWavStorage(properties);var store=mock(PersistentRuntimeStore.class);
+        var cleanup=mock(TemporaryAudioCleanupQueue.class);var events=mock(RuntimeEventPublisher.class);
+        var principal=new RuntimePrincipal(1,2,3,4,Set.of("speak:write"),new VoiceRuntimeBinding(5,TtsProviderKind.OFFICIAL,"voice",6L,1L));
+        when(store.createSpeakTurn(eq(principal),eq("request"),anyList(),eq(2L))).thenReturn(11L);
+        when(store.currentConnection(principal,2L)).thenReturn(true);
+        when(store.markAudioReady(eq(11L),eq(0),eq(principal),any(),anyLong(),anyLong()))
+            .thenThrow(new IllegalStateException("DB unavailable"));
+        doThrow(new IllegalStateException("DB still unavailable")).when(store).markAudioFailed(11L,0,"OFFICIAL_TTS_FAILED");
+        when(store.turnState(principal,"11")).thenReturn(java.util.Map.of("status","FAILED"));
+        var runtime=new SpeakOnlyRuntimeService(properties,cleanup,store,events);
+        var work=runtime.start(principal,"request","Hello",2).initialWork().get(0);
+        var support=new TtsAdapterSupport(storage);
+
+        assertThrows(IllegalStateException.class,()->support.complete(work,runtime,wav()));
+        support.fail(work,runtime,"OFFICIAL_TTS_FAILED");
+
+        assertFalse(runtime.hasTurn("11"));
+        verify(store).markAudioFailed(11L,0,"OFFICIAL_TTS_FAILED");
+        verify(events).audioFailed(principal,2L,"11",work.segmentId(),0,"OFFICIAL_TTS_FAILED");
+        verify(events).failed(eq(principal),eq(2L),eq("11"),any());
+        try(var files=Files.list(directory)) { assertEquals(0,files.count()); }
+    }
+
+    @Test void registeredAudioSurvivesImmediateCleanupWhenNotificationFails() throws Exception
+    {
+        var properties=new VoiceRuntimeProperties();properties.setTemporaryAudioDirectory(directory.toString());
+        var storage=new TemporaryWavStorage(properties);var store=mock(PersistentRuntimeStore.class);
+        var cleanup=mock(TemporaryAudioCleanupQueue.class);var events=mock(RuntimeEventPublisher.class);
+        var principal=new RuntimePrincipal(1,2,3,4,Set.of("speak:write"),new VoiceRuntimeBinding(5,TtsProviderKind.OFFICIAL,"voice",6L,1L));
+        when(store.createSpeakTurn(eq(principal),eq("request"),anyList(),eq(2L))).thenReturn(11L);
+        when(store.currentConnection(principal,2L)).thenReturn(true);
+        when(store.markAudioReady(eq(11L),eq(0),eq(principal),any(),anyLong(),anyLong())).thenReturn(true);
+        when(store.turnState(principal,"11")).thenReturn(java.util.Map.of("status","FAILED"));
+        doThrow(new IllegalStateException("socket unavailable")).when(events).audioSegment(eq(principal),eq(2L),any());
+        var runtime=new SpeakOnlyRuntimeService(properties,cleanup,store,events);
+        var work=runtime.start(principal,"request","Hello",2).initialWork().get(0);
+
+        new TtsAdapterSupport(storage).complete(work,runtime,wav());
+
+        assertFalse(runtime.hasTurn("11"));
+        verify(store).fail(11L);
+        verify(cleanup).schedule(any());
+        try(var files=Files.list(directory)) { assertEquals(1,files.count()); }
+    }
+
     @Test void finalizationRetriesOnlyBillingAfterRemoteFailure()
     {
         var mapper=mock(TtsLifecycleMapper.class); var system=mock(BusinessSystemClient.class);
