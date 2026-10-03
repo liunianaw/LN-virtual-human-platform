@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "providerType": "KOKORO",
-  "overlayVersion": "1",
+  "overlayVersion": "2",
   "source": {
     "url": "https://github.com/hexgrad/kokoro.git",
     "commit": "dfb907a02bba8152ca444717ca5d78747ccb4bec",

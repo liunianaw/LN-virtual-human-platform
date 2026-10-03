@@ -1,7 +1,7 @@
 import request from '@/utils/request'
 import type { AjaxResult } from '@/types'
 
-export interface VoiceCapability { providerType: string; modelId: string; modelRevision: string; capabilityVersion: string; languages: string[]; voices: { id: string; displayName: string; languages: string[] }[]; parameters: Record<string, { minimum: number; maximum: number; defaultValue: number }>; referenceVoice: boolean; fallbackTarget: boolean }
+export interface VoiceCapability { providerType: string; modelId: string; modelRevision: string; capabilityVersion: string; languages: string[]; voices: { id: string; displayName: string; languages: string[] }[]; parameters: Record<string, { minimum: number; maximum: number; defaultValue: number }>; referenceVoice: boolean; referenceMaxDurationMs?: number; fallbackTarget: boolean }
 export interface VoiceServiceHealth { serviceId: string; name: string; providerType: string; configValid: boolean; apiReachable: boolean; modelReady: boolean; status: string; lastSynthesisStatus: string }
 export interface VoiceReadiness { apiReachable: boolean; modelReady: boolean; services: VoiceServiceHealth[] }
 export interface VoiceTask { taskId: string; purpose: string; status: string; errorCode?: string; winnerAttemptId?: string; settlement?: string; factDeliveryReview?: boolean; degraded?: boolean; attempts: { attemptId: string; providerType: string; state: string; reasonCode: string; costSource: string }[] }

@@ -1,4 +1,4 @@
-LN Voice official-source overlays, version 1.
+LN Voice official-source overlays, version 2.
 
 Kokoro source: https://github.com/hexgrad/kokoro
 Commit: dfb907a02bba8152ca444717ca5d78747ccb4bec
@@ -12,6 +12,15 @@ Commit: dd9105b34bf2be2230f4aa1e4769fb586a3c824e
 License: see cosyvoice3/MATCHA-LICENSE and fetched submodule.
 
 Platform additions: ruoyi_voice/model_backends.py and model_server.py.
-Official model algorithms are called unchanged; no direct upstream patches.
+Official inference algorithms are retained. cosyvoice3/patches/local-wetext.patch
+replaces optional/downloaded frontend initialization with explicit local wetext
+FST loading; patch and resulting source hashes are recorded in source.lock.json.
+Kokoro's overlay connects English spans to the official English G2P while
+retaining the pinned legacy Chinese phone inventory and model/voice weights.
+WeText FST resources: https://www.modelscope.cn/pengzhendong/wetext.git
+Revision: 030bb1febce0bd0168549a03e181cd9c1d70c799
+License: Apache-2.0, declared by the repository model card; see
+cosyvoice3/TEXT-RESOURCE-LICENSE. Four required TN files are recorded in
+cosyvoice3/text-resources.lock.json, separately from synthesis model weights.
 Weights and voice resources are separate, hash-locked inputs described in each
 source.lock.json. They are not included in platform source or container images.

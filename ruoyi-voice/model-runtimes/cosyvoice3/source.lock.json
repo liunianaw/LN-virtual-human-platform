@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "providerType": "COSYVOICE3",
-  "overlayVersion": "1",
+  "overlayVersion": "2",
   "source": {
     "url": "https://github.com/QwenAudio/CosyVoice.git",
     "commit": "074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc",
@@ -93,10 +93,23 @@
     "ruoyi_voice/model_backends.py",
     "ruoyi_voice/model_server.py"
   ],
-  "upstreamPatches": [],
+  "upstreamPatches": [
+    {
+      "path": "patches/local-wetext.patch",
+      "sha256": "b40720954be42db30c360e8d5eb738fc54b6f7fab9df8ffc3fa87531d0d4381d",
+      "files": [
+        {
+          "path": "cosyvoice/cli/frontend.py",
+          "sha256": "330862af85a62f07065fe6cc59a7da526a10247334fd11fbe81c91c739c8e58d"
+        }
+      ]
+    }
+  ],
   "officialEntryPoints": [
     "cosyvoice.cli.cosyvoice.CosyVoice3",
     "CosyVoice3.inference_zero_shot"
   ],
-  "requiresRealModelValidation": true
+  "requiresRealModelValidation": true,
+  "textResourceLock": "text-resources.lock.json",
+  "textResourceLockSha256": "0d769bfe91e28ce7529bf9c385da948527c9b87ad1f22333b5c85e50df7e1447"
 }

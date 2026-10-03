@@ -1,12 +1,11 @@
 """One bounded native inference process; no business database, billing or retries."""
 import hmac
-import json
 import os
 import threading
 import time
-from pathlib import Path
 from .executor import audio_metadata, Problem
 from .model_backends import load_backend
+from .build_inputs import read_lock
 from .native_providers import capability
 from .providers import ProviderFailure
 from .server import Server, Handler
@@ -20,7 +19,7 @@ class ModelHandler(Handler):
             if self.command == "GET" and self.path == "/internal/model/v1/readiness":
                 return self.reply(200, {"apiReachable": True, "modelReady": self.server.backend is not None,
                     "capability": self.server.capability, "sourceCommit": self.server.lock["source"]["commit"],
-                    "weightRevision": self.server.lock["weights"]["revision"], "overlayVersion": "1",
+                    "weightRevision": self.server.lock["weights"]["revision"], "overlayVersion": self.server.lock.get("overlayVersion", "1"),
                     "loadedCodePath": self.server.code_path, "loadError": self.server.load_error,
                     "inferenceConcurrency": 1, "cancelMode": "QUEUED_ONLY", "lastSynthesis": self.server.last})
             if self.command != "POST" or self.path != "/internal/model/v1/synthesize":
@@ -84,7 +83,7 @@ def main():
     name = os.environ["LN_VOICE_MODEL_PROVIDER"]
     if name not in ("COSYVOICE3", "KOKORO"):
         raise ValueError("Unsupported native model")
-    lock = json.loads(Path(os.environ["LN_VOICE_SOURCE_LOCK"]).read_text(encoding="utf-8"))
+    lock = read_lock(os.environ["LN_VOICE_SOURCE_LOCK"])
     descriptor = capability(name)
     backend, code_path, error = None, None, None
     try:

@@ -60,7 +60,7 @@
   {
     "schemaVersion": 1,
     "providerType": "KOKORO",
-    "adapterVersion": "official-source-overlay-1",
+    "adapterVersion": "official-source-overlay-2",
     "capabilityVersion": "kokoro-v1",
     "modelId": "Kokoro-82M",
     "modelRevision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
@@ -150,7 +150,7 @@
   {
     "schemaVersion": 1,
     "providerType": "COSYVOICE3",
-    "adapterVersion": "official-source-overlay-1",
+    "adapterVersion": "official-source-overlay-2",
     "capabilityVersion": "cosyvoice3-v1",
     "modelId": "Fun-CosyVoice3-0.5B-2512",
     "modelRevision": "29e01c4e8d000f4bcd70751be16fa94bf3d85a18",
@@ -171,6 +171,7 @@
     "audioStreaming": false,
     "cancelMode": "QUEUED_ONLY",
     "queryMode": "PROCESS",
-    "fallbackTarget": false
+    "fallbackTarget": false,
+    "referenceMaxDurationMs": 30000
   }
 ]

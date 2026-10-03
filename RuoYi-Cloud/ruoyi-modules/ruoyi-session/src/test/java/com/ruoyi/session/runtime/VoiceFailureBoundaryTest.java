@@ -115,6 +115,35 @@ class VoiceFailureBoundaryTest
     private VoiceOrchestrationServiceImpl voices(VoiceAttemptStore store,VoiceExecutionClient client)
     { return new VoiceOrchestrationServiceImpl(store,client,mock(TtsRuntimeAdapterRegistry.class),mock(RuntimeAuthorization.class),
         mock(TemporaryWavStorage.class),new VoiceRuntimeProperties(),mock(VoiceExecutionPool.class),new ObjectMapper()); }
+
+    @Test void invalidReferenceNeverStartsBackupAndReleasesTheUnsuccessfulOperation() throws Exception
+    {
+        var mapper=mock(VoiceTaskMapper.class);
+        var store=spy(new VoiceAttemptStore(mapper,new ObjectMapper()));
+        var full=new VoiceBinding("5","COSYVOICE3","6",1,"model","revision","cosyvoice3-v1",
+            "reference:3","zh-CN",Map.of(),"3","参考",binding,true,"1","http://127.0.0.1:8012");
+        var business=new Task(20,7,"BUSINESS","11:0","hash",5,"{}","1","RUNNING",1,null,3L,11L,21L,2L,1L,10L,
+            "owner",null,Instant.now().plusSeconds(60),"hash",5,null,null);
+        var attempt=new VoiceTaskMapper.Attempt(30,20,1,"COSYVOICE3",6,5,"revision","cosyvoice3-v1",
+            "hash","permit","DISPATCHING","worker","boot",1,business.deadlineAt(),null,null,null,null,"SELF_HOSTED");
+        doReturn(business).when(store).create(anyLong(),anyString(),anyString(),anyString(),any(),any(),any(),any(),any());
+        doReturn(new VoiceAttemptStore.Dispatch(business,attempt,"permit",full)).when(store).createAttempt(20,"Hello",false);
+        doReturn(full).when(store).fullBinding(business);
+        when(mapper.task(20)).thenReturn(business);when(mapper.attempt(30)).thenReturn(attempt);when(mapper.attemptForUpdate(30)).thenReturn(attempt);
+        when(mapper.finishAttempt(eq(30L),eq("FAILED"),any(),any(),any(),any(),any())).thenReturn(1);
+        var sink=mock(TtsCompletionSink.class);var voices=voices(store,mock(VoiceExecutionClient.class));
+        var work=new TtsSynthesisWork("11",1,"segment",0,"Hello",principal);
+        voices.submit(grant,2,work,sink);
+        var event=new com.ruoyi.common.voice.VoiceProtocol.Event("reference-rejected","30",1,"hash","worker","boot",
+            "FAILED","VOICE_REFERENCE_UNAVAILABLE","DEFINITIVE",null,null,"SELF_HOSTED","revision");
+        voices.event(30,event);
+        verify(store).failure(30,event,false,event);
+        verify(store,never()).createAttempt(anyLong(),anyString(),eq(true));
+        verify(mapper).finishTask(20,"FAILED","VOICE_REFERENCE_UNAVAILABLE");
+        verify(mapper).settle(20,"RELEASE");
+        verify(sink).onAudioFailed(principal,work,"VOICE_REFERENCE_UNAVAILABLE");
+        assertEquals(0,active(voices).size());
+    }
     private Task task(long id)
     { return task(id,Instant.now().plusSeconds(60)); }
     private Task task(long id,Instant deadline)

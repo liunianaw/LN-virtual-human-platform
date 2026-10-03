@@ -1,20 +1,24 @@
 """Thin overlays over pinned official inference. Heavy imports stay in model processes."""
 import hashlib
 import importlib
+import io
+import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import urllib.parse
 import urllib.request
+import wave
 from pathlib import Path
-from .build_inputs import verify_source, verify_weights
+from .build_inputs import verify_source, verify_weights, verify_resources
 from .executor import audio_metadata
 from .native_providers import NoRedirect, read_bounded, remaining, pcm_wav
 from .providers import ProviderFailure
 
 
-def reference_audio(request, deadline):
+def reference_audio(request, deadline, max_duration_ms=None):
     url, digest, size = (request.get(name) for name in ("referenceAudioUrl", "referenceAudioSha256", "referenceAudioBytes"))
     binding = request["binding"]
     if not binding.get("referenceAssetId") or not binding.get("referenceText") or not isinstance(url, str) \
@@ -30,6 +34,10 @@ def reference_audio(request, deadline):
         if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
             raise ValueError()
         audio_metadata(data, size)
+        if max_duration_ms is not None:
+            with wave.open(io.BytesIO(data), "rb") as audio:
+                if audio.getnframes() * 1000 > max_duration_ms * audio.getframerate():
+                    raise ValueError()
         return data
     except Exception:
         raise ProviderFailure("VOICE_REFERENCE_UNAVAILABLE", "BEFORE_DISPATCH") from None
@@ -53,6 +61,12 @@ def encode_chunks(chunks, rate, deadline):
     return pcm_wav(pcm)
 
 
+def mixed_g2p(text, zh, en):
+    # Keep the v1 Chinese phone inventory; its legacy branch ignores en_callable.
+    parts = re.split(r"([A-Za-z]+(?:[ '-]+[A-Za-z]+)*)", text)
+    return " ".join((en if i % 2 else zh)(part)[0] for i, part in enumerate(parts) if part.strip()), None
+
+
 class KokoroBackend:
     def __init__(self, weights, descriptor):
         from kokoro import KModel, KPipeline
@@ -63,10 +77,10 @@ class KokoroBackend:
         torch.set_num_threads(int(os.getenv("LN_VOICE_CPU_THREADS", "2")))
         model = KModel(repo_id="hexgrad/Kokoro-82M", config=str(weights / "config.json"),
                        model=str(weights / "kokoro-v1_0.pth")).to("cpu").eval()
-        # English callable is supplied to official Chinese G2P for mixed text.
         en = KPipeline(lang_code="a", repo_id="hexgrad/Kokoro-82M", model=model)
-        zh = KPipeline(lang_code="z", repo_id="hexgrad/Kokoro-82M", model=model,
-                       en_callable=lambda text: en.g2p(text)[0])
+        zh = KPipeline(lang_code="z", repo_id="hexgrad/Kokoro-82M", model=model)
+        chinese_g2p = zh.g2p
+        zh.g2p = lambda text: mixed_g2p(text, chinese_g2p, en.g2p)
         self.pipelines, self.weights = {"zh-CN": zh, "en-US": en}, weights
         for voice in descriptor["voices"]:
             for language in voice["languages"]:
@@ -92,10 +106,14 @@ class CosyVoiceBackend:
         if not torch.cuda.is_available():
             raise ValueError("CosyVoice3 runtime requires its configured GPU")
         self.model = CosyVoice3(model_dir=str(weights), load_trt=False, load_vllm=False, fp16=False)
+        if self.model.frontend.text_frontend != "wetext" or not all(
+                getattr(self.model.frontend, name, None) for name in ("zh_tn_model", "en_tn_model")):
+            raise ValueError("Required local text frontend is not ready")
         self.rate = self.model.sample_rate
+        self.max_reference_ms = descriptor["referenceMaxDurationMs"]
 
     def synthesize(self, request):
-        data = reference_audio(request, request["deadlineAt"])
+        data = reference_audio(request, request["deadlineAt"], self.max_reference_ms)
         binding = request["binding"]
         # Only a temporary server-owned file is passed to official prompt processing.
         with tempfile.TemporaryDirectory(prefix="ln-voice-reference-") as directory:
@@ -116,6 +134,12 @@ def load_backend(name, source, weights, lock, descriptor):
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     sys.path.insert(0, str(source))
     if name == "COSYVOICE3":
+        resource_lock = Path(os.environ["LN_VOICE_TEXT_RESOURCE_LOCK"])
+        resource_data = resource_lock.read_text(encoding="utf-8")
+        if hashlib.sha256(resource_data.encode()).hexdigest() != lock["textResourceLockSha256"]:
+            raise ValueError("Text resource manifest does not match runtime lock")
+        resources = verify_resources(os.environ["LN_VOICE_TEXT_RESOURCE_DIR"], json.loads(resource_data))
+        os.environ["LN_VOICE_WETEXT_DIR"] = str(resources)
         sys.path.insert(1, str(source / "third_party/Matcha-TTS"))
     module = importlib.import_module("kokoro" if name == "KOKORO" else "cosyvoice.cli.cosyvoice")
     loaded_path = Path(module.__file__).resolve()

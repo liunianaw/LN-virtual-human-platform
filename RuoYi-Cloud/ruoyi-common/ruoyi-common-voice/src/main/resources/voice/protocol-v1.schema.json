@@ -618,6 +618,10 @@
         },
         "fallbackTarget": {
           "type": "boolean"
+        },
+        "referenceMaxDurationMs": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     }

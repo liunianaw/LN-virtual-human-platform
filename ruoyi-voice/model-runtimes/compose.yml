@@ -20,7 +20,9 @@ services:
     environment:
       LN_VOICE_MODEL_BEARER: ${LN_VOICE_COSYVOICE3_BEARER:?dedicated model bearer required}
       LN_VOICE_REFERENCE_HOSTS: ${LN_VOICE_REFERENCE_HOSTS:?controlled COS hostname required}
-    volumes: ["${LN_VOICE_COSYVOICE3_MODEL_DIR:?locked weights directory required}:/models/cosyvoice3:ro"]
+    volumes:
+      - "${LN_VOICE_COSYVOICE3_MODEL_DIR:?locked weights directory required}:/models/cosyvoice3:ro"
+      - "${LN_VOICE_COSYVOICE3_TEXT_RESOURCE_DIR:?locked wetext directory required}:/models/wetext:ro"
     mem_limit: 8g
     cpus: 4
     pids_limit: 256

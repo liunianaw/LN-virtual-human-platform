@@ -7,7 +7,7 @@ import java.util.Map;
 public record VoiceCapability(int schemaVersion, String providerType, String adapterVersion,
     String capabilityVersion, String modelId, String modelRevision, List<String> languages,
     List<Voice> voices, int maxInputChars, Map<String, Range> parameters, boolean referenceVoice,
-    boolean audioStreaming, String cancelMode, String queryMode, boolean fallbackTarget)
+    boolean audioStreaming, String cancelMode, String queryMode, boolean fallbackTarget, Integer referenceMaxDurationMs)
 {
     public record Voice(String id, String displayName, List<String> languages) { }
     public record Range(double minimum, double maximum, double defaultValue) { }
