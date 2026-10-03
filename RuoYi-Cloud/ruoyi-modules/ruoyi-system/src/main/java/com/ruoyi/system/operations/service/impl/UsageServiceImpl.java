@@ -89,7 +89,7 @@ public class UsageServiceImpl implements IUsageService
         administrator();
         if (accountId <= 0) throw bad("账号无效");
         Map<String,Object> account = mapper.adminAccount(accountId);
-        if (account == null) throw new ServiceException("开发者账号不存在",404);
+        if (account == null) throw new ServiceException("账号不存在",404);
         DateRange range = dateRange(from, to);
         Map<String,Object> result = new LinkedHashMap<>();
         result.put("account", stringIds(account));

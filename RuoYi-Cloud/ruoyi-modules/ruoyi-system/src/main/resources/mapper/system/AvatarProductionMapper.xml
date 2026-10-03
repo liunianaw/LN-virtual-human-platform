@@ -173,7 +173,12 @@
     <select id="countAssemblyBlockers" resultType="int">
         select (select count(*) from p_generation_step s join p_generation_task t on t.id = s.task_id
             where t.account_id = #{accountId} and t.avatar_version_id = #{versionId}
-              and s.status in ('READY','RUNNING','POLLING','UNKNOWN'))
+              and (s.status in ('READY','RUNNING','POLLING')
+                  or (s.status = 'UNKNOWN' and not exists (
+                      select 1 from p_generation_step newer join p_generation_task nt on nt.id = newer.task_id
+                      where newer.account_id = s.account_id and nt.account_id = t.account_id
+                        and nt.avatar_version_id = t.avatar_version_id and newer.action_code = s.action_code
+                        and newer.id &gt; s.id))))
           + (select count(*) from p_avatar_action_selection sel where sel.account_id = #{accountId}
               and sel.avatar_version_id = #{versionId} and sel.latest_attempt_id is not null and sel.selection_closed = 0)
     </select>
@@ -230,7 +235,8 @@
     </select>
     <select id="steps" resultType="map">
         select s.action_code as actionCode, s.status as stage,
-            case when s.status = 'READY' and (svc.id is null or sec.id is null)
+            case when s.status = 'SUCCEEDED' then null
+                when s.status = 'READY' and (svc.id is null or sec.id is null)
                 then 'SERVICE_UNAVAILABLE' else s.error_code end as errorCode,
             case when s.status = 'READY' and (svc.id is null or sec.id is null)
                 then '生成服务当前不可用，尚未提交该动作请求' else null end as safeMessage,
@@ -247,6 +253,11 @@
         left join p_secret sec on sec.id = svc.secret_id and sec.status = 'ACTIVE'
         left join p_generation_attempt a on a.step_id = s.id and a.attempt_no = s.attempt_no
         where t.avatar_version_id = #{versionId} and t.account_id = #{accountId} and s.step_type = 'GENERATE_ACTION'
+          and not exists (
+              select 1 from p_generation_step newer join p_generation_task nt on nt.id = newer.task_id
+              where newer.account_id = s.account_id and nt.account_id = t.account_id
+                and nt.avatar_version_id = t.avatar_version_id and newer.action_code = s.action_code
+                and newer.id &gt; s.id)
         order by s.created_at, s.id
     </select>
     <select id="resultPreview" resultType="map">
