@@ -32,7 +32,7 @@
   <select id="countAvailableVoice" resultType="int">select count(*) from p_voice voice
     join p_voice_version v on v.id=voice.current_version_id join p_official_service s on s.id=v.official_service_id
     where voice.id=#{voiceId} and voice.visibility='OFFICIAL' and voice.status in ('PUBLISHED','UNLISTED')
-      and v.service_type='OFFICIAL' and s.capability='TTS' and s.status='ACTIVE' for update</select>
+      and v.service_type='OFFICIAL' and s.capability='TTS' and s.status='ACTIVE' <include refid="com.ruoyi.system.voice.mapper.VoiceBindingMapper.dependenciesAvailable"><property name="v" value="v"/></include> for update</select>
   <select id="selectSkillBindingForUpdate" resultType="map">select cast(s.id as char) skillId,s.skill_type skillType,
     s.tool_name toolName from p_skill s where s.id=#{skillId} and s.status in ('PUBLISHED','UNLISTED')
       and (s.account_id=#{accountId} and s.visibility='PRIVATE' or s.visibility='OFFICIAL') for update</select>
@@ -52,13 +52,14 @@
     join p_official_service official on official.id=vv.official_service_id
     where a.id=#{applicationId} and av.status='PUBLISHED' and avatar.status in ('PUBLISHED','UNLISTED')
       and voice.visibility='OFFICIAL' and voice.status in ('PUBLISHED','UNLISTED') and vv.service_type='OFFICIAL'
-      and official.capability='TTS' and official.status='ACTIVE'
+      and official.capability='TTS' and official.status='ACTIVE' <include refid="com.ruoyi.system.voice.mapper.VoiceBindingMapper.dependenciesAvailable"><property name="v" value="vv"/></include>
       and not exists (select 1 from p_application_skill x join p_skill s on s.id=x.skill_id
         where x.application_id=a.id and s.status not in ('PUBLISHED','UNLISTED'))</select>
   <select id="selectAvatarVersion" resultType="long">select v.id from p_avatar a join p_avatar_version v on v.id=a.current_version_id
     where a.id=#{avatarId} and v.status='PUBLISHED' and (a.account_id=#{accountId} or a.visibility='OFFICIAL')</select>
   <select id="selectVoiceVersion" resultType="long">select v.id from p_voice voice join p_voice_version v on v.id=voice.current_version_id
     where voice.id=#{voiceId} and voice.visibility='OFFICIAL' and voice.status in ('PUBLISHED','UNLISTED')</select>
+  <select id="selectVoiceFallback" resultType="long">select fallback_voice_version_id from p_voice_version where id=#{version}</select>
   <update id="releaseCurrentReferences">update p_resource_reference set state='RELEASED',released_at=utc_timestamp(3),updated_at=utc_timestamp(3)
     where account_id=#{accountId} and holder_type='APP_CURRENT' and holder_id=#{applicationId} and state in ('RESERVED','CONFIRMED')</update>
   <insert id="insertCurrentReference">insert into p_resource_reference
@@ -79,5 +80,5 @@
   <select id="selectVoiceChoices" resultType="map">select cast(voice.id as char) voiceId,voice.name,v.voice_code voiceAlias
     from p_voice voice join p_voice_version v on v.id=voice.current_version_id join p_official_service s on s.id=v.official_service_id
     where v.service_type='OFFICIAL' and voice.visibility='OFFICIAL' and voice.status in ('PUBLISHED','UNLISTED')
-      and s.capability='TTS' and s.status='ACTIVE' order by voice.updated_at desc,voice.id desc</select>
+      and s.capability='TTS' and s.status='ACTIVE' <include refid="com.ruoyi.system.voice.mapper.VoiceBindingMapper.dependenciesAvailable"><property name="v" value="v"/></include> order by voice.updated_at desc,voice.id desc</select>
 </mapper>

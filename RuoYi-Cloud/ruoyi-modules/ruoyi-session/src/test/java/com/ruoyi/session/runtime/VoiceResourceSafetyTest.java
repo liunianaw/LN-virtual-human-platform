@@ -121,6 +121,42 @@ class VoiceResourceSafetyTest
         verify(system,never()).reserveTts(anyLong(),anyLong(),anyString(),anyLong());
     }
 
+    @Test void commonArbiterKeepsSuccessfulSettlementWhenPlaybackRegistrationFails() throws Exception
+    {
+        var properties=new VoiceRuntimeProperties();properties.setTemporaryAudioDirectory(directory.toString());
+        var storage=new TemporaryWavStorage(properties);var mapper=mock(com.ruoyi.session.runtime.mapper.VoiceTaskMapper.class);
+        var store=mock(VoiceAttemptStore.class);when(store.mapper()).thenReturn(mapper);
+        var binding=new com.ruoyi.common.voice.VoiceBinding("5","DASHSCOPE_QWEN_TTS","6",1,"qwen3-tts-flash-realtime","qwen3-tts-flash-realtime","qwen-bridge-v1","Cherry","zh-CN",java.util.Map.of(),null,null,null,false,"1","wss://dashscope.aliyuncs.com/api-ws/v1/realtime");
+        var principal=new RuntimePrincipal(7,8,3,4,Set.of("speak:write"),new VoiceRuntimeBinding(5,TtsProviderKind.OFFICIAL,"Cherry",6L,1L,binding));
+        var grant=new RuntimeAuthorization.Grant(principal,10,"token","BUSINESS_KEY",1,Instant.now().plusSeconds(60));
+        var work=new TtsSynthesisWork("11",1,"segment",0,"Hello",principal);
+        var task=new com.ruoyi.session.runtime.mapper.VoiceTaskMapper.Task(20,7,"BUSINESS","11:0","hash",5,"{}","1","RUNNING",1,null,3L,11L,21L,2L,1L,10L,"owner",null,Instant.now().plusSeconds(60),"hash",5,null,null);
+        var attempt=new com.ruoyi.session.runtime.mapper.VoiceTaskMapper.Attempt(30,20,1,"DASHSCOPE_QWEN_TTS",6,5,binding.modelRevision(),binding.capabilityVersion(),"hash","token","DISPATCHING","worker","boot",1,task.deadlineAt(),null,null,null,null,"UNKNOWN");
+        when(store.create(anyLong(),anyString(),anyString(),anyString(),any(),any(),any(),any(),any())).thenReturn(task);
+        when(store.createAttempt(20,"Hello",false)).thenReturn(new VoiceAttemptStore.Dispatch(task,attempt,"permit",binding));
+        when(mapper.task(20)).thenReturn(task);when(mapper.attempt(30)).thenReturn(attempt);when(store.binding(task,1)).thenReturn(binding);
+        when(store.success(eq(30L),any(),any())).thenReturn(true);
+        var client=mock(VoiceExecutionClient.class);when(client.audio(30,(int)properties.getMaxAudioBytes())).thenReturn(wav());
+        var sink=mock(TtsCompletionSink.class);when(sink.onAudioReady(any(),any())).thenThrow(new IllegalStateException("Registration unavailable"));
+        var voices=new VoiceOrchestrationServiceImpl(store,client,mock(TtsRuntimeAdapterRegistry.class),mock(RuntimeAuthorization.class),storage,properties,mock(VoiceExecutionPool.class),new com.fasterxml.jackson.databind.ObjectMapper());
+        voices.submit(grant,2,work,sink);
+        var metadata=new com.ruoyi.common.voice.VoiceProtocol.Audio("audio/wav","PCM_S16LE",24000,1,16,48,1,com.ruoyi.common.voice.VoiceProtocol.hash(wav()));
+        var event=new com.ruoyi.common.voice.VoiceProtocol.Event("completed","30",1,"hash","worker","boot","SUCCEEDED",null,"DEFINITIVE",metadata,null,"UNKNOWN",binding.modelRevision());
+        voices.event(30,event);
+        when(mapper.eventHash(30,"completed")).thenReturn(com.ruoyi.common.voice.VoiceProtocol.hash("event"));when(store.encode(event)).thenReturn("event");
+        voices.event(30,event);
+        verify(store,times(1)).success(eq(30L),eq(event),any());
+        verify(store,never()).failure(anyLong(),any(),anyBoolean(),any());
+        verify(sink,times(1)).onAudioReady(eq(principal),any());
+        verify(sink).onAudioFailed(principal,work,"VOICE_AUDIO_DELIVERY_FAILED");
+        byte[] malformed=wav();malformed[4]=0;when(client.audio(30,(int)properties.getMaxAudioBytes())).thenReturn(malformed);
+        when(store.fullBinding(task)).thenReturn(binding);
+        var invalidEvent=new com.ruoyi.common.voice.VoiceProtocol.Event("invalid","30",1,"hash","worker","boot","SUCCEEDED",null,"DEFINITIVE",metadata,null,"UNKNOWN",binding.modelRevision());
+        voices.event(30,invalidEvent);
+        verify(store).failure(eq(30L),argThat(e->"VOICE_AUDIO_INVALID".equals(e.errorCode())),eq(false),eq(invalidEvent));
+        try(var files=Files.list(directory)) { assertEquals(0,files.count()); }
+    }
+
     private static byte[] wav()
     {
         var buffer=ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN);
@@ -143,17 +179,13 @@ class VoiceResourceSafetyTest
         when(lifecycle.dispatch(eq(11L),eq(0),anyString(),eq(2L))).thenReturn(1);
         when(lifecycle.finish(eq(11L),eq(0),anyString(),eq(true))).thenReturn(1,0);
         var runtime=mock(SpeakOnlyRuntimeService.class);when(runtime.onAudioReady(any(),any())).thenReturn(AudioReadyResult.ignored());
-        TtsRuntimeAdapter fake=new TtsRuntimeAdapter() {
-            public TtsProviderKind providerKind(){return TtsProviderKind.OFFICIAL;}
-            public void submit(TtsSynthesisWork work,TtsCompletionSink sink){
-                sink.beforeExternal(work);
-                var input=new AudioReadyInput("11",1,"segment",0,"audio/wav",10,48,
-                    new TemporaryAudioReference("media","LOCAL_TEMP","session-audio","fixture.wav",Instant.now().plusSeconds(60)));
-                sink.onAudioReady(principal,input);sink.onAudioReady(principal,input);
-            }
-        };
-        new TtsSubmissionService(access,epochs,store,system,new TtsRuntimeAdapterRegistry(java.util.List.of(fake)),runtime,lifecycle,
-            new VoiceRuntimeProperties()).submit(grant,2,java.util.List.of(new TtsSynthesisWork("11",1,"segment",0,"Hello",principal)));
+        var voices=mock(IVoiceOrchestrationService.class);
+        doAnswer(call->{ TtsCompletionSink sink=call.getArgument(3); sink.onAudioReady(principal,new AudioReadyInput("11",1,"segment",0,"audio/wav",10,48,
+            new TemporaryAudioReference("media","LOCAL_TEMP","session-audio","fixture.wav",Instant.now().plusSeconds(60))));return null;
+        }).when(voices).submit(any(),eq(2L),any(),any());
+        new TtsSubmissionService(access,epochs,store,system,voices,runtime,lifecycle,new VoiceRuntimeProperties())
+            .submit(grant,2,java.util.List.of(new TtsSynthesisWork("11",1,"segment",0,"Hello",principal)));
+        verify(voices,times(1)).submit(any(),eq(2L),any(),any());
         verify(runtime,times(1)).onAudioReady(eq(principal),any());
         verify(system,never()).finishTts(anyLong(),anyString(),anyString());
     }

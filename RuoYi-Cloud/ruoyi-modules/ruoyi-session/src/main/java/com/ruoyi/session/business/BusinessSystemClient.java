@@ -127,7 +127,7 @@ public class BusinessSystemClient
             number(node, "voiceVersionId"), node.path("providerVoiceRef").asText(),
             number(node, "officialServiceId"), number(node, "officialServiceRevision"),
             node.path("systemPrompt").asText(""), node.path("developerConfig").deepCopy(),
-            node.path("internalSkills").deepCopy(), scopes);
+            node.path("internalSkills").deepCopy(), scopes, node.path("voiceBinding").deepCopy());
     }
     private static long number(JsonNode node, String key)
     {
@@ -143,7 +143,7 @@ public class BusinessSystemClient
     public record Snapshot(long accountId, long applicationId, long applicationRevision,
         long applicationEpoch, long keyId, long keyEpoch, long avatarVersionId, long voiceVersionId,
         String providerVoiceRef, long officialServiceId, long officialServiceRevision,
-        String systemPrompt, JsonNode developerConfig, JsonNode internalSkills, List<String> allowedScopes) { }
+        String systemPrompt, JsonNode developerConfig, JsonNode internalSkills, List<String> allowedScopes, JsonNode voiceBinding) { }
     private record Authenticate(String secret, String scope) { }
     private record Reference(long accountId, long applicationId, long applicationRevision,
         long sessionId, String operationId) { }

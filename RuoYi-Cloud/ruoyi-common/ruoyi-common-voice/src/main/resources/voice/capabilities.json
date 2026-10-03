@@ -1,0 +1,4 @@
+[
+  {"schemaVersion":1,"providerType":"DASHSCOPE_QWEN_TTS","adapterVersion":"bridge-1","capabilityVersion":"qwen-bridge-v1","modelId":"qwen3-tts-flash-realtime","modelRevision":"qwen3-tts-flash-realtime","languages":["zh-CN","en-US"],"voices":[{"id":"Cherry","displayName":"Cherry","languages":["zh-CN","en-US"]}],"maxInputChars":200,"parameters":{},"referenceVoice":false,"audioStreaming":false,"cancelMode":"BEST_EFFORT","queryMode":"PROCESS","fallbackTarget":false},
+  {"schemaVersion":1,"providerType":"TEST_TONE","adapterVersion":"1","capabilityVersion":"test-tone-v1","modelId":"test-tone","modelRevision":"1","languages":["zh-CN","en-US"],"voices":[{"id":"tone","displayName":"协议测试音（非语音模型）","languages":["zh-CN","en-US"]}],"maxInputChars":200,"parameters":{},"referenceVoice":false,"audioStreaming":false,"cancelMode":"QUEUED_ONLY","queryMode":"PROCESS","fallbackTarget":true}
+]

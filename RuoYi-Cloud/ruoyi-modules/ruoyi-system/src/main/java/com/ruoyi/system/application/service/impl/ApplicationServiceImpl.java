@@ -115,6 +115,8 @@ public class ApplicationServiceImpl implements IApplicationService
         String operation = "application:" + applicationId + ":" + key;
         reference(accountId, applicationId, operation, "AVATAR_VERSION", avatarVersion, now);
         reference(accountId, applicationId, operation, "VOICE_VERSION", voiceVersion, now);
+        Long fallback=mapper.selectVoiceFallback(voiceVersion);
+        if(fallback!=null) reference(accountId,applicationId,operation,"VOICE_VERSION",fallback,now);
         remember(accountId, scope("application:update:" + applicationId), key, hash, applicationId, now);
         return detail(accountId, applicationId);
     }

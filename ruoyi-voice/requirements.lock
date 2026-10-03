@@ -1,0 +1,2 @@
+# Runtime uses Python 3.11 standard library only. Build backend is pinned below.
+setuptools==75.8.0

@@ -8,6 +8,7 @@ import com.ruoyi.system.officialservice.domain.OfficialIdempotency;
 
 public interface OfficialServiceMapper
 {
+    String voiceBinding(@Param("voiceVersionId") long voiceVersionId);
     Long nextId();
     List<OfficialService> selectPage(@Param("capability") String capability, @Param("status") String status,
         @Param("offset") int offset, @Param("limit") int limit);

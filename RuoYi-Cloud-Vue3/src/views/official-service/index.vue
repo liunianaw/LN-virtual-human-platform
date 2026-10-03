@@ -4,7 +4,7 @@
     <el-card header="官方服务配置" class="mb16"><el-form inline label-width="90px">
       <el-form-item label="名称"><el-input v-model="form.name" maxlength="100" /></el-form-item>
       <el-form-item label="能力"><el-select v-model="form.capability" @change="preset"><el-option label="角色制作" value="AVATAR_GENERATION" /><el-option label="官方 TTS" value="TTS" /><el-option label="默认 ASR" value="ASR" /></el-select></el-form-item>
-      <el-form-item label="适配器"><el-input v-model="form.providerCode" readonly /></el-form-item>
+      <el-form-item label="适配器"><el-select v-if="form.capability === 'TTS'" v-model="form.providerCode" @change="selectVoiceProvider"><el-option v-for="item in capabilities" :key="item.providerType" :value="item.providerType" :label="item.providerType" /></el-select><el-input v-else v-model="form.providerCode" readonly /></el-form-item>
       <el-form-item label="模型"><el-input v-model="form.modelId" readonly /></el-form-item>
       <el-form-item label="使用凭证">
         <el-select v-model="form.secretId" placeholder="请选择已保存的凭证" style="width:300px">
@@ -21,20 +21,23 @@
 </template>
 <script setup lang="ts" name="OfficialServices">
 import { checkOfficialService, createOfficialService, listOfficialServices, replaceOfficialServiceCredential, setOfficialServiceStatus, updateOfficialService, type OfficialService } from '@/api/asset/official-service'
+import { voiceCapabilities, type VoiceCapability } from '@/api/asset/official-voice'
+const capabilities = ref<VoiceCapability[]>([])
+function selectVoiceProvider() { form.modelId = capabilities.value.find((item: VoiceCapability) => item.providerType === form.providerCode)?.modelId || ''; form.endpoint = '' }
 const { proxy } = getCurrentInstance(); const loading = ref(false); const items = ref<OfficialService[]>([])
 const form = reactive({ name: '', capability: 'AVATAR_GENERATION' as OfficialService['capability'], providerCode: 'DASHSCOPE_IMAGE', endpoint: 'https://dashscope.aliyuncs.com', modelId: 'qwen-image-3.0-pro', secretId: '' })
 const editing = ref<OfficialService>()
 const credentialOptions = computed(() => Array.from(new Map(items.value.filter((item: OfficialService) => item.credentialConfigured && item.secretId).map((item: OfficialService) => [item.secretId!, { value: item.secretId!, label: `${item.name}（已配置）` }])).values()))
 function selectDefaultCredential() { if (!form.secretId && credentialOptions.value.length === 1) form.secretId = credentialOptions.value[0].value }
-function preset() { const tts = form.capability === 'TTS', asr = form.capability === 'ASR'; form.providerCode = tts || asr ? 'DASHSCOPE_BEIJING' : 'DASHSCOPE_IMAGE'; form.endpoint = tts ? 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime' : asr ? 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' : 'https://dashscope.aliyuncs.com'; form.modelId = tts ? 'qwen3-tts-flash-realtime' : asr ? 'qwen3-asr-flash' : 'qwen-image-3.0-pro' }
+function preset() { if (form.capability === 'TTS') { form.providerCode = capabilities.value[0]?.providerType || ''; selectVoiceProvider(); return }; const tts = form.capability === 'TTS', asr = form.capability === 'ASR'; form.providerCode = tts || asr ? 'DASHSCOPE_BEIJING' : 'DASHSCOPE_IMAGE'; form.endpoint = tts ? 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime' : asr ? 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' : 'https://dashscope.aliyuncs.com'; form.modelId = tts ? 'qwen3-tts-flash-realtime' : asr ? 'qwen3-asr-flash' : 'qwen-image-3.0-pro' }
 function reload() { loading.value = true; listOfficialServices().then(r => { items.value = r.data?.items || []; selectDefaultCredential() }).finally(() => loading.value = false) }
 function resetForm() { Object.assign(form, { name: '', capability: 'AVATAR_GENERATION', providerCode: 'DASHSCOPE_IMAGE', endpoint: 'https://dashscope.aliyuncs.com', modelId: 'qwen-image-3.0-pro', secretId: '' }); editing.value = undefined; selectDefaultCredential() }
-function edit(row: OfficialService) { editing.value = row; Object.assign(form, { name: row.name, capability: row.capability, providerCode: row.capability === 'AVATAR_GENERATION' ? 'DASHSCOPE_IMAGE' : 'DASHSCOPE_BEIJING', endpoint: row.endpoint, modelId: row.modelId, secretId: row.secretId || '' }) }
+function edit(row: OfficialService) { editing.value = row; Object.assign(form, { name: row.name, capability: row.capability, providerCode: row.providerCode, endpoint: row.endpoint, modelId: row.modelId, secretId: row.secretId || '' }) }
 function cancelEdit() { resetForm() }
 function save() { if (!form.name.trim() || !form.secretId) return proxy?.$modal.msgWarning('请填写名称并选择已保存的凭证。'); const data = { ...form, name: form.name.trim(), parameters: editing.value?.parameters || {} }; const request = editing.value ? updateOfficialService(editing.value.serviceId, editing.value.revision, data) : createOfficialService(data); request.then(() => { proxy?.$modal.msgSuccess(editing.value ? '服务配置已更新。' : '已保存为停用配置。'); resetForm(); reload() }) }
 function check(row: OfficialService) { checkOfficialService(row.serviceId, row.revision).then(r => r.data?.configurationValid ? proxy?.$modal.msgSuccess('配置检查通过；未调用厂商。') : proxy?.$modal.msgError(r.data?.issues?.join('；') || '配置检查未通过')) }
 function credential(row: OfficialService) { proxy?.$modal.prompt('输入新的厂商凭证；保存后不会回显。', '替换凭证', { inputType: 'password' }).then(({ value }: { value: string }) => replaceOfficialServiceCredential(row.serviceId, row.revision, value)).then(() => { proxy?.$modal.msgSuccess('凭证已替换。'); reload() }) }
 function toggle(row: OfficialService) { const status = row.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE'; proxy?.$modal.prompt(status === 'ACTIVE' ? '确认启用已检查的服务？' : '停用后将拒绝新的调用。', status === 'ACTIVE' ? '启用服务' : '停用服务').then(({ value }: { value: string }) => setOfficialServiceStatus(row.serviceId, row.revision, status, value || (status === 'ACTIVE' ? 'administrator enabled' : 'administrator disabled'))).then(() => reload()) }
-onMounted(reload)
+onMounted(() => { reload(); voiceCapabilities().then(r => capabilities.value = r.data || []) })
 </script>
 <style scoped>.mb16 { margin-bottom:16px; }.credential-hint { margin-left:10px; color:var(--el-text-color-secondary); font-size:12px; }</style>

@@ -14,16 +14,16 @@ public class TtsSubmissionService
     private final RuntimeConnectionEpochs epochs;
     private final PersistentRuntimeStore store;
     private final BusinessSystemClient system;
-    private final TtsRuntimeAdapterRegistry adapters;
+    private final IVoiceOrchestrationService voices;
     private final SpeakOnlyRuntimeService runtime;
     private final TtsLifecycleMapper lifecycle;
     private final VoiceRuntimeProperties properties;
     private final String owner = UUID.randomUUID().toString();
 
     public TtsSubmissionService(RuntimeAuthorization access, RuntimeConnectionEpochs epochs,
-        PersistentRuntimeStore store, BusinessSystemClient system, TtsRuntimeAdapterRegistry adapters,
+        PersistentRuntimeStore store, BusinessSystemClient system, IVoiceOrchestrationService voices,
         SpeakOnlyRuntimeService runtime, TtsLifecycleMapper lifecycle, VoiceRuntimeProperties properties)
-    { this.access = access; this.epochs = epochs; this.store = store; this.system = system; this.adapters = adapters;
+    { this.access = access; this.epochs = epochs; this.store = store; this.system = system; this.voices = voices;
       this.runtime = runtime; this.lifecycle = lifecycle; this.properties = properties; }
 
     String owner() { return owner; }
@@ -61,7 +61,7 @@ public class TtsSubmissionService
                 work.text().codePointCount(0, work.text().length()));
             lifecycle.reserved(turn, work.ordinal(), reservationId);
             store.beginTts(principal, work, epoch, reservationId == 0 ? null : reservationId);
-            adapters.requireAdapter(principal.voice()).submit(work, new TtsCompletionSink()
+            voices.submit(grant, epoch, work, new TtsCompletionSink()
             {
                 @Override public void beforeExternal(TtsSynthesisWork item)
                 {
@@ -74,14 +74,14 @@ public class TtsSubmissionService
                 @Override public AudioReadyResult onAudioReady(RuntimePrincipal ignored, AudioReadyInput input)
                 {
                     // Persist success before playback or remote billing; duplicates cannot downgrade it.
-                    if (lifecycle.finish(turn, work.ordinal(), owner, true) != 1) return AudioReadyResult.ignored();
+                    // The unified arbiter committed task adoption and operation settlement together.
                     AudioReadyResult result = runtime.onAudioReady(principal, input);
                     if (!result.accepted()) store.markLateAudioSucceeded(principal, work, input.durationMs());
                     return result;
                 }
                 @Override public void onAudioFailed(RuntimePrincipal ignored, TtsSynthesisWork failed, String code)
                 {
-                    lifecycle.finish(turn, work.ordinal(), owner, false);
+                    // Attempt outcome and billing intent were committed by the arbiter.
                     store.cancelNotSubmitted(principal, failed);
                     runtime.onAudioFailed(principal, failed, code);
                 }

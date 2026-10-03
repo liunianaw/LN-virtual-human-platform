@@ -28,6 +28,7 @@
       tts_dispatch_state=case when #{success} then 'SUCCEEDED' else 'FAILED' end,
       settlement_status='PENDING',settlement_next_at=utc_timestamp(3),settlement_attempts=0,settlement_error=null
     where turn_id=#{turn} and ordinal=#{ordinal} and operation_type='TTS' and tts_owner=#{owner}
+      and not exists(select 1 from s_voice_task t where t.operation_id=s_operation.id)
       and ((#{success} and tts_dispatch_state='DISPATCHING')
         or (not #{success} and tts_dispatch_state in ('PREPARED','DISPATCHING'))
         or (#{success} and settlement_outcome='REVIEW' and tts_dispatch_state='FAILED'))
@@ -38,6 +39,7 @@
       tts_dispatch_state='FAILED',settlement_status='PENDING',settlement_next_at=utc_timestamp(3),
       error_code='TTS_RECOVERY_REQUIRED'
     where tts_dispatch_state in ('PREPARED','DISPATCHING') and settlement_status='NONE'
+      and not exists(select 1 from s_voice_task t where t.operation_id=s_operation.id)
       and (tts_owner != #{owner} or tts_deadline_at &lt;= utc_timestamp(3))
     order by tts_deadline_at,id limit #{limit}
   </update>

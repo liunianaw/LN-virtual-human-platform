@@ -107,10 +107,18 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
         if (text == null || text.isBlank() || voice.providerVoiceRef() == null || voice.providerVoiceRef().isBlank())
             throw new IllegalArgumentException("Audition text is invalid");
         Duration timeout = properties.getOfficial().getTimeout();
+        if (voice.executionDeadline() != null) timeout = timeout.compareTo(Duration.between(java.time.Instant.now(), voice.executionDeadline())) < 0
+            ? timeout : Duration.between(java.time.Instant.now(), voice.executionDeadline());
+        if (timeout.isNegative() || timeout.isZero()) throw new TimeoutException("Voice deadline elapsed");
+        if (voice.executionDeadline() != null) timeout = timeout.compareTo(Duration.between(java.time.Instant.now(), voice.executionDeadline())) < 0
+            ? timeout : Duration.between(java.time.Instant.now(), voice.executionDeadline());
+        if (timeout.isNegative() || timeout.isZero()) throw new TimeoutException("Voice deadline elapsed");
         long deadline = System.nanoTime() + timeout.toNanos();
         OfficialServiceResolver.Resolved config = resolver.resolve(voice);
         AudioListener listener = new AudioListener(text, voice.providerVoiceRef(), maximumBytes);
         URI target = endpoint(config.endpoint(), config.model());
+        remaining(deadline);
+        remaining(deadline);
         beforeExternal.run();
         CompletableFuture<WebSocket> opening = null;
         try

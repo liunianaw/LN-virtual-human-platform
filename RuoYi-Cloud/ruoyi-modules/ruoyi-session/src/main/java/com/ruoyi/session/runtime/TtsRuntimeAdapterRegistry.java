@@ -34,4 +34,7 @@ public class TtsRuntimeAdapterRegistry
         }
         return adapter;
     }
+    /** Temporary migration route; real provider adapters move to the executor in stage three. */
+    public boolean usesLegacyBridge(String providerType)
+    { return "DASHSCOPE_QWEN_TTS".equals(providerType); }
 }

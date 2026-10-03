@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools==75.8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ruoyi-voice"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Bounded internal Voice attempt executor"
+license = { file = "LICENSE" }
+dependencies = []
+
+[project.scripts]
+ruoyi-voice = "ruoyi_voice.server:main"
+
+[tool.setuptools.package-data]
+ruoyi_voice = ["*.json"]

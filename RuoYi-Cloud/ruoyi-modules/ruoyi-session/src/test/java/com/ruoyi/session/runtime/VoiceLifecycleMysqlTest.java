@@ -25,13 +25,10 @@ class VoiceLifecycleMysqlTest
         {
             var ds=new DriverManagerDataSource(System.getenv("VOICE_TEST_MYSQL_URL")+schema+"?serverTimezone=UTC",
                 System.getenv("VOICE_TEST_MYSQL_USER"),System.getenv("VOICE_TEST_MYSQL_PASSWORD"));
-            try(var connection=ds.getConnection()) {
-                ScriptUtils.executeSqlScript(connection,new ClassPathResource("db/migration/V1__initialize_session_schema.sql"));
-                ScriptUtils.executeSqlScript(connection,new ClassPathResource("db/migration/V8__tts_durable_finalization.sql"));
-            }
+            org.flywaydb.core.Flyway.configure().dataSource(ds).load().migrate();
             var jdbc=new JdbcTemplate(ds);
             jdbc.update("insert into s_principal (id,created_at,updated_at,account_id,application_id,principal_type,external_user_id,status,last_seen_at) values (1,now(3),now(3),7,8,'BUSINESS','fixture','ACTIVE',now(3))");
-            jdbc.update("insert into s_session (id,created_at,updated_at,account_id,application_id,principal_id,app_config_id,create_request_id,reference_operation_id,status,last_activity_at,expires_at,active_turn_id,connection_epoch) values (3,now(3),now(3),7,8,1,4,'fixture','fixture','ACTIVE',now(3),date_add(now(3),interval 1 hour),11,2)");
+            jdbc.update("insert into s_session (id,created_at,updated_at,account_id,application_id,principal_id,session_snapshot_id,create_request_id,reference_operation_id,status,last_activity_at,expires_at,active_turn_id,connection_epoch) values (3,now(3),now(3),7,8,1,4,'fixture','fixture','ACTIVE',now(3),date_add(now(3),interval 1 hour),11,2)");
             jdbc.update("insert into s_turn (id,created_at,updated_at,account_id,session_id,turn_no,client_request_id,request_hash,turn_type,status,text_status,audio_status,playback_status,connection_epoch,input_source,include_in_history,last_event_seq,started_at) values (11,now(3),now(3),7,3,1,'fixture',unhex(repeat('00',32)),'SPEAK','RUNNING','NOT_REQUESTED','RUNNING','WAITING',2,'TEXT',0,0,now(3))");
             for(int i=0;i<4;i++) jdbc.update("insert into s_operation (id,created_at,updated_at,account_id,session_id,turn_id,client_request_id,operation_type,ordinal,status,playback_status,input_char_count,result_summary) values (?,now(3),now(3),7,3,11,?,'TTS',?,'QUEUED','WAITING',10,json_object('segmentId',?))",21+i,"segment"+i,i,"segment"+i);
             var mapper=new SqlSessionTemplate(new TtsPersistenceConfiguration().ttsSqlSessionFactory(ds)).getMapper(TtsLifecycleMapper.class);
@@ -86,7 +83,7 @@ class VoiceLifecycleMysqlTest
         try {
             var flyway=org.flywaydb.core.Flyway.configure().dataSource(System.getenv("VOICE_TEST_MYSQL_URL")+schema+"?serverTimezone=UTC",
                 System.getenv("VOICE_TEST_MYSQL_USER"),System.getenv("VOICE_TEST_MYSQL_PASSWORD")).load();
-            assertEquals(8,flyway.migrate().migrationsExecuted);
+            assertEquals(9,flyway.migrate().migrationsExecuted);
             flyway.validate();
         } finally { server.execute("drop database `"+schema+"`"); }
     }

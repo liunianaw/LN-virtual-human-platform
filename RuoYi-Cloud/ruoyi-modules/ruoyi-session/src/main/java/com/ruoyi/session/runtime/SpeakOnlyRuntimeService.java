@@ -408,6 +408,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
             SegmentState segment = byId.get(input.segmentId());
             segment.audio = input.temporaryAudio();
             segment.durationMs = input.durationMs();
+            segment.degraded=input.degraded(); segment.actualVoiceDisplayName=input.actualVoiceDisplayName();segment.reasonCode=input.reasonCode();
             segment.status = SegmentStatus.READY;
         }
 
@@ -434,7 +435,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 }
                 segment.status = SegmentStatus.DELIVERED;
                 events.add(new AudioSegmentEvent(turnId, segment.segmentId, segment.ordinal, segment.audio.mediaId(), "audio/wav",
-                        segment.durationMs, segment.audio.expiresAt()));
+                        segment.durationMs, segment.audio.expiresAt(),segment.degraded,segment.actualVoiceDisplayName,segment.reasonCode));
                 nextDelivery++;
             }
             return List.copyOf(events);
@@ -506,6 +507,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         private SegmentStatus status = SegmentStatus.NEW;
         private TemporaryAudioReference audio;
         private long durationMs;
+        private boolean degraded; private String actualVoiceDisplayName="", reasonCode="";
 
         private SegmentState(String segmentId, int ordinal, String text)
         {

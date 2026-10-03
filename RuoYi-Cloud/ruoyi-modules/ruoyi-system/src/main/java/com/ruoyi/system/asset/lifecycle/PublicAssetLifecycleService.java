@@ -73,7 +73,7 @@ public class PublicAssetLifecycleService
             Integer activeTasks = jdbc.queryForObject("select count(*) from p_generation_task where avatar_id=? and status in ('QUEUED','PROCESSING')", Integer.class, resourceId);
             generations += activeTasks == null ? 0 : activeTasks;
         }
-        return Map.of("counts", Map.of("applications", applications, "sessions", sessions, "generations", generations),
+        return Map.of("counts", Map.of("applications", applications, "sessions", sessions, "generations", generations,"voices",count(kind,resourceId,"VOICE_VERSION")),
             "items", items, "total", total == null ? 0 : total, "pageNum", page, "pageSize", size);
     }
 
@@ -213,6 +213,7 @@ public class PublicAssetLifecycleService
                     if (owner != null) storageQuota.free(owner, file.id());
                 }
             }
+            if (VOICES.equals(kind)) jdbc.update("update p_resource_reference r join p_voice_version v on v.id=r.holder_id set r.state='RELEASED',r.released_at=utc_timestamp(3) where r.holder_type='VOICE_VERSION' and v.voice_id=?",asset.id());
             jdbc.update("update " + table(kind) + " set status='DELETED',deleted_at=utc_timestamp(3),cleanup_status='COMPLETED',cleanup_lease_owner=null,cleanup_lease_expires_at=null,last_cleanup_error_code=null,revision=revision+1,updated_at=utc_timestamp(3) where id=? and status='DELETING' and cleanup_lease_epoch=?", asset.id(), asset.leaseEpoch());
         });
     }

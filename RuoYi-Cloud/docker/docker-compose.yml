@@ -22,6 +22,31 @@ x-container-logging: &container-logging
     max-file: "3"
 
 services:
+  ruoyi-voice:
+    profiles: ["voice"]
+    build:
+      context: ../..
+      dockerfile: ruoyi-voice/Dockerfile
+    environment:
+      LN_VOICE_BIND: "0.0.0.0"
+      LN_VOICE_PORT: "8003"
+      LN_VOICE_INTERNAL_BEARER: "${LN_VOICE_INTERNAL_BEARER:-}"
+      LN_VOICE_SESSION_URL: "${LN_VOICE_SESSION_URL:-http://ruoyi-modules-session:9202}"
+      LN_VOICE_CALLBACK_BEARER: "${LN_VOICE_CALLBACK_BEARER:-}"
+      LN_VOICE_ENABLE_FAKE: "${LN_VOICE_ENABLE_FAKE:-false}"
+      LN_VOICE_CONCURRENCY: "${LN_VOICE_CONCURRENCY:-1}"
+      LN_VOICE_QUEUE_CAPACITY: "${LN_VOICE_QUEUE_CAPACITY:-8}"
+      LN_VOICE_QUEUE_TIMEOUT_SECONDS: "${LN_VOICE_QUEUE_TIMEOUT_SECONDS:-10}"
+      LN_VOICE_RESULT_TTL_SECONDS: "${LN_VOICE_RESULT_TTL_SECONDS:-900}"
+      LN_VOICE_MAX_RESULT_BYTES: "${LN_VOICE_MAX_RESULT_BYTES:-134217728}"
+    expose: ["8003"]
+    mem_limit: 256m
+    cpus: 1
+    pids_limit: 64
+    read_only: true
+    restart: unless-stopped
+    logging: *container-logging
+
   ruoyi-mysql:
     container_name: ruoyi-mysql
     image: mysql:5.7
@@ -142,6 +167,14 @@ services:
       - "9201:9201"
     environment:
       <<: [*common-client-env, *rabbitmq-client-env]
+      LN_VOICE_URL: "${LN_VOICE_URL:-http://ruoyi-voice:8003}"
+      LN_VOICE_INTERNAL_BEARER: "${LN_VOICE_INTERNAL_BEARER:-}"
+      LN_VOICE_ENABLE_FAKE: "${LN_VOICE_ENABLE_FAKE:-false}"
+      LN_VOICE_ALLOWED_ENDPOINTS: "${LN_VOICE_ALLOWED_ENDPOINTS:-}"
+      LN_VOICE_CAPABILITY_MANIFEST: "${LN_VOICE_CAPABILITY_MANIFEST:-}"
+      LN_SYSTEM_TO_SESSION_URL: "${LN_SYSTEM_TO_SESSION_URL:-http://ruoyi-modules-session:9202}"
+      LN_SYSTEM_TO_SESSION_INTERNAL_BEARER: "${LN_SYSTEM_TO_SESSION_INTERNAL_BEARER:-}"
+      LN_SESSION_TO_SYSTEM_INTERNAL_BEARER: "${LN_SESSION_TO_SYSTEM_INTERNAL_BEARER:-}"
       PLATFORM_DB_URL: "${PLATFORM_DB_URL:?Set PLATFORM_DB_URL}"
       PLATFORM_DB_USER: "${PLATFORM_DB_USER:?Set PLATFORM_DB_USER}"
       PLATFORM_DB_PASSWORD: "${PLATFORM_DB_PASSWORD:?Set PLATFORM_DB_PASSWORD}"
@@ -179,6 +212,15 @@ services:
       - "9202:9202"
     environment:
       <<: [*common-client-env, *rabbitmq-client-env]
+      LN_VOICE_URL: "${LN_VOICE_URL:-http://ruoyi-voice:8003}"
+      LN_VOICE_INTERNAL_BEARER: "${LN_VOICE_INTERNAL_BEARER:-}"
+      LN_VOICE_ENABLE_FAKE: "${LN_VOICE_ENABLE_FAKE:-false}"
+      LN_VOICE_ALLOWED_ENDPOINTS: "${LN_VOICE_ALLOWED_ENDPOINTS:-}"
+      LN_VOICE_CAPABILITY_MANIFEST: "${LN_VOICE_CAPABILITY_MANIFEST:-}"
+      LN_VOICE_CALLBACK_BEARER: "${LN_VOICE_CALLBACK_BEARER:-}"
+      LN_SESSION_TO_SYSTEM_URL: "${LN_SESSION_TO_SYSTEM_URL:-http://ruoyi-modules-system:9201}"
+      LN_SESSION_TO_SYSTEM_INTERNAL_BEARER: "${LN_SESSION_TO_SYSTEM_INTERNAL_BEARER:-}"
+      LN_SYSTEM_TO_SESSION_INTERNAL_BEARER: "${LN_SYSTEM_TO_SESSION_INTERNAL_BEARER:-}"
       SESSION_DB_URL: "${SESSION_DB_URL:?Set SESSION_DB_URL}"
       SESSION_DB_USER: "${SESSION_DB_USER:?Set SESSION_DB_USER}"
       SESSION_DB_PASSWORD: "${SESSION_DB_PASSWORD:?Set SESSION_DB_PASSWORD}"

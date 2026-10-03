@@ -33,6 +33,7 @@ public class OfficialServiceServiceImpl implements IOfficialServiceService
         ASR_MODEL = "qwen3-asr-flash";
     private static final Set<String> IMAGE_PARAMETERS = Set.of("n", "size", "prompt_extend", "watermark", "seed");
     private static final Set<String> TTS_PARAMETERS = Set.of("speed", "rate", "pitch", "volume");
+    private final com.ruoyi.common.voice.VoiceCatalog voiceCatalog = new com.ruoyi.common.voice.VoiceCatalog();
     private final OfficialServiceMapper mapper;
     private final OfficialSecretCrypto crypto;
     private final ObjectMapper json;
@@ -94,6 +95,16 @@ public class OfficialServiceServiceImpl implements IOfficialServiceService
         if (bindings != 1) throw new ServiceException("官方服务与冻结任务或声音版本不匹配", HttpStatus.CONFLICT.value());
         OfficialService service = mapper.selectResolvable(serviceId, expectedRevision, purpose); if (service == null) throw new ServiceException("官方服务已停用或修订不匹配", HttpStatus.CONFLICT.value());
         validateStored(service);
+        if ("TTS".equals(purpose))
+        {
+            String frozen=mapper.voiceBinding(voiceVersionId);
+            try {
+                var binding=json.readValue(frozen,com.ruoyi.common.voice.VoiceBinding.class);
+                com.ruoyi.common.voice.VoiceCatalog.validateEndpoint(binding.endpoint(),binding.providerType());
+                return new ResolvedService(binding.providerType(),binding.endpoint(),binding.modelId(),
+                    new java.util.LinkedHashMap<>(binding.parameters()),crypto.decrypt(mapper.selectSecret(service.getSecretId())));
+            } catch (Exception error) { throw bad("VOICE_BINDING_UNAVAILABLE"); }
+        }
         return new ResolvedService(service.getProviderCode(), service.getEndpoint(), service.getModelId(), parameters(service.getParameters()), crypto.decrypt(mapper.selectSecret(service.getSecretId())));
     }
 
@@ -115,6 +126,13 @@ public class OfficialServiceServiceImpl implements IOfficialServiceService
     {
         try
         {
+            if ("TTS".equals(service.getCapability()))
+            {
+                var capability=voiceCatalog.require(service.getProviderCode(),service.getModelId());
+                com.ruoyi.common.voice.VoiceCatalog.validateEndpoint(service.getEndpoint(),service.getProviderCode());
+                capability.validateParameters(parameters(service.getParameters()));
+                return;
+            }
             URI endpoint = URI.create(service.getEndpoint()); boolean image = "AVATAR_GENERATION".equals(service.getCapability());
             boolean asr = "ASR".equals(service.getCapability());
             if (endpoint.getUserInfo() != null || endpoint.getPort() > 0 || endpoint.getQuery() != null || endpoint.getFragment() != null || !"dashscope.aliyuncs.com".equals(endpoint.getHost())) throw bad("服务地址不在官方白名单");

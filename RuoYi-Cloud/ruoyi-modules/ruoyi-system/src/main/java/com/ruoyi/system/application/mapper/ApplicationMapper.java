@@ -35,6 +35,7 @@ public interface ApplicationMapper
     int countCurrentConfigAvailable(@Param("applicationId") long applicationId);
     Long selectAvatarVersion(@Param("accountId") long accountId, @Param("avatarId") long avatarId);
     Long selectVoiceVersion(@Param("voiceId") long voiceId);
+    Long selectVoiceFallback(@Param("version") long version);
     void releaseCurrentReferences(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
     void insertCurrentReference(@Param("id") long id, @Param("accountId") long accountId,
         @Param("applicationId") long applicationId, @Param("operationId") String operationId,

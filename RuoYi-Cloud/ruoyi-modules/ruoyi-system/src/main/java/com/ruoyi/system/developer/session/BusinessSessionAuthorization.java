@@ -82,6 +82,10 @@ public class BusinessSessionAuthorization
         if (includeSnapshot && mapper.availableCurrent(accountId, applicationId) != 1)
             throw new ServiceException("Application 资源当前不可用", 422);
         Map<String, Object> result = new LinkedHashMap<>(row);
+        if (row.get("voiceBinding") instanceof String binding) {
+            try { result.put("voiceBinding",json.readTree(binding)); }
+            catch(Exception error) { throw new ServiceException("VOICE_BINDING_UNAVAILABLE",409); }
+        }
         result.put("allowedScopes", List.of("session:read", "avatar:read", "speak:write",
             "asr:write", "context:capture", "guidance:receive"));
         if (includeSnapshot)
