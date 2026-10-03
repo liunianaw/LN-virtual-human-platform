@@ -8,11 +8,14 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** The sole attempt/fallback arbiter; bridge and HTTP execution share the same durable permits. */
 @Service
 public class VoiceOrchestrationServiceImpl implements IVoiceOrchestrationService
 {
+    private static final Logger LOG = LoggerFactory.getLogger(VoiceOrchestrationServiceImpl.class);
     private final VoiceAttemptStore store;
     private final VoiceExecutionClient client;
     private final TtsRuntimeAdapterRegistry bridges;
@@ -33,11 +36,19 @@ public class VoiceOrchestrationServiceImpl implements IVoiceOrchestrationService
         Task task=store.create(work.principal().accountId(),"BUSINESS",work.turnId()+":"+work.ordinal(),work.text(),binding,work,epoch,grant.id(),deadline());
         if(store.mapper().latest(task.id())!=null) return;
         Context context=new Context(work,sink,work.text());
-        register(task.id(),context);
-        start(store.createAttempt(task.id(),work.text(),false),context);
+        if(!register(task.id(),context)) return;
+        try { start(store.createAttempt(task.id(),work.text(),false),context); }
+        catch(RuntimeException error) { release(task.id(),context); throw error; }
     }
-    private void register(long id,Context context) {
-        synchronized(active) { if(active.size()>=128) throw VoiceAttemptStore.problem("VOICE_QUEUE_FULL");active.put(id,context); }
+    private void release(long id,Context context) {
+        active.computeIfPresent(id,(key,current)->current==context?null:current);
+    }
+    private boolean register(long id,Context context) {
+        synchronized(active) {
+            if(active.containsKey(id)) return false;
+            if(active.size()>=128) throw VoiceAttemptStore.problem("VOICE_QUEUE_FULL");
+            active.put(id,context); return true;
+        }
     }
     private Instant deadline() { return Instant.now().plus(properties.getOfficial().getQueueTimeout()).plus(properties.getOfficial().getTimeout()); }
 
@@ -46,21 +57,31 @@ public class VoiceOrchestrationServiceImpl implements IVoiceOrchestrationService
         if(key==null || !key.matches("[A-Za-z0-9._:-]{1,64}")) throw VoiceAttemptStore.problem("VOICE_PARAMETER_INVALID");
         VoiceBinding binding=client.binding(version).primaryOnly();
         Task task=store.create(administrator,"AUDITION",version+":"+key,text,binding,null,null,null,deadline());
-        if(store.mapper().latest(task.id())==null) {
-            Context context=new Context(null,null,text); register(task.id(),context);
-            start(store.createAttempt(task.id(),text,false),context);
-        }
-        while(true) {
-            task=store.mapper().task(task.id());
-            if("SUCCEEDED".equals(task.status())) {
-                try { return audio.read(json.readValue(task.resultReference(),TemporaryAudioReference.class)); }
-                catch(Exception e) { throw VoiceAttemptStore.problem("VOICE_RESULT_EXPIRED"); }
+        long taskId=task.id();
+        Context registered=null;
+        try {
+            if(store.mapper().latest(taskId)==null) {
+                Context context=new Context(null,null,text);
+                if(register(taskId,context)) {
+                    registered=context;
+                    start(store.createAttempt(taskId,text,false),context);
+                }
             }
-            if(Set.of("FAILED","CANCELLED","UNKNOWN").contains(task.status())) throw VoiceAttemptStore.problem(task.errorCode()==null?"VOICE_OUTCOME_UNKNOWN":task.errorCode());
-            if(!Instant.now().isBefore(task.deadlineAt())) break;
-            try { Thread.sleep(40); } catch(InterruptedException e) { Thread.currentThread().interrupt(); throw VoiceAttemptStore.problem("VOICE_OUTCOME_UNKNOWN"); }
+            while(true) {
+                task=store.mapper().task(taskId);
+                if("SUCCEEDED".equals(task.status())) {
+                    try { return audio.read(json.readValue(task.resultReference(),TemporaryAudioReference.class)); }
+                    catch(Exception e) { throw VoiceAttemptStore.problem("VOICE_RESULT_EXPIRED"); }
+                }
+                if(Set.of("FAILED","CANCELLED","UNKNOWN").contains(task.status())) throw VoiceAttemptStore.problem(task.errorCode()==null?"VOICE_OUTCOME_UNKNOWN":task.errorCode());
+                if(!Instant.now().isBefore(task.deadlineAt())) break;
+                try { Thread.sleep(40); } catch(InterruptedException e) { Thread.currentThread().interrupt(); throw VoiceAttemptStore.problem("VOICE_OUTCOME_UNKNOWN"); }
+            }
+            store.recover(task); throw VoiceAttemptStore.problem("VOICE_OUTCOME_UNKNOWN");
+        } finally {
+            // Only the request that registered this context owns its release. Durable queries remain intact.
+            if(registered!=null) release(taskId,registered);
         }
-        store.recover(task); throw VoiceAttemptStore.problem("VOICE_OUTCOME_UNKNOWN");
     }
 
     private void start(VoiceAttemptStore.Dispatch dispatch,Context context)
@@ -171,6 +192,7 @@ public class VoiceOrchestrationServiceImpl implements IVoiceOrchestrationService
                         a.attemptNo()==2?store.mapper().attempts(t.id()).get(0).errorCode():"")).accepted();
                 } catch(RuntimeException deliveryFailure) {
                     // Synthesis and settlement succeeded. End the playback turn without releasing its fee.
+                    LOG.warn("Voice audio delivery failed taskId={} attemptId={}", t.id(), id, deliveryFailure);
                     context.sink.onAudioFailed(w.principal(),w,"VOICE_AUDIO_DELIVERY_FAILED");
                 }
             }

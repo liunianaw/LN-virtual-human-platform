@@ -4,12 +4,15 @@ import com.ruoyi.session.business.BusinessSystemClient;
 import com.ruoyi.session.runtime.mapper.TtsLifecycleMapper;
 import java.time.Instant;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /** Rechecks authority and reserves official quota before each new provider side effect. */
 @Service
 public class TtsSubmissionService
 {
+    private static final Logger LOG = LoggerFactory.getLogger(TtsSubmissionService.class);
     private final RuntimeAuthorization access;
     private final RuntimeConnectionEpochs epochs;
     private final PersistentRuntimeStore store;
@@ -49,12 +52,12 @@ public class TtsSubmissionService
             runtime.onAudioFailed(principal,work,error instanceof RuntimeProblem problem?problem.code():"TTS_AUTH_UNAVAILABLE");
             return;
         }
-        // Claim before reserve HTTP: a lost response can be reconciled by the same business key.
-        if (lifecycle.prepare(principal.accountId(), principal.sessionId(), turn, work.ordinal(), work.segmentId(),
-            epoch, owner, Instant.now().plus(properties.getOfficial().getQueueTimeout())
-                .plus(properties.getOfficial().getTimeout()).plusSeconds(30)) != 1) return;
         try
         {
+            // Claim before reserve HTTP: a lost response can be reconciled by the same business key.
+            if (lifecycle.prepare(principal.accountId(), principal.sessionId(), turn, work.ordinal(), work.segmentId(),
+                epoch, owner, Instant.now().plus(properties.getOfficial().getQueueTimeout())
+                    .plus(properties.getOfficial().getTimeout()).plusSeconds(30)) != 1) return;
             if ("BUSINESS_KEY".equals(grant.source()) && principal.voice().providerKind() != TtsProviderKind.OFFICIAL)
                 throw new RuntimeProblem(org.springframework.http.HttpStatus.FORBIDDEN, "OFFICIAL_VOICE_REQUIRED", "Official Voice is required.");
             long reservationId = system.reserveTts(principal.accountId(), principal.applicationId(), businessId,
@@ -82,21 +85,33 @@ public class TtsSubmissionService
                 @Override public void onAudioFailed(RuntimePrincipal ignored, TtsSynthesisWork failed, String code)
                 {
                     // Attempt outcome and billing intent were committed by the arbiter.
-                    store.cancelNotSubmitted(principal, failed);
-                    runtime.onAudioFailed(principal, failed, code);
+                    notifyFailure(principal, failed, code);
                 }
             });
         }
         catch (RuntimeException error)
         {
+            LOG.warn("TTS submission failed turnId={} ordinal={}", work.turnId(), work.ordinal(), error);
             // Explicit pre-admission rejection has no reservation; transport failures remain unconfirmed.
             if (error instanceof RuntimeProblem problem && "BUSINESS_AUTH_REJECTED".equals(problem.code())
                 && java.util.Set.of(400,401,403,404,429).contains(problem.status().value()))
-                lifecycle.reserved(turn,work.ordinal(),0);
-            lifecycle.finish(turn, work.ordinal(), owner, false);
-            store.cancelNotSubmitted(principal, work);
-            runtime.onAudioFailed(principal, work, error instanceof RuntimeProblem problem ? problem.code() : "TTS_SUBMIT_FAILED");
+            {
+                try { lifecycle.reserved(turn, work.ordinal(), 0); }
+                catch (RuntimeException cleanupError)
+                { LOG.warn("TTS reservation lookup remains pending turnId={} ordinal={}", work.turnId(), work.ordinal(), cleanupError); }
+            }
+            try { lifecycle.finish(turn, work.ordinal(), owner, false); }
+            catch (RuntimeException cleanupError)
+            { LOG.warn("TTS finalization remains pending turnId={} ordinal={}", work.turnId(), work.ordinal(), cleanupError); }
+            notifyFailure(principal, work, error instanceof RuntimeProblem problem ? problem.code() : "TTS_SUBMIT_FAILED");
         }
     }
 
+    private void notifyFailure(RuntimePrincipal principal, TtsSynthesisWork work, String code)
+    {
+        try { store.cancelNotSubmitted(principal, work); }
+        catch (RuntimeException error)
+        { LOG.warn("TTS cancellation remains pending turnId={} ordinal={}", work.turnId(), work.ordinal(), error); }
+        finally { runtime.onAudioFailed(principal, work, code); }
+    }
 }

@@ -13,6 +13,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 @EnabledIfEnvironmentVariable(named="VOICE_TEST_MYSQL_URL", matches=".+")
 class UnifiedVoiceMysqlTest
@@ -111,7 +112,76 @@ class UnifiedVoiceMysqlTest
                 org.mockito.Mockito.verify(client,org.mockito.Mockito.times(1)).submit(org.mockito.ArgumentMatchers.any());
                 assertEquals("SUCCEEDED",mapper.source(7,"AUDITION","3:arbiter-e2e").status());
             } finally { pool.close(); }
+            // R04: real permits time out without callbacks; UNKNOWN/query evidence survives slot release.
+            var inlinePool=mock(VoiceExecutionPool.class);
+            doAnswer(call->{ ((Runnable)call.getArgument(0)).run();return null; }).when(inlinePool).execute(any(),any());
+            var access=mock(RuntimeAuthorization.class);
+            var voices=new VoiceOrchestrationServiceImpl(store,client,mock(TtsRuntimeAdapterRegistry.class),access,
+                storage,properties,inlinePool,new ObjectMapper().findAndRegisterModules());voicesRef.set(voices);
+            var timedOut=new ArrayList<VoiceProtocol.Request>();
+            doAnswer(call->{
+                VoiceProtocol.Request request=call.getArgument(0);timedOut.add(request);
+                assertTrue(voices.authorize(Long.parseLong(request.attemptId()),new VoiceProtocol.Permit(1,"fixture","fixture-boot",request.dispatchToken())).authorized());
+                jdbc.update("update s_voice_task set deadline_at=date_sub(utc_timestamp(3),interval 1 second) where id=?",Long.parseLong(request.taskId()));return null;
+            }).when(client).submit(any());
+            for(int i=0;i<129;i++) assertEquals("VOICE_OUTCOME_UNKNOWN",assertThrows(RuntimeProblem.class,
+                ()->voices.audition(7,3,"timeout-"+timedOut.size(),text)).code());
+            voices.recover();
+            var contexts=VoiceOrchestrationServiceImpl.class.getDeclaredField("active");contexts.setAccessible(true);
+            assertEquals(0,((Map<?,?>)contexts.get(voices)).size());
+            assertEquals(129,jdbc.queryForObject("select count(*) from s_voice_task where source_key like '3:timeout-%' and status='UNKNOWN'",Integer.class));
+            assertEquals(129,jdbc.queryForObject("select count(*) from s_voice_attempt a join s_voice_task t on t.id=a.task_id where t.source_key like '3:timeout-%' and a.state='UNKNOWN'",Integer.class));
+            VoiceProtocol.Request late=timedOut.get(0);
+            voices.event(Long.parseLong(late.attemptId()),new VoiceProtocol.Event("late-completed",late.attemptId(),1,late.requestHash(),
+                "fixture","fixture-boot","SUCCEEDED",null,"DEFINITIVE",new VoiceProtocol.Audio("audio/wav","PCM_S16LE",24000,1,16,48,1,VoiceProtocol.hash(result)),null,"TEST","1"));
+            assertArrayEquals(result,voices.audition(7,3,"timeout-0",text));assertEquals(129,timedOut.size());
+
+            // R03: actual submission wrapper -> common arbiter -> runtime, after durable success/SETTLE.
+            var persistent=spy(new PersistentRuntimeStore(jdbc,new ObjectMapper().findAndRegisterModules()));
+            doThrow(new IllegalStateException("Injected registration DB failure"))
+                .when(persistent).markAudioReady(anyLong(),anyInt(),any(),any(),anyLong(),anyLong());
+            doThrow(new IllegalStateException("Injected cancellation DB failure")).when(persistent).cancelNotSubmitted(any(),any());
+            doThrow(new IllegalStateException("Injected failure DB failure")).when(persistent).markAudioFailed(anyLong(),anyInt(),anyString());
+            doThrow(new IllegalStateException("Injected turn DB failure")).when(persistent).fail(anyLong());
+            var events=mock(RuntimeEventPublisher.class);
+            var runtime=new SpeakOnlyRuntimeService(properties,mock(TemporaryAudioCleanupQueue.class),persistent,events);
+            var businessPrincipal=new RuntimePrincipal(7,8,3,4,Set.of("speak:write"),new VoiceRuntimeBinding(3,TtsProviderKind.OFFICIAL,"tone",5L,1L,binding));
+            var grant=new RuntimeAuthorization.Grant(businessPrincipal,10,"fixture-token","BUSINESS_KEY",1,Instant.now().plusSeconds(60));
+            when(access.verify(10)).thenReturn(grant);
+            jdbc.update("update s_session set next_turn_no=2 where id=3");
+            var deliveryWork=runtime.start(businessPrincipal,"delivery-boundary",text,2).initialWork().get(0);
+            var epochs=mock(RuntimeConnectionEpochs.class);when(epochs.current(businessPrincipal,2)).thenReturn(true);
+            var system=mock(com.ruoyi.session.business.BusinessSystemClient.class);
+            when(system.reserveTts(anyLong(),anyLong(),anyString(),anyLong())).thenReturn(51L);
+            var lifecycle=new SqlSessionTemplate(new TtsPersistenceConfiguration().ttsSqlSessionFactory(ds)).getMapper(com.ruoyi.session.runtime.mapper.TtsLifecycleMapper.class);
+            var completed=new java.util.concurrent.atomic.AtomicReference<VoiceProtocol.Event>();
+            doAnswer(call->{
+                VoiceProtocol.Request request=call.getArgument(0);
+                assertTrue(voices.authorize(Long.parseLong(request.attemptId()),new VoiceProtocol.Permit(1,"fixture","fixture-boot",request.dispatchToken())).authorized());
+                var success=new VoiceProtocol.Event("delivery-completed",request.attemptId(),1,request.requestHash(),"fixture","fixture-boot","SUCCEEDED",null,"DEFINITIVE",
+                    new VoiceProtocol.Audio("audio/wav","PCM_S16LE",24000,1,16,48,1,VoiceProtocol.hash(result)),null,"TEST","1");
+                completed.set(success);voices.event(Long.parseLong(request.attemptId()),success);return null;
+            }).when(client).submit(any());
+            assertArrayEquals(result,voices.audition(7,3,"after-timeouts",text));
+            long filesBefore;
+            try(var files=java.nio.file.Files.list(audioDirectory)) { filesBefore=files.count(); }
+            var submissions=new TtsSubmissionService(access,epochs,persistent,system,voices,runtime,lifecycle,properties);
+            assertDoesNotThrow(()->submissions.submit(grant,2,List.of(deliveryWork)));
+            assertFalse(runtime.hasTurn(deliveryWork.turnId()));
+            verify(events).audioFailed(businessPrincipal,2,deliveryWork.turnId(),deliveryWork.segmentId(),0,"VOICE_AUDIO_DELIVERY_FAILED");
+            verify(events,never()).audioSegment(any(),anyLong(),any());
+            var delivered=mapper.source(7,"BUSINESS",deliveryWork.turnId()+":0");assertEquals("SUCCEEDED",delivered.status());
+            assertEquals("SETTLE:PENDING",mapper.settlement(delivered.id()));
+            voices.event(Long.parseLong(completed.get().attemptId()),completed.get());
+            assertEquals(1,jdbc.queryForObject("select count(*) from s_outbox where event_type='VOICE_ATTEMPT_FACT' and aggregate_id=? and json_unquote(json_extract(payload,'$.status'))='SUCCEEDED'",Integer.class,completed.get().attemptId()));
+            try(var files=java.nio.file.Files.list(audioDirectory)) { assertEquals(filesBefore,files.count()); }
+            var finalizer=new TtsFinalizationWorker(lifecycle,system,submissions,persistent);
+            finalizer.sweep();finalizer.sweep();
+            verify(system,times(1)).finishTts(7,deliveryWork.turnId()+":0","SETTLE");
+            assertEquals("SETTLE:DONE",mapper.settlement(delivered.id()));
+            assertEquals(0,((Map<?,?>)contexts.get(voices)).size());
             System.out.println("Unified Voice MySQL: V9, audition isolation, source keys, one-shot permit, winner FK, fallback limit, recovery and late settlement passed");
+            System.out.println("R03/R04: real submission/arbiter/runtime failure boundary, single SETTLE, WAV cleanup, 129 timeouts, retained UNKNOWN and late read-only result passed");
             System.out.println(jdbc.queryForList("explain select id from s_voice_attempt where state='UNKNOWN' and lease_expires_at<=utc_timestamp(3) order by lease_expires_at,id limit 32"));
         } finally { server.execute("drop database `"+schema+"`"); }
     }

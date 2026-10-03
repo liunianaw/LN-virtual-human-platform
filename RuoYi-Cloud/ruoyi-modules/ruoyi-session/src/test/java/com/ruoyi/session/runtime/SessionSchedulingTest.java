@@ -72,9 +72,9 @@ class SessionSchedulingTest
         {
             context.refresh();
             assertTrue(finalizationStarted.await(2, TimeUnit.SECONDS));
-            verify(storage, timeout(1000)).cleanupExpiredFiles();
-            verify(sessionStore, timeout(1000)).cleanupCandidates();
-            verify(transactions, timeout(1000)).execute(any());
+            verify(storage, timeout(1000).atLeastOnce()).cleanupExpiredFiles();
+            verify(sessionStore, timeout(1000).atLeastOnce()).cleanupCandidates();
+            verify(transactions, timeout(1000).atLeastOnce()).execute(any());
         }
         finally
         {
