@@ -35,7 +35,7 @@ public class VoiceManagementServiceImpl implements IVoiceManagementService
     {
         admin();try {
             var status=json.readTree(http.request(System.getenv("LN_VOICE_URL"),System.getenv("LN_VOICE_INTERNAL_BEARER"),"GET","/internal/voice/v1/readiness",null,null,65536));
-            return Map.of("apiReachable",true,"modelReady",status.path("modelReady").asBoolean(),"providers",status.path("providers"),"services",bindings.health(status.path("providers"),true));
+            return Map.of("apiReachable",true,"modelReady",status.path("modelReady").asBoolean(),"providers",status.path("providers"),"services",bindings.health(status.path("endpoints"),true));
         } catch(Exception e) { return Map.of("apiReachable",false,"modelReady",false,"providers",Map.of(),"services",bindings.health(json.createObjectNode(),false)); }
     }
     public String upload(long account,MultipartFile input)

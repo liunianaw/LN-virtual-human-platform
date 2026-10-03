@@ -11,12 +11,27 @@ import wave
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
-from .providers import ProviderFailure
+from .providers import ProviderFailure, SynthesisResult
 
 
 class Problem(Exception):
     def __init__(self, code, status=400):
         self.code, self.status = code, status
+
+
+def validate_binding(binding, cap):
+    if any(binding.get(name) != cap[name] for name in ("providerType", "modelId", "capabilityVersion", "modelRevision")) \
+            or binding.get("language") not in cap["languages"]:
+        raise ProviderFailure("VOICE_CAPABILITY_UNSUPPORTED", "DEFINITIVE")
+    if binding.get("referenceAssetId"):
+        if not cap["referenceVoice"] or not binding.get("referenceText"):
+            raise ProviderFailure("VOICE_REFERENCE_UNAVAILABLE", "DEFINITIVE")
+    elif not any(v["id"] == binding.get("providerVoiceRef") and binding["language"] in v["languages"] for v in cap["voices"]):
+        raise ProviderFailure("VOICE_CAPABILITY_UNSUPPORTED", "DEFINITIVE")
+    for name, value in binding.get("parameters", {}).items():
+        rule = cap["parameters"].get(name)
+        if rule is None or type(value) not in (int, float) or not math.isfinite(value) or not rule["minimum"] <= value <= rule["maximum"]:
+            raise ProviderFailure("VOICE_PARAMETER_INVALID", "DEFINITIVE")
 
 
 def audio_metadata(data: bytes, maximum: int) -> dict:
@@ -158,23 +173,22 @@ class Executor:
             if not grant.get("authorized"):
                 raise ProviderFailure("VOICE_CANCELLED", "BEFORE_DISPATCH")
             binding = grant["binding"]
+            execution = grant.get("execution")
             provider = self.providers.get(binding["providerType"])
-            if provider is None or not provider.ready():
+            if provider is None or not provider.ready(binding, execution):
                 raise ProviderFailure("VOICE_PROVIDER_NOT_READY", "DEFINITIVE")
             cap = provider.capability
-            if binding["providerType"] != cap["providerType"] or binding.get("modelId", cap["modelId"]) != cap["modelId"] or binding["capabilityVersion"] != cap["capabilityVersion"] or binding["modelRevision"] != cap["modelRevision"] or binding["language"] not in cap["languages"]:
-                raise ProviderFailure("VOICE_CAPABILITY_UNSUPPORTED", "DEFINITIVE")
-            if binding.get("referenceAssetId") and not cap["referenceVoice"]:
-                raise ProviderFailure("VOICE_PARAMETER_INVALID", "DEFINITIVE")
-            for name, value in binding.get("parameters", {}).items():
-                rule = cap["parameters"].get(name)
-                if rule is None or type(value) not in (int, float) or not math.isfinite(value) or not rule["minimum"] <= value <= rule["maximum"]:
-                    raise ProviderFailure("VOICE_PARAMETER_INVALID", "DEFINITIVE")
-            if len(item.request["text"]) > cap["maxInputChars"] or not binding.get("referenceAssetId") and not any(v["id"] == binding["providerVoiceRef"] and binding["language"] in v["languages"] for v in cap["voices"]):
+            # Old test fixtures omit modelId; production grants always carry a complete binding.
+            validated = dict(binding, modelId=binding.get("modelId", cap["modelId"]))
+            if binding["capabilityVersion"] in getattr(provider, "compatible_capability_versions", ()):
+                validated["capabilityVersion"] = cap["capabilityVersion"]
+            validate_binding(validated, cap)
+            if len(item.request["text"]) > cap["maxInputChars"]:
                 raise ProviderFailure("VOICE_CAPABILITY_UNSUPPORTED", "DEFINITIVE")
             if time.time() >= deadline:
                 raise ProviderFailure("VOICE_CANCELLED", "BEFORE_DISPATCH")
-            data = provider.synthesize(item.request["text"], binding, deadline)
+            result = provider.synthesize(item.request["text"], binding, deadline, execution)
+            data = result.audio if isinstance(result, SynthesisResult) else result
             metadata = audio_metadata(data, item.request["maxAudioBytes"])
             with self.lock:
                 if self.used + len(data) > self.max_bytes:
@@ -194,7 +208,9 @@ class Executor:
                 item.event = {"eventId": str(uuid.uuid4()), "attemptId": key, "taskRevision": item.request["taskRevision"],
                     "requestHash": item.request["requestHash"], "workerInstanceId": "voice", "workerBootId": self.boot,
                     "state": item.state, "errorCode": code, "failureStage": stage, "audio": metadata,
-                    "providerRequestId": None, "costSource": "TEST", "modelRevision": binding["modelRevision"] if "binding" in locals() else None}
+                    "providerRequestId": result.provider_request_id if isinstance(locals().get("result"), SynthesisResult) else None,
+                    "costSource": result.cost_source if isinstance(locals().get("result"), SynthesisResult) else ("TEST" if "provider" in locals() and binding["providerType"].startswith("TEST_") else "UNKNOWN"),
+                    "modelRevision": binding["modelRevision"] if "binding" in locals() else None}
                 item.request.pop("text", None)
                 item.request.pop("dispatchToken", None)
             self.slots.release()

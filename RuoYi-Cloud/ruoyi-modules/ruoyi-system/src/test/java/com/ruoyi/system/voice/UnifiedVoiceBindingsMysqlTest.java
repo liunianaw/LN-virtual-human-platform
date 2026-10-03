@@ -41,6 +41,15 @@ class UnifiedVoiceBindingsMysqlTest
             var primary=tx.execute(s->service.createOfficialCandidate(1,main,"Primary"));
             var saved=bindings.read(Long.parseLong(primary.versionId()));assertEquals(backup.versionId(),saved.fallback().voiceVersionId());
             assertEquals(1,jdbc.queryForObject("select count(*) from p_resource_reference where holder_type='VOICE_VERSION' and resource_id=? and state='CONFIRMED'",Integer.class,backup.versionId()));
+            // Actual reference-material query must bind the fixed version, owner, purpose and lifecycle.
+            jdbc.update("insert into p_file(id,created_at,updated_at,account_id,purpose,storage_provider,bucket,object_key,content_type,size_bytes,sha256,status) values(901,now(3),now(3),1,'VOICE_SAMPLE','fixture','bucket','reference.wav','audio/wav',48,unhex(repeat('01',32)),'AVAILABLE')");
+            jdbc.update("update p_voice_version set reference_asset_id=901 where id=?",primary.versionId());
+            var reference=mapper.referenceFile(Long.parseLong(primary.versionId()));
+            assertEquals(901L,reference.getId());assertEquals("reference.wav",reference.getObjectKey());assertEquals(32,reference.getSha256().length);
+            jdbc.update("update p_file set account_id=2 where id=901");assertNull(mapper.referenceFile(Long.parseLong(primary.versionId())));
+            jdbc.update("update p_file set account_id=1,status='DELETE_PENDING' where id=901");assertNull(mapper.referenceFile(Long.parseLong(primary.versionId())));
+            jdbc.update("update p_file set status='AVAILABLE',purpose='PREVIEW' where id=901");assertNull(mapper.referenceFile(Long.parseLong(primary.versionId())));
+            jdbc.update("update p_voice_version set reference_asset_id=null where id=?",primary.versionId());
             assertThrows(Exception.class,()->tx.execute(s->service.createOfficialCandidate(1,new VoiceServiceImpl.OfficialVoiceInput("非法",null,501L,"1","missing","zh-CN",null,Map.of(),null,false,null,null),"Bad")));
             assertThrows(Exception.class,()->tx.execute(s->service.createOfficialCandidate(1,new VoiceServiceImpl.OfficialVoiceInput("非法",null,501L,"1","tone","zh-CN",null,Map.of("unknown",1),null,false,null,null),"BadParameter")));
             jdbc.update("update p_official_service set revision=2 where id=501");

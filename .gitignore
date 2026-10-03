@@ -17,6 +17,10 @@ validation/workspace/
 **/dist/
 **/test-results/
 **/.pytest_cache/
+ruoyi-voice/model-runtimes/**/metadata.local.json
+ruoyi-voice/model-runtimes/**/weights/
+ruoyi-voice/*.egg-info/
+ruoyi-voice/build/
 # Pristine upstream checkouts; pinned sources are recorded in docs/framework-bootstrap.md
 upstream/
 

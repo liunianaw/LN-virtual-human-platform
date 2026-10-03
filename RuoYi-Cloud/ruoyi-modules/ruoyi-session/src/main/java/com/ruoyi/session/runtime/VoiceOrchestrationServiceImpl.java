@@ -25,7 +25,7 @@ public class VoiceOrchestrationServiceImpl implements IVoiceOrchestrationService
     private final VoiceExecutionPool pool;
     private final ObjectMapper json;
     private final Map<Long,Context> active=new ConcurrentHashMap<>();
-    private static final Set<String> FALLBACK_CODES=Set.of("VOICE_PROVIDER_NOT_READY","VOICE_QUEUE_FULL","VOICE_AUDIO_INVALID");
+    private static final Set<String> FALLBACK_CODES=Set.of("VOICE_PROVIDER_NOT_READY","VOICE_QUEUE_FULL","VOICE_AUDIO_INVALID","VOICE_PROVIDER_FAILED");
     public VoiceOrchestrationServiceImpl(VoiceAttemptStore store,VoiceExecutionClient client,TtsRuntimeAdapterRegistry bridges,
         RuntimeAuthorization access,TemporaryWavStorage audio,VoiceRuntimeProperties properties,VoiceExecutionPool pool,ObjectMapper json)
     { this.store=store; this.client=client; this.bridges=bridges; this.access=access; this.audio=audio; this.properties=properties; this.pool=pool; this.json=json; }
@@ -143,7 +143,10 @@ public class VoiceOrchestrationServiceImpl implements IVoiceOrchestrationService
         // Network authorization completes before acquiring the short database permit transaction.
         if(t.grantId()!=null) access.verify(t.grantId());
         client.verify(binding);
-        return new VoiceProtocol.Authorized(store.authorize(id,permit),binding);
+        // Resolve before the permit transaction, so resolution failures cannot leave a submitted attempt.
+        VoiceProtocol.Execution material=bridges.usesLegacyBridge(binding.providerType())?null:client.material(binding);
+        boolean granted=store.authorize(id,permit);
+        return new VoiceProtocol.Authorized(granted,binding,granted?material:null);
     }
 
     @Override public void event(long id,VoiceProtocol.Event event)

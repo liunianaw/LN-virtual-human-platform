@@ -6,6 +6,23 @@
     and (${v}.fallback_voice_version_id is null or exists(select 1 from p_voice_version fv join p_voice fvoice on fvoice.id=fv.voice_id join p_official_service fs on fs.id=fv.official_service_id where fv.id=${v}.fallback_voice_version_id and fvoice.status in ('PUBLISHED','UNLISTED') and fv.service_type='OFFICIAL' and fs.capability='TTS' and fs.status='ACTIVE' and (fv.reference_asset_id is null or exists(select 1 from p_file fr where fr.id=fv.reference_asset_id and fr.purpose='VOICE_SAMPLE' and fr.status='AVAILABLE'))))
   </sql>
   <select id="binding" resultType="string">select execution_binding from p_voice_version where id=#{id}</select>
+  <resultMap id="referenceFileMap" type="com.ruoyi.system.asset.domain.AssetFile">
+    <id column="id" property="id"/>
+    <result column="account_id" property="accountId"/>
+    <result column="purpose" property="purpose"/>
+    <result column="storage_provider" property="storageProvider"/>
+    <result column="bucket" property="bucket"/>
+    <result column="object_key" property="objectKey"/>
+    <result column="size_bytes" property="sizeBytes"/>
+    <result column="sha256" property="sha256"/>
+    <result column="status" property="status"/>
+  </resultMap>
+  <select id="referenceFile" resultMap="referenceFileMap">
+    select f.id,f.account_id,f.purpose,f.storage_provider,f.bucket,f.object_key,f.size_bytes,f.sha256,f.status
+    from p_voice_version v join p_voice voice on voice.id=v.voice_id
+    join p_file f on f.id=v.reference_asset_id and f.account_id=voice.account_id
+    where v.id=#{version} and f.purpose='VOICE_SAMPLE' and f.status='AVAILABLE'
+  </select>
   <select id="health" resultType="com.ruoyi.system.voice.mapper.VoiceBindingMapper$ServiceHealth">select cast(s.id as char),s.name,s.provider_code,s.model_id,s.status,s.endpoint,s.parameters,(select c.status from p_call_record c where c.fact_kind='ATTEMPT' and c.voice_service_id=s.id order by c.updated_at desc,c.id desc limit 1) from p_official_service s where s.capability='TTS' order by s.id desc limit 100</select>
   <select id="available" resultType="int">
     select count(*) from p_voice_version v join p_voice voice on voice.id=v.voice_id

@@ -31,4 +31,10 @@ public class VoiceExecutionClient
         VoiceBinding current=binding(Long.parseLong(binding.voiceVersionId()));
         if(!current.primaryOnly().equals(binding.primaryOnly())) throw VoiceAttemptStore.problem("VOICE_REQUEST_CONFLICT");
     }
+    public VoiceProtocol.Execution material(VoiceBinding binding)
+    {
+        try { return json.readValue(http.request(System.getenv("LN_SESSION_TO_SYSTEM_URL"),System.getenv("LN_SESSION_TO_SYSTEM_INTERNAL_BEARER"),
+            "GET","/internal/v1/voice-bindings/"+binding.voiceVersionId()+"/execution",null,null,65536),VoiceProtocol.Execution.class); }
+        catch(Exception error) { throw VoiceAttemptStore.problem("VOICE_CREDENTIAL_INVALID"); }
+    }
 }

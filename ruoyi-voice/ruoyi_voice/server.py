@@ -79,9 +79,12 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == "GET" and path == ["capabilities"]:
                 return self.reply(200, [p.capability for p in engine.providers.values()])
             if self.command == "GET" and path == ["readiness"]:
-                return self.reply(200, {"apiReachable": True, "modelReady": bool(engine.providers) and all(p.ready() for p in engine.providers.values()),
+                probes = {name: p.readiness() if hasattr(p, "readiness") else {"modelReady": p.ready()}
+                          for name, p in engine.providers.items()}
+                return self.reply(200, {"apiReachable": True, "modelReady": bool(probes) and all(p["modelReady"] for p in probes.values()),
                     "workerBootId": engine.boot, "resultBytes": engine.used,
-                    "providers": {name: p.ready() for name, p in engine.providers.items()}})
+                    "providers": {name: p["modelReady"] for name, p in probes.items()},
+                    "endpoints": {r["endpoint"]: r for r in probes.values() if r.get("endpoint")}})
             if self.command == "POST" and path == ["attempts"]:
                 return self.reply(202, engine.submit(self.body(), self.headers.get("Idempotency-Key")))
             if len(path) in (2, 3) and path[0] == "attempts" and path[1].isascii() and path[1].isdigit():

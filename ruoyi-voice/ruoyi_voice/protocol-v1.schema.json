@@ -240,6 +240,64 @@
         },
         "binding": {
           "$ref": "#/$defs/VoiceBinding"
+        },
+        "execution": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "credential",
+                "referenceAudioUrl",
+                "referenceAudioSha256",
+                "referenceAudioBytes"
+              ],
+              "properties": {
+                "credential": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                },
+                "referenceAudioUrl": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "referenceAudioSha256": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "referenceAudioBytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 45,
+                      "maximum": 5242880
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
         }
       }
     },

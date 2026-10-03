@@ -1,2 +1,3 @@
-# Runtime uses Python 3.11 standard library only. Build backend is pinned below.
+# Lightweight executor only; model requirements stay in independent model-runtimes.
 setuptools==75.8.0
+websockets==15.0.1

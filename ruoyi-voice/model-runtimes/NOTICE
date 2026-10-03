@@ -1,0 +1,17 @@
+LN Voice official-source overlays, version 1.
+
+Kokoro source: https://github.com/hexgrad/kokoro
+Commit: dfb907a02bba8152ca444717ca5d78747ccb4bec
+Copyright holders and license: see kokoro/UPSTREAM-LICENSE and fetched source.
+
+CosyVoice source: https://github.com/QwenAudio/CosyVoice
+Commit: 074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc
+Copyright holders and license: see cosyvoice3/UPSTREAM-LICENSE and fetched source.
+Required Matcha-TTS source: https://github.com/shivammehta25/Matcha-TTS
+Commit: dd9105b34bf2be2230f4aa1e4769fb586a3c824e
+License: see cosyvoice3/MATCHA-LICENSE and fetched submodule.
+
+Platform additions: ruoyi_voice/model_backends.py and model_server.py.
+Official model algorithms are called unchanged; no direct upstream patches.
+Weights and voice resources are separate, hash-locked inputs described in each
+source.lock.json. They are not included in platform source or container images.

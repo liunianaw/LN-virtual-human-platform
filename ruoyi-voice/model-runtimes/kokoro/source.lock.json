@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "providerType": "KOKORO",
+  "overlayVersion": "1",
+  "source": {
+    "url": "https://github.com/hexgrad/kokoro.git",
+    "commit": "dfb907a02bba8152ca444717ca5d78747ccb4bec",
+    "submodules": []
+  },
+  "weights": {
+    "repo": "hexgrad/Kokoro-82M",
+    "revision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
+    "files": [
+      {
+        "path": "config.json",
+        "algorithm": "sha1",
+        "hash": "14a726edd3718279eac426630879ff743955b16a"
+      },
+      {
+        "path": "kokoro-v1_0.pth",
+        "algorithm": "sha256",
+        "hash": "496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4"
+      },
+      {
+        "path": "voices/af_heart.pt",
+        "algorithm": "sha256",
+        "hash": "0ab5709b8ffab19bfd849cd11d98f75b60af7733253ad0d67b12382a102cb4ff"
+      },
+      {
+        "path": "voices/zf_xiaobei.pt",
+        "algorithm": "sha256",
+        "hash": "9b76be63dab4f4f96962030acc0126a9aee9728608fbbe115e2b58a2bd504df6"
+      },
+      {
+        "path": "voices/zf_xiaoni.pt",
+        "algorithm": "sha256",
+        "hash": "95b49f169bf1640f4f43c25e13daa39f7b98d15d00823e83ef5c14b3ced59e49"
+      },
+      {
+        "path": "voices/zf_xiaoxiao.pt",
+        "algorithm": "sha256",
+        "hash": "cfaf6f2ded1ee56f1ff94fcd2b0e6cdf32e5b794bdc05b44e7439d44aef5887c"
+      },
+      {
+        "path": "voices/zf_xiaoyi.pt",
+        "algorithm": "sha256",
+        "hash": "b5235dbaeef85a4c613bf78af9a88ff63c25bac5f26ba77e36186d8b7ebf05e2"
+      },
+      {
+        "path": "voices/zm_yunjian.pt",
+        "algorithm": "sha256",
+        "hash": "76cbf8bad35901d011d9628a2fdceb7b4f1f127e7a3269cb393b3941eb7fc417"
+      },
+      {
+        "path": "voices/zm_yunxi.pt",
+        "algorithm": "sha256",
+        "hash": "dbe6e1ce7c3dbaf2f5667432947b638b1c6831ccbe154c4610dbcc44f431e27b"
+      },
+      {
+        "path": "voices/zm_yunxia.pt",
+        "algorithm": "sha256",
+        "hash": "bb2b03b08e84d64e1214440ce3b624987fac177f2eeb5bab8571799a3d980acd"
+      },
+      {
+        "path": "voices/zm_yunyang.pt",
+        "algorithm": "sha256",
+        "hash": "5238ac22e0c7f8b6cdd2eddd6e444b8a700b73c4674d9a047d59a94ff96379a2"
+      }
+    ]
+  },
+  "overlayFiles": [
+    "ruoyi_voice/model_backends.py",
+    "ruoyi_voice/model_server.py"
+  ],
+  "upstreamPatches": [],
+  "officialEntryPoints": [
+    "kokoro.KModel",
+    "kokoro.KPipeline"
+  ],
+  "requiresRealModelValidation": true
+}

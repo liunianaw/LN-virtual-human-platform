@@ -1,6 +1,7 @@
 """Installed adapters own native protocols; the executor owns bounded admission."""
 import io
 import wave
+from dataclasses import dataclass
 from typing import Protocol
 
 
@@ -9,11 +10,18 @@ class ProviderFailure(Exception):
         self.code, self.stage = code, stage
 
 
+@dataclass
+class SynthesisResult:
+    audio: bytes
+    provider_request_id: str | None = None
+    cost_source: str = "SELF_HOSTED"
+
+
 class Provider(Protocol):
     capability: dict
 
-    def ready(self) -> bool: ...
-    def synthesize(self, text: str, binding: dict, deadline: float) -> bytes: ...
+    def ready(self, binding=None, execution=None) -> bool: ...
+    def synthesize(self, text: str, binding: dict, deadline: float, execution=None) -> bytes | SynthesisResult: ...
 
 
 class FakeProvider:
@@ -28,10 +36,10 @@ class FakeProvider:
         "fallbackTarget": True,
     }
 
-    def ready(self) -> bool:
+    def ready(self, binding=None, execution=None) -> bool:
         return True
 
-    def synthesize(self, text: str, binding: dict, deadline: float) -> bytes:
+    def synthesize(self, text: str, binding: dict, deadline: float, execution=None) -> bytes:
         output = io.BytesIO()
         with wave.open(output, "wb") as audio:
             audio.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
@@ -42,4 +50,13 @@ class FakeProvider:
 def installed_providers():
     """Only trusted adapters shipped in this module may be registered."""
     import os
-    return {"TEST_TONE": FakeProvider()} if os.getenv("LN_VOICE_ENABLE_FAKE") == "true" else {}
+    from .native_providers import QwenProvider, ModelProvider
+    providers = {"TEST_TONE": FakeProvider()} if os.getenv("LN_VOICE_ENABLE_FAKE") == "true" else {}
+    if os.getenv("LN_VOICE_ENABLE_QWEN") == "true":
+        if os.getenv("LN_VOICE_QWEN_ROUTE") != "executor":
+            raise ValueError("Qwen executor requires the mutually exclusive executor route")
+        providers["DASHSCOPE_QWEN_TTS"] = QwenProvider()
+    for name in ("KOKORO", "COSYVOICE3"):
+        if os.getenv("LN_VOICE_ENABLE_" + name) == "true":
+            providers[name] = ModelProvider(name)
+    return providers

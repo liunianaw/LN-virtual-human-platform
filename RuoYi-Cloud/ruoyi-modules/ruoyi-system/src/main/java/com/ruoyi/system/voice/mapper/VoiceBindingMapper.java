@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 public interface VoiceBindingMapper
 {
     String binding(@Param("id") long id);
+    com.ruoyi.system.asset.domain.AssetFile referenceFile(@Param("version") long version);
     List<ServiceHealth> health();
     int available(@Param("id") long id, @Param("published") boolean published);
     int save(@Param("id") long id, @Param("provider") String provider, @Param("binding") String binding,

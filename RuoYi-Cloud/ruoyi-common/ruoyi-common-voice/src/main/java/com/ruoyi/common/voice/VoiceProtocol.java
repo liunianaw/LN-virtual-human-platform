@@ -16,7 +16,11 @@ public final class VoiceProtocol
         String requestHash,String voiceVersionId,String dispatchToken,String text,String textHash,int inputCharCount,
         Instant deadlineAt,long maxAudioBytes) { }
     public record Permit(long taskRevision,String workerInstanceId,String workerBootId,String dispatchToken) { }
-    public record Authorized(boolean authorized,VoiceBinding binding) { }
+    /** Transient send-time secrets; never persisted in binding, events or diagnostics. */
+    public record Execution(String credential,String referenceAudioUrl,String referenceAudioSha256,Long referenceAudioBytes) { }
+    public record Authorized(boolean authorized,VoiceBinding binding,Execution execution) {
+        public Authorized(boolean authorized,VoiceBinding binding) { this(authorized,binding,null); }
+    }
     public record Audio(String mimeType,String codec,int sampleRateHz,int channels,int sampleWidthBits,long byteLength,long durationMs,String sha256) { }
     public record Event(String eventId,String attemptId,long taskRevision,String requestHash,String workerInstanceId,
         String workerBootId,String state,String errorCode,String failureStage,Audio audio,String providerRequestId,

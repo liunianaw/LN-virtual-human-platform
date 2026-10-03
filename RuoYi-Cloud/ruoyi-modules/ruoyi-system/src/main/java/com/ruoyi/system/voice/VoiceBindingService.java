@@ -24,7 +24,10 @@ public class VoiceBindingService
             catch(Exception error) { valid=false; }
             java.util.Map<String,Object> item=new LinkedHashMap<>();
             item.put("serviceId",s.serviceId());item.put("name",s.name());item.put("providerType",s.providerType());item.put("configValid",valid);
-            item.put("apiReachable",apiReachable);item.put("modelReady",apiReachable && providers.path(s.providerType()).asBoolean());
+            var probe=providers.path(s.endpoint());
+            item.put("executionApiReachable",apiReachable);
+            item.put("apiReachable",apiReachable && probe.path("apiReachable").asBoolean());
+            item.put("modelReady",valid && "ACTIVE".equals(s.status()) && apiReachable && probe.path("modelReady").asBoolean());
             item.put("lastSynthesisStatus",s.lastSynthesisStatus()==null?"NOT_TESTED":s.lastSynthesisStatus());item.put("status",s.status());
             return item;
         }).toList();
