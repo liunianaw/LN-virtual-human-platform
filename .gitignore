@@ -44,3 +44,10 @@ upstream/
 *.ppt
 *.pptx
 **/[Rr][Ee][Aa][Dd][Mm][Ee].txt
+
+# Local console acceptance scripts and evidence; production tests remain tracked
+/validation/console-ui/
+/validation/console-experience-check.mjs
+/validation/header-navigation-check.mjs
+/validation/menu-management-check.mjs
+/validation/system-permission-check.py
