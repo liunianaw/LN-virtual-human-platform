@@ -75,8 +75,12 @@ public class AssetController
 
     @RequiresPermissions("system:asset:list")
     @GetMapping("/generation-tasks")
-    public AjaxResult listGenerationTasks()
+    public AjaxResult listGenerationTasks(@RequestParam(required = false) Integer pageNum,
+        @RequestParam(required = false) Integer pageSize)
     {
+        if (pageNum != null || pageSize != null)
+            return AjaxResult.success(assetService.pageConsoleGenerationTasks(SecurityUtils.getUserId(),
+                pageNum == null ? 1 : pageNum, pageSize == null ? 20 : pageSize));
         return AjaxResult.success(assetService.listGenerationTasks(SecurityUtils.getUserId()));
     }
 

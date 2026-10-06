@@ -19,6 +19,26 @@ import com.ruoyi.system.asset.service.impl.AssetServiceImpl;
 class AssetServiceTest
 {
     @Test
+    void consolePaginationKeepsAccountAndIdentityInBothQueries()
+    {
+        var mapper = mock(AssetMapper.class);
+        try (var security = org.mockito.Mockito.mockStatic(com.ruoyi.common.security.utils.SecurityUtils.class)) {
+            security.when(com.ruoyi.common.security.utils.SecurityUtils::getUserId).thenReturn(7L);
+            for (boolean admin : new boolean[]{false, true}) {
+                security.when(com.ruoyi.common.security.utils.SecurityUtils::isAdmin).thenReturn(admin);
+                String visibility = admin ? "OFFICIAL" : "PRIVATE";
+                when(mapper.selectConsoleTasks(7L, visibility, 20, 20)).thenReturn(java.util.List.of());
+                when(mapper.countConsoleTasks(7L, visibility)).thenReturn(35);
+                assertEquals(35, service(mapper).pageConsoleGenerationTasks(7L, 2, 20).get("total"));
+                verify(mapper).selectConsoleTasks(7L, visibility, 20, 20);
+                verify(mapper).countConsoleTasks(7L, visibility);
+            }
+            assertThrows(ServiceException.class, () -> service(mapper).pageConsoleGenerationTasks(8L, 1, 20));
+            assertThrows(ServiceException.class, () -> service(mapper).pageConsoleGenerationTasks(7L, Integer.MAX_VALUE, 100));
+            verifyNoMoreInteractions(mapper);
+        }
+    }
+    @Test
     void reusesExistingTaskForTheSameAccountRequestId()
     {
         AssetMapper mapper = mock(AssetMapper.class);

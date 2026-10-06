@@ -33,7 +33,7 @@ class VoiceFailureBoundaryTest
             var access=mock(RuntimeAuthorization.class); when(access.verify(10)).thenReturn(grant);
             var epochs=mock(RuntimeConnectionEpochs.class); when(epochs.current(principal,2)).thenReturn(true);
             var events=mock(RuntimeEventPublisher.class);
-            when(store.createSpeakTurn(eq(principal),anyString(),anyList(),eq(2L))).thenReturn(11L);
+            when(store.createSpeakTurn(eq(principal),anyString(),anyList(),eq(2L))).thenReturn(new PersistentRuntimeStore.SpeakTurnCreated(11L, true));
             var runtime=new SpeakOnlyRuntimeService(new VoiceRuntimeProperties(),mock(TemporaryAudioCleanupQueue.class),store,events);
             var work=runtime.start(principal,phase,"Hello",2).initialWork().get(0);
             var failure=new IllegalStateException("Injected "+phase+" failure");

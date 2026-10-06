@@ -1,5 +1,6 @@
 <template>
   <div class="app-container">
+    <header class="console-page-heading"><div><h1>用量与限额</h1><p>核对积分、额度预占与逐次调用记录。</p></div></header>
     <el-alert title="生成一个动作 50 积分，音频合成每字符 0.01 积分；实际单价以请求预占时锁定的费率版本为准。资源存储暂时免费，容量限制仍生效。" type="info" :closable="false" />
     <div class="toolbar"><el-button @click="refresh">刷新</el-button></div>
     <el-card header="账号限额与余额" shadow="never">

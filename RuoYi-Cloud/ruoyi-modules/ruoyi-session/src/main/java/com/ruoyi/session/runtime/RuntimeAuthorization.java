@@ -66,9 +66,11 @@ public class RuntimeAuthorization
             if (row.applicationEpoch()!=current.applicationEpoch()) throw rejected();
             scopes = scopes.stream().filter(current.allowedScopes()::contains).toList();
             if (!scopes.contains("session:read")) throw rejected();
+            var execution = row.voiceBinding()==null?null:
+                json.readValue(row.voiceBinding(),com.ruoyi.common.voice.VoiceBinding.class);
             VoiceRuntimeBinding voice = new VoiceRuntimeBinding(row.voiceVersionId(), TtsProviderKind.OFFICIAL,
-                row.providerVoiceRef(), row.officialServiceId(), row.officialServiceRevision(),
-                row.voiceBinding()==null?null:json.readValue(row.voiceBinding(),com.ruoyi.common.voice.VoiceBinding.class));
+                execution==null?row.providerVoiceRef():execution.providerVoiceRef(),
+                row.officialServiceId(), row.officialServiceRevision(), execution);
             return new Grant(new RuntimePrincipal(row.accountId(),row.applicationId(),row.sessionId(),
                 row.snapshotId(),Set.copyOf(scopes),voice),row.id(),row.tokenId(),row.source(),
                 row.principalId(),row.grantExpires());

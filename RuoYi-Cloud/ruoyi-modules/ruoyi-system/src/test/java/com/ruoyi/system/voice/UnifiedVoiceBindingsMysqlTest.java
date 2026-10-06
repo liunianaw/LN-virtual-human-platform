@@ -40,6 +40,24 @@ class UnifiedVoiceBindingsMysqlTest
             var main=new VoiceServiceImpl.OfficialVoiceInput("主声音",null,501L,"1","tone","zh-CN",null,Map.of(),Long.parseLong(backup.versionId()),true,null,null);
             var primary=tx.execute(s->service.createOfficialCandidate(1,main,"Primary"));
             var saved=bindings.read(Long.parseLong(primary.versionId()));assertEquals(backup.versionId(),saved.fallback().voiceVersionId());
+            var sessionMapper=new SqlSessionTemplate(factory.getObject()).getMapper(com.ruoyi.system.developer.session.mapper.BusinessSessionMapper.class);
+            jdbc.update("update p_voice set status='PUBLISHED',current_version_id=? where id=?",primary.versionId(),primary.voiceId());
+            jdbc.update("insert into p_application(id,created_at,updated_at,account_id,name,status,voice_id) values(801,now(3),now(3),1,'snapshot-fixture','ACTIVE',?)",primary.voiceId());
+            var applications=new SqlSessionTemplate(factory.getObject()).getMapper(com.ruoyi.system.application.mapper.ApplicationMapper.class);
+            assertEquals(1,applications.countAvailableVoice(Long.parseLong(primary.voiceId())));
+            assertTrue(applications.selectVoiceChoices().stream().anyMatch(v->primary.voiceId().equals(v.get("voiceId"))));
+            jdbc.update("update p_voice set status='UNLISTED' where id=?",primary.voiceId());
+            assertEquals(0,applications.countAvailableVoice(Long.parseLong(primary.voiceId())));
+            assertFalse(applications.selectVoiceChoices().stream().anyMatch(v->primary.voiceId().equals(v.get("voiceId"))));
+            assertEquals(primary.versionId(),bindings.available(Long.parseLong(primary.versionId()),false).voiceVersionId());
+            assertEquals("tone",sessionMapper.snapshot(1,801).get("providerVoiceRef"));
+            jdbc.update("update p_voice set status='PUBLISHED' where id=?",primary.voiceId());
+            assertEquals("tone",sessionMapper.snapshot(1,801).get("providerVoiceRef"));
+            jdbc.update("update p_voice_version set voice_code='',execution_binding=json_set(execution_binding,'$.providerVoiceRef','reference:901','$.referenceAssetId','901','$.referenceText','参考文本') where id=?",primary.versionId());
+            assertEquals("reference:901",sessionMapper.snapshot(1,801).get("providerVoiceRef"));
+            jdbc.update("update p_voice_version set voice_code='legacy-tone',execution_binding=null where id=?",primary.versionId());
+            assertEquals("legacy-tone",sessionMapper.snapshot(1,801).get("providerVoiceRef"));
+            jdbc.update("update p_voice_version set voice_code='tone',execution_binding=cast(? as json) where id=?",json.writeValueAsString(saved),primary.versionId());
             assertEquals(1,jdbc.queryForObject("select count(*) from p_resource_reference where holder_type='VOICE_VERSION' and resource_id=? and state='CONFIRMED'",Integer.class,backup.versionId()));
             // Actual reference-material query must bind the fixed version, owner, purpose and lifecycle.
             jdbc.update("insert into p_file(id,created_at,updated_at,account_id,purpose,storage_provider,bucket,object_key,content_type,size_bytes,sha256,status) values(901,now(3),now(3),1,'VOICE_SAMPLE','fixture','bucket','reference.wav','audio/wav',48,unhex(repeat('01',32)),'AVAILABLE')");

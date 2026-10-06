@@ -11,5 +11,6 @@ public interface IVoiceManagementService
     List<com.ruoyi.system.voice.mapper.VoiceBindingMapper.Reference> references(long account);
     String upload(long account,MultipartFile file);
     Object diagnostics();
+    Object pageDiagnostics(int pageNum,int pageSize,Long taskId,String status);
     Map<String,Object> readiness();
 }

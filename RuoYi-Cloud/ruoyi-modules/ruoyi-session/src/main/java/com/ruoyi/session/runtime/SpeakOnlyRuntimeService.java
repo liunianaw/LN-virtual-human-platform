@@ -39,11 +39,13 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         principal.requireSpeakScope();
         validateRequest(requestId, text);
         List<SegmentPlan> chunks = plans(split(text, properties.getMaxCodePointsPerSegment()));
+        PersistentRuntimeStore.SpeakTurnCreated created = persistentStore.createSpeakTurn(principal, requestId, chunks, connectionEpoch);
+        if (!created.created())
+            return new SpeechStarted(Long.toString(created.turnId()), 1L, chunks.size(), List.of());
         String priorTurnId = activeTurnBySession.get(principal.sessionId());
         TurnState prior = priorTurnId == null ? null : turns.get(priorTurnId);
         if (prior != null && prior.connectionEpoch <= connectionEpoch) stop(principal, priorTurnId);
-        long persistentTurnId = persistentStore.createSpeakTurn(principal, requestId, chunks, connectionEpoch);
-        TurnState state = new TurnState(principal, persistentTurnId, chunks, connectionEpoch);
+        TurnState state = new TurnState(principal, created.turnId(), chunks, connectionEpoch);
         turns.put(state.turnId, state);
         activeTurnBySession.put(principal.sessionId(), state.turnId);
         synchronized (state)

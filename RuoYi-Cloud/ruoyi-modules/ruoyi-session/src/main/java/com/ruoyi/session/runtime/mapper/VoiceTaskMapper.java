@@ -35,6 +35,9 @@ public interface VoiceTaskMapper
     int claimQuery(@Param("id") long id);
     List<Task> recoverable(@Param("owner") String owner);
     List<Task> diagnostics(@Param("account") Long account);
+    List<Task> pageDiagnostics(@Param("account") Long account, @Param("taskId") Long taskId,
+        @Param("status") String status, @Param("limit") int limit, @Param("offset") int offset);
+    long countDiagnostics(@Param("account") Long account, @Param("taskId") Long taskId, @Param("status") String status);
     List<Attempt> attempts(@Param("task") long task);
     record Task(long id,long accountId,String purpose,String sourceKey,String requestHash,long voiceVersionId,
         String bindingSnapshot,String policyVersion,String status,long revision,Long winnerAttemptId,Long sessionId,Long turnId,

@@ -11,4 +11,5 @@ public interface IVoiceOrchestrationService
     VoiceProtocol.Authorized authorize(long id,VoiceProtocol.Permit permit);
     void event(long id,VoiceProtocol.Event event);
     List<Map<String,Object>> diagnostics(Long account);
+    Map<String,Object> pageDiagnostics(Long account, int pageNum, int pageSize, Long taskId, String status);
 }

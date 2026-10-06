@@ -254,14 +254,28 @@ public class VoiceOrchestrationServiceImpl implements IVoiceOrchestrationService
     }
     @Override public List<Map<String,Object>> diagnostics(Long account)
     {
-        return store.mapper().diagnostics(account).stream().map(t->{
+        return store.mapper().diagnostics(account).stream().map(this::diagnosticView).toList();
+    }
+    @Override public Map<String,Object> pageDiagnostics(Long account,int pageNum,int pageSize,Long taskId,String status)
+    {
+        if(pageNum<1 || pageSize<1 || pageSize>100 || (long)(pageNum-1)*pageSize>Integer.MAX_VALUE
+            || (account!=null && account<=0) || (taskId!=null && taskId<=0))
+            throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST,"INVALID_PAGE","分页参数无效");
+        String filter=status==null || status.isBlank()?null:status.trim();
+        if(filter!=null && !filter.matches("[A-Z_]{1,32}"))
+            throw new RuntimeProblem(org.springframework.http.HttpStatus.BAD_REQUEST,"INVALID_FILTER","状态筛选无效");
+        return Map.of("items",store.mapper().pageDiagnostics(account,taskId,filter,pageSize,(pageNum-1)*pageSize)
+            .stream().map(this::diagnosticView).toList(),"total",store.mapper().countDiagnostics(account,taskId,filter),
+            "pageNum",pageNum,"pageSize",pageSize);
+    }
+    private Map<String,Object> diagnosticView(com.ruoyi.session.runtime.mapper.VoiceTaskMapper.Task t)
+    {
             Map<String,Object> out=new LinkedHashMap<>(); out.put("taskId",Long.toString(t.id()));out.put("purpose",t.purpose());out.put("status",t.status());
             out.put("voiceVersionId",Long.toString(t.voiceVersionId()));out.put("errorCode",t.errorCode());out.put("winnerAttemptId",t.winnerAttemptId()==null?null:Long.toString(t.winnerAttemptId()));
             out.put("factDeliveryReview",store.mapper().deliveryReview(t.id())>0);
             out.put("settlement",t.operationId()==null?"NOT_BILLED":store.mapper().settlement(t.id()));
             out.put("degraded",t.winnerAttemptId()!=null && store.mapper().attempt(t.winnerAttemptId()).attemptNo()==2);
             out.put("attempts",store.mapper().attempts(t.id()).stream().map(a->Map.of("attemptId",Long.toString(a.id()),"providerType",a.providerType(),"state",a.state(),"reasonCode",a.errorCode()==null?"":a.errorCode(),"costSource",a.costSource())).toList());return out;
-        }).toList();
     }
     private record Context(TtsSynthesisWork work,TtsCompletionSink sink,String text) { }
 }

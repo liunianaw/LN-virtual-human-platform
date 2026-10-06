@@ -1,5 +1,6 @@
 import request from '@/utils/request'
 import type { AjaxResult } from '@/types'
+import type { PageResult, PageQuery } from '@/types/page'
 
 export interface SkillInput {
   name: string
@@ -40,8 +41,8 @@ const headers = (revision?: string) => ({
   'Idempotency-Key': crypto.randomUUID(),
   ...(revision ? { 'If-Match': revision } : {})
 })
-export const listSkills = (admin = false): Promise<AjaxResult<{ items: SkillSummary[] }>> =>
-  request({ url: base(admin), method: 'get' })
+export const listSkills = (admin = false, params: PageQuery = {}): Promise<AjaxResult<PageResult<SkillSummary>>> =>
+  request({ url: base(admin), method: 'get', params })
 export const getSkill = (id: string, admin = false): Promise<AjaxResult<SkillDetail>> =>
   request({ url: `${base(admin)}/${id}`, method: 'get' })
 export const createSkill = (data: SkillInput, admin = false): Promise<AjaxResult<SkillDetail>> =>

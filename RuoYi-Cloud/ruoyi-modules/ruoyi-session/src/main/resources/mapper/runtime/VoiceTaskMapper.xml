@@ -57,9 +57,23 @@
     where t.id=#{task} and o.account_id=t.account_id and o.session_id=t.session_id
     and (o.settlement_outcome is null or o.settlement_outcome='REVIEW') and o.tts_dispatch_state!='SUCCEEDED'</update>
   <update id="cancel">update s_voice_task set cancel_requested_at=coalesce(cancel_requested_at,utc_timestamp(3)) where id=#{task}</update>
-  <select id="deliveryReview" resultType="int">select count(*) from s_outbox x join s_voice_attempt a on cast(a.id as char)=x.aggregate_id where a.task_id=#{task} and x.event_type='VOICE_ATTEMPT_FACT' and x.status!='SENT' and x.attempt_count&gt;=12</select>
+  <select id="deliveryReview" resultType="int">select count(*) from s_outbox x join s_voice_attempt a on cast(a.id as char character set utf8mb4) collate utf8mb4_0900_as_cs=x.aggregate_id where a.task_id=#{task} and x.event_type='VOICE_ATTEMPT_FACT' and x.status!='SENT' and x.attempt_count&gt;=12</select>
   <select id="queries" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Attempt">select <include refid="attemptColumns"/> from s_voice_attempt where state='UNKNOWN' and query_count &lt; 12 and query_next_at &lt;= utc_timestamp(3) order by query_next_at,id limit 4</select>
   <update id="claimQuery">update s_voice_attempt set query_count=query_count+1,query_next_at=date_add(utc_timestamp(3),interval 30 second) where id=#{id} and state='UNKNOWN' and query_count &lt; 12 and query_next_at &lt;= utc_timestamp(3)</update>
   <select id="recoverable" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Task">select <include refid="taskColumns"/> from s_voice_task t where status in ('QUEUED','RUNNING') and (owner!=#{owner} or deadline_at &lt;= utc_timestamp(3) or (purpose='BUSINESS' and not exists(select 1 from s_session s where s.id=t.session_id and s.active_turn_id=t.turn_id and s.status='ACTIVE' and s.connection_epoch=t.connection_epoch))) order by deadline_at,id limit 32</select>
   <select id="diagnostics" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Task">select <include refid="taskColumns"/> from s_voice_task <where><if test="account != null">account_id=#{account}</if></where> order by created_at desc,id desc limit 100</select>
+  <sql id="diagnosticFilters">
+    <where>
+      <if test="account != null">and account_id=#{account}</if>
+      <if test="taskId != null">and id=#{taskId}</if>
+      <if test="status != null">and status=#{status}</if>
+    </where>
+  </sql>
+  <select id="pageDiagnostics" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Task">
+    select <include refid="taskColumns"/> from s_voice_task <include refid="diagnosticFilters"/>
+    order by created_at desc,id desc limit #{limit} offset #{offset}
+  </select>
+  <select id="countDiagnostics" resultType="long">
+    select count(*) from s_voice_task <include refid="diagnosticFilters"/>
+  </select>
 </mapper>

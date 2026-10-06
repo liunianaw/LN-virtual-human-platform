@@ -67,11 +67,14 @@ public class GlobalExceptionHandler
      * 请求方式不支持
      */
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
-    public AjaxResult handleHttpRequestMethodNotSupported(HttpRequestMethodNotSupportedException e, HttpServletRequest request)
+    public org.springframework.http.ResponseEntity<AjaxResult> handleHttpRequestMethodNotSupported(HttpRequestMethodNotSupportedException e, HttpServletRequest request)
     {
         String requestURI = request.getRequestURI();
         log.error("请求地址'{}',不支持'{}'请求", requestURI, e.getMethod());
-        return AjaxResult.error(e.getMessage());
+        var response = org.springframework.http.ResponseEntity.status(org.springframework.http.HttpStatus.METHOD_NOT_ALLOWED);
+        var methods = e.getSupportedHttpMethods();
+        if (methods != null) response.allow(methods.toArray(org.springframework.http.HttpMethod[]::new));
+        return response.body(AjaxResult.error(HttpStatus.BAD_METHOD, "请求方式不支持"));
     }
 
     /**
@@ -100,6 +103,7 @@ public class GlobalExceptionHandler
      * 请求参数类型不匹配
      */
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    @ResponseStatus(org.springframework.http.HttpStatus.BAD_REQUEST)
     public AjaxResult handleMethodArgumentTypeMismatchException(MethodArgumentTypeMismatchException e, HttpServletRequest request)
     {
         String requestURI = request.getRequestURI();
@@ -109,7 +113,7 @@ public class GlobalExceptionHandler
             value = EscapeUtil.clean(value);
         }
         log.error("请求参数类型不匹配'{}',发生系统异常.", requestURI, e);
-        return AjaxResult.error(String.format("请求参数类型不匹配，参数[%s]要求类型为：'%s'，但输入值为：'%s'", e.getName(), e.getRequiredType().getName(), value));
+        return AjaxResult.error(HttpStatus.BAD_REQUEST, String.format("请求参数类型不匹配，参数[%s]要求类型为：'%s'，但输入值为：'%s'", e.getName(), e.getRequiredType().getName(), value));
     }
 
     /**

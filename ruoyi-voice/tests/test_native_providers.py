@@ -178,6 +178,20 @@ class NativeProvidersTest(unittest.TestCase):
             self.assertEqual('tensor',kokoro.synthesize(dict(native,binding=binding('KOKORO'))))
         pipeline.assert_called_once()
 
+    def test_kokoro_long_chinese_uses_bounded_official_pipeline_pieces(self):
+        pipeline=Mock()
+        pipeline.g2p.side_effect=lambda text: ('x' * (len(text) * 6), None)
+        pipeline.return_value=[Mock(audio='tensor')]
+        kokoro=KokoroBackend.__new__(KokoroBackend);kokoro.weights=Path('/controlled-model');kokoro.pipelines={'zh-CN':pipeline}
+        text='第一段中文，' * 20 + 'Hello world，末尾不应丢失。'
+        with patch('ruoyi_voice.model_backends.encode_chunks',side_effect=lambda chunks,rate,deadline:list(chunks)[0]):
+            self.assertEqual('tensor',kokoro.synthesize({'text':text,'binding':binding('KOKORO'),'deadlineAt':time.time()+10}))
+        pieces=pipeline.call_args.args[0]
+        self.assertGreater(len(pieces),1)
+        self.assertEqual(text,''.join(pieces))
+        self.assertTrue(all(len(pipeline.g2p(piece)[0]) <= 510 for piece in pieces))
+        pipeline.assert_called_once()
+
     def test_reference_denies_arbitrary_host_before_download_and_checks_hash(self):
         voice=binding('COSYVOICE3');voice.update(referenceAssetId='3',referenceText='参考')
         data=FakeProvider().synthesize('fixture',{},time.time()+10)

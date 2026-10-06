@@ -156,7 +156,7 @@ public class VoiceServiceImpl implements IOfficialVoiceService
 
     private void auditionFact(long accountId, String operation, String status, int characters, String code)
     {
-        operations.accept(new com.ruoyi.system.operations.CallFactEvent(operation + "-" + status, operation,
+        operations.accept(new com.ruoyi.system.operations.CallFactEvent(hex(digest(operation + "-" + status)), operation,
             accountId, "TTS", status, null, null, null, null,
             new com.ruoyi.system.operations.CallFactEvent.Usage((long) characters, null, null, false),
             null, null, "UNKNOWN", code));

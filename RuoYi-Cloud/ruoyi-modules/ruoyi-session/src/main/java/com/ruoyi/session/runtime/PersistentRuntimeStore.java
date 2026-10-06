@@ -27,7 +27,7 @@ public class PersistentRuntimeStore
     }
 
     @Transactional
-    public long createSpeakTurn(RuntimePrincipal principal, String requestId, List<SegmentPlan> segments, long connectionEpoch)
+    public SpeakTurnCreated createSpeakTurn(RuntimePrincipal principal, String requestId, List<SegmentPlan> segments, long connectionEpoch)
     {
         try
         {
@@ -37,12 +37,22 @@ public class PersistentRuntimeStore
             {
                 throw unavailable();
             }
+            byte[] requestHash = hash(segments.stream().map(SegmentPlan::text).reduce("", String::concat));
+            SpeakTurnCreated existing = jdbcTemplate.query(
+                    "select id,request_hash,turn_type from s_turn where session_id=? and account_id=? and client_request_id=?",
+                    rs -> {
+                        if (!rs.next()) return null;
+                        if (!"SPEAK".equals(rs.getString(3)) || !MessageDigest.isEqual(requestHash, rs.getBytes(2)))
+                            throw new RuntimeProblem(HttpStatus.CONFLICT, "REQUEST_CONFLICT", "The request ID was used with different input.");
+                        return new SpeakTurnCreated(rs.getLong(1), false);
+                    }, principal.sessionId(), principal.accountId(), requestId);
+            if (existing != null) return existing;
             long turnId = nextId();
             Instant now = Instant.now();
             jdbcTemplate.update("update s_session set next_turn_no = ?, active_turn_id = ?, last_activity_at = ?, updated_at = ?, revision = revision + 1 where id = ?",
                     nextTurnNo + 1, turnId, now, now, principal.sessionId());
             jdbcTemplate.update("insert into s_turn (id,created_at,updated_at,account_id,session_id,turn_no,client_request_id,request_hash,turn_type,status,text_status,audio_status,playback_status,connection_epoch,input_source,include_in_history,last_event_seq,started_at) values (?,?,?,?,?,?,?,?, 'SPEAK','RUNNING','NOT_REQUESTED','RUNNING','WAITING',?,'TEXT',0,0,?)",
-                    turnId, now, now, principal.accountId(), principal.sessionId(), nextTurnNo, requestId, hash(segments.stream().map(SegmentPlan::text).reduce("", String::concat)), connectionEpoch, now);
+                    turnId, now, now, principal.accountId(), principal.sessionId(), nextTurnNo, requestId, requestHash, connectionEpoch, now);
             for (SegmentPlan segment : segments)
             {
                 long operationId = nextId();
@@ -51,7 +61,7 @@ public class PersistentRuntimeStore
                         operationId, now, now, principal.accountId(), principal.sessionId(), turnId, operationRequestId, "TTS", segment.ordinal(),
                         principal.voice().voiceVersionId(), (long) segment.text().codePointCount(0, segment.text().length()), hash(segment.text()), segment.segmentId());
             }
-            return turnId;
+            return new SpeakTurnCreated(turnId, true);
         }
         catch (EmptyResultDataAccessException exception)
         {
@@ -285,7 +295,7 @@ public class PersistentRuntimeStore
     public TemporaryAudioReference readableAudio(RuntimePrincipal principal, String mediaId)
     {
         TemporaryAudioReference audio = jdbcTemplate.query("select o.storage_provider,o.bucket,o.object_key,o.expires_at from s_temp_object o join s_session s on s.id=o.session_id "
-                + "where o.session_id = ? and o.account_id = ? and o.media_id = ? and o.purpose = 'TTS_AUDIO' and o.status = 'ACTIVE' and o.expires_at > now(3) and s.status='ACTIVE' and o.turn_id=s.active_turn_id",
+                + "where o.session_id = ? and o.account_id = ? and o.media_id = ? and o.purpose = 'TTS_AUDIO' and o.status = 'ACTIVE' and o.expires_at > utc_timestamp(3) and s.status='ACTIVE' and o.turn_id=s.active_turn_id",
             rs -> rs.next() ? new TemporaryAudioReference(mediaId, rs.getString(1), rs.getString(2), rs.getString(3), rs.getTimestamp(4).toInstant()) : null,
             principal.sessionId(), principal.accountId(), mediaId);
         if (audio == null) throw new RuntimeProblem(HttpStatus.NOT_FOUND, "MEDIA_NOT_FOUND", "Audio is unavailable.");
@@ -296,7 +306,7 @@ public class PersistentRuntimeStore
     {
         return jdbcTemplate.query("select media_id,storage_provider,bucket,object_key,expires_at from s_temp_object where "
                 + "(status = 'DELETE_PENDING' and (delete_attempts = 0 or next_delete_at is null or next_delete_at <= utc_timestamp(3))) "
-                + "or (status = 'ACTIVE' and expires_at <= now(3)) order by updated_at asc limit ?",
+                + "or (status = 'ACTIVE' and expires_at <= utc_timestamp(3)) order by updated_at asc limit ?",
             (rs, row) -> new TemporaryAudioReference(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getTimestamp(5).toInstant()), limit);
     }
 
@@ -363,6 +373,8 @@ public class PersistentRuntimeStore
     }
 
     private record Operation(long id, long inputChars, String segmentId) { }
+
+    public record SpeakTurnCreated(long turnId, boolean created) { }
 
     private static byte[] hash(String value)
     {

@@ -241,7 +241,7 @@ Promise.all([loadPointRates(), loadPlatformUsage()])
 .section { margin-top: 20px; }
 .metric-grid { margin-top: 6px; }
 .metric { min-height: 92px; padding: 18px; margin-top: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; background: var(--el-fill-color-extra-light); }
-.metric-label { color: var(--el-text-color-secondary); font-size: 13px; }
+.metric-label { color: var(--el-text-color-secondary); font-size: 14px; }
 .metric-value { margin-top: 10px; color: var(--el-text-color-primary); font-size: 24px; font-weight: 600; }
 .list-toolbar { display: flex; gap: 10px; max-width: 620px; margin: 24px 0 12px; }
 .pagination { justify-content: flex-end; margin-top: 16px; }

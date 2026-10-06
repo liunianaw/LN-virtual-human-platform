@@ -2,6 +2,7 @@ import request from '@/utils/request'
 const assetBase = () => '/system/asset'
 const avatarBase = () => assetBase() + '/avatars'
 import type { AjaxResult } from '@/types'
+import type { PageResult, PageQuery } from '@/types/page'
 
 export interface AvatarReferenceFile {
   fileId: string
@@ -159,6 +160,10 @@ export function listAvatarGenerationTasks(): Promise<AjaxResult<AvatarGeneration
     url: assetBase() + '/generation-tasks',
     method: 'get'
   })
+}
+
+export function pageAvatarGenerationTasks(params: PageQuery): Promise<AjaxResult<PageResult<AvatarGenerationTask>>> {
+  return request({ url: assetBase() + '/generation-tasks', method: 'get', params })
 }
 
 export function listAvatarGenerationServices(): Promise<AjaxResult<AvatarGenerationService[]>> {

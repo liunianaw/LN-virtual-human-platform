@@ -25,7 +25,7 @@ class UnifiedVoiceMysqlTest
         var admin=new DriverManagerDataSource(System.getenv("VOICE_TEST_MYSQL_URL"),System.getenv("VOICE_TEST_MYSQL_USER"),System.getenv("VOICE_TEST_MYSQL_PASSWORD"));
         var server=new JdbcTemplate(admin);server.execute("create database `"+schema+"`");
         try {
-            var ds=new DriverManagerDataSource(System.getenv("VOICE_TEST_MYSQL_URL")+schema+"?serverTimezone=UTC",System.getenv("VOICE_TEST_MYSQL_USER"),System.getenv("VOICE_TEST_MYSQL_PASSWORD"));
+            var ds=new DriverManagerDataSource(System.getenv("VOICE_TEST_MYSQL_URL")+schema+"?serverTimezone=UTC&forceConnectionTimeZoneToSession=true",System.getenv("VOICE_TEST_MYSQL_USER"),System.getenv("VOICE_TEST_MYSQL_PASSWORD"));
             var flyway=org.flywaydb.core.Flyway.configure().dataSource(ds).load();assertEquals(9,flyway.migrate().migrationsExecuted);flyway.validate();
             var jdbc=new JdbcTemplate(ds);var tx=new TransactionTemplate(new DataSourceTransactionManager(ds));
             var mapper=new SqlSessionTemplate(new TtsPersistenceConfiguration().ttsSqlSessionFactory(ds)).getMapper(VoiceTaskMapper.class);
@@ -34,12 +34,22 @@ class UnifiedVoiceMysqlTest
             factory.addAdvice(new org.springframework.transaction.interceptor.TransactionInterceptor(new DataSourceTransactionManager(ds),new org.springframework.transaction.annotation.AnnotationTransactionAttributeSource()));
             var store=(VoiceAttemptStore)factory.getProxy();assertNotNull(store.owner());
             var binding=binding("3",null);String text="你好🙂";
+            // Java-bound deadlines must be selected by the SQL recovery clock without an eight-hour delay.
+            var expired=store.create(7,"AUDITION","3:utc-expired",text,binding,null,null,null,Instant.now().minusSeconds(1));
+            assertTrue(mapper.recoverable(store.owner()).stream().anyMatch(t->t.id()==expired.id()));
+            assertEquals("VOICE_CANCELLED",assertThrows(RuntimeProblem.class,()->store.createAttempt(expired.id(),text,false)).code());
+            // A fresh process must recover a persisted task even while its deadline is still in the future.
+            var orphan=store.create(7,"AUDITION","3:utc-orphan",text,binding,null,null,null,Instant.now().plusSeconds(60));
+            assertTrue(mapper.recoverable("another-boot").stream().anyMatch(t->t.id()==orphan.id()));
+            store.recover(expired);store.recover(orphan);
             var task=tx.execute(s->store.create(7,"AUDITION","3:Request",text,binding,null,null,null,Instant.now().plusSeconds(60)));
             assertNull(task.sessionId());assertNull(task.operationId());
             assertEquals(task.id(),tx.execute(s->store.create(7,"AUDITION","3:Request",text,binding,null,null,null,Instant.now().plusSeconds(60))).id());
             assertThrows(RuntimeProblem.class,()->tx.execute(s->store.create(7,"AUDITION","3:Request","different",binding,null,null,null,Instant.now().plusSeconds(60))));
             assertNotEquals(task.id(),tx.execute(s->store.create(7,"AUDITION","3:request",text,binding,null,null,null,Instant.now().plusSeconds(60))).id());
             var d=tx.execute(s->store.createAttempt(task.id(),text,false));
+            long leaseSeconds=jdbc.queryForObject("select timestampdiff(second,utc_timestamp(3),lease_expires_at) from s_voice_attempt where id=?",Long.class,d.attempt().id());
+            assertTrue(leaseSeconds>0 && leaseSeconds<=60,"Java-bound lease must share the SQL UTC clock");
             assertFalse(tx.<Boolean>execute(s->store.authorize(d.attempt().id(),new VoiceProtocol.Permit(1,"worker","boot","wrong"))));
             var permit=new VoiceProtocol.Permit(1,"worker","boot",d.token());
             var gate=new java.util.concurrent.CountDownLatch(1);
@@ -54,6 +64,14 @@ class UnifiedVoiceMysqlTest
             assertTrue(tx.<Boolean>execute(s->store.success(d.attempt().id(),event,audio)));
             assertFalse(tx.<Boolean>execute(s->store.success(d.attempt().id(),event,audio)));
             assertEquals(d.attempt().id(),mapper.task(task.id()).winnerAttemptId());
+            assertEquals(0,mapper.deliveryReview(task.id()));
+            String attemptId=Long.toString(d.attempt().id());
+            jdbc.update("update s_outbox set attempt_count=12 where event_type='VOICE_ATTEMPT_FACT' and aggregate_id=?",attemptId);
+            int pending=jdbc.queryForObject("select count(*) from s_outbox where event_type='VOICE_ATTEMPT_FACT' and aggregate_id=?",Integer.class,attemptId);
+            assertTrue(pending>0);
+            assertEquals(pending,mapper.deliveryReview(task.id()));
+            jdbc.update("update s_outbox set status='SENT' where event_type='VOICE_ATTEMPT_FACT' and aggregate_id=?",attemptId);
+            assertEquals(0,mapper.deliveryReview(task.id()));
             assertEquals(0,jdbc.queryForObject("select count(*) from s_operation",Integer.class));
             assertThrows(RuntimeProblem.class,()->tx.execute(s->store.failure(d.attempt().id(),new VoiceProtocol.Event(event.eventId(),event.attemptId(),1,event.requestHash(),"worker","boot","FAILED","VOICE_QUEUE_FULL","BEFORE_DISPATCH",null,null,"TEST","1"),false)));
 
@@ -150,6 +168,16 @@ class UnifiedVoiceMysqlTest
             when(access.verify(10)).thenReturn(grant);
             jdbc.update("update s_session set next_turn_no=2 where id=3");
             var deliveryWork=runtime.start(businessPrincipal,"delivery-boundary",text,2).initialWork().get(0);
+            var replay=runtime.start(businessPrincipal,"delivery-boundary",text,2);
+            assertEquals(deliveryWork.turnId(),replay.turnId());assertTrue(replay.initialWork().isEmpty());
+            assertTrue(runtime.hasTurn(deliveryWork.turnId()));
+            var conflict=assertThrows(RuntimeProblem.class,()->runtime.start(businessPrincipal,"delivery-boundary",text+" changed",2));
+            assertEquals("REQUEST_CONFLICT",conflict.code());assertTrue(runtime.hasTurn(deliveryWork.turnId()));
+            assertEquals("RUNNING",jdbc.queryForObject("select status from s_turn where id=?",String.class,Long.parseLong(deliveryWork.turnId())));
+            var restartedRuntime=new SpeakOnlyRuntimeService(properties,mock(TemporaryAudioCleanupQueue.class),persistent,events);
+            assertTrue(restartedRuntime.start(businessPrincipal,"delivery-boundary",text,2).initialWork().isEmpty());
+            assertEquals(1,jdbc.queryForObject("select count(*) from s_turn where session_id=3 and client_request_id='delivery-boundary'",Integer.class));
+            assertEquals(1,jdbc.queryForObject("select count(*) from s_operation where turn_id=?",Integer.class,Long.parseLong(deliveryWork.turnId())));
             var epochs=mock(RuntimeConnectionEpochs.class);when(epochs.current(businessPrincipal,2)).thenReturn(true);
             var system=mock(com.ruoyi.session.business.BusinessSystemClient.class);
             when(system.reserveTts(anyLong(),anyLong(),anyString(),anyLong())).thenReturn(51L);

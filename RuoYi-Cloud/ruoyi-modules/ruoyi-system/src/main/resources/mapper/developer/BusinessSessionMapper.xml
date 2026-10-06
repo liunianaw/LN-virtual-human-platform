@@ -5,7 +5,8 @@
     select a.account_id accountId,a.id applicationId,a.status applicationStatus,a.admin_disabled adminDisabled,
       a.auth_epoch applicationEpoch,a.revision applicationRevision,a.system_prompt systemPrompt,
       u.status accountStatus,u.del_flag accountDeleted,
-      av.id avatarVersionId,vv.id voiceVersionId,vv.voice_code providerVoiceRef,
+      av.id avatarVersionId,vv.id voiceVersionId,
+      coalesce(json_unquote(json_extract(vv.execution_binding,'$.providerVoiceRef')),vv.voice_code) providerVoiceRef,
       vv.official_service_id officialServiceId,vv.execution_binding voiceBinding,
       cast(json_unquote(json_extract(vv.official_config_snapshot,'$.revision')) as unsigned) officialServiceRevision
     from p_application a

@@ -94,6 +94,19 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     <select id="countTasksByAccount" resultType="int">
         select count(*) from p_generation_task where account_id = #{accountId}
     </select>
+    <sql id="consoleTaskScope">
+        account_id = #{accountId}
+        and exists (select 1 from p_avatar a where a.id = p_generation_task.avatar_id
+            and a.account_id = #{accountId} and a.visibility = #{visibility})
+    </sql>
+    <select id="selectConsoleTasks" resultMap="GenerationTaskResult">
+        select <include refid="taskColumns"/> from p_generation_task
+        where <include refid="consoleTaskScope"/>
+        order by created_at desc, id desc limit #{limit} offset #{offset}
+    </select>
+    <select id="countConsoleTasks" resultType="int">
+        select count(*) from p_generation_task where <include refid="consoleTaskScope"/>
+    </select>
     <select id="selectTaskStepsByAccount" resultType="map">
         select cast(s.id as char) stepId, s.step_key stepKey, s.step_type stepType,
             s.action_code actionCode, s.status, s.error_code errorCode,

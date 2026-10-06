@@ -187,6 +187,19 @@ public class AssetServiceImpl implements IAssetService
         return assetMapper.selectTaskStepsByAccount(accountId, taskId);
     }
 
+    @Override
+    public Map<String, Object> pageConsoleGenerationTasks(Long accountId, int pageNum, int pageSize)
+    {
+        requireAccount(accountId);
+        if (!accountId.equals(SecurityUtils.getUserId())) throw forbidden("只能查看当前账号的制作任务");
+        if (pageNum < 1 || pageSize < 1 || pageSize > 100 || (long) (pageNum - 1) * pageSize > Integer.MAX_VALUE)
+            throw new ServiceException("分页参数无效", HttpStatus.BAD_REQUEST);
+        String visibility = SecurityUtils.isAdmin() ? "OFFICIAL" : "PRIVATE";
+        return Map.of("items", assetMapper.selectConsoleTasks(accountId, visibility, pageSize, (pageNum - 1) * pageSize)
+            .stream().map(this::taskResponse).toList(), "total", assetMapper.countConsoleTasks(accountId, visibility),
+            "pageNum", pageNum, "pageSize", pageSize);
+    }
+
     /** 返回当前账号可选的启用官方制作服务；Mapper 仅查询可公开展示的字段。 */
     public List<AvatarGenerationServiceResponse> listAvatarGenerationServices(Long accountId)
     {

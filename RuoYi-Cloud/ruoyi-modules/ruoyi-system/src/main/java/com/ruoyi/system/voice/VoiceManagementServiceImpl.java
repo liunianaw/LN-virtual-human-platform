@@ -38,6 +38,19 @@ public class VoiceManagementServiceImpl implements IVoiceManagementService
             return Map.of("apiReachable",true,"modelReady",status.path("modelReady").asBoolean(),"providers",status.path("providers"),"services",bindings.health(status.path("endpoints"),true));
         } catch(Exception e) { return Map.of("apiReachable",false,"modelReady",false,"providers",Map.of(),"services",bindings.health(json.createObjectNode(),false)); }
     }
+    public Object pageDiagnostics(int pageNum,int pageSize,Long taskId,String status)
+    {
+        admin();
+        if(pageNum<1 || pageSize<1 || pageSize>100 || (long)(pageNum-1)*pageSize>Integer.MAX_VALUE || (taskId!=null && taskId<=0))
+            throw new ServiceException("分页参数无效",400);
+        String filter=status==null || status.isBlank()?null:status.trim();
+        if(filter!=null && !filter.matches("[A-Z_]{1,32}")) throw new ServiceException("状态筛选无效",400);
+        String path="/internal/v1/voice-attempts/page?pageNum="+pageNum+"&pageSize="+pageSize;
+        if(taskId!=null) path+="&taskId="+taskId;
+        if(filter!=null) path+="&status="+filter;
+        try { return json.readTree(http.request(System.getenv("LN_SYSTEM_TO_SESSION_URL"),System.getenv("LN_SYSTEM_TO_SESSION_INTERNAL_BEARER"),"GET",path,null,null,262144)); }
+        catch(Exception e) { throw new ServiceException("VOICE_DIAGNOSTICS_UNAVAILABLE",503); }
+    }
     public String upload(long account,MultipartFile input)
     {
         admin(); if(account<=0 || input==null || input.getSize()<44 || input.getSize()>5242880) throw new ServiceException("参考音频大小无效",400);

@@ -17,7 +17,10 @@ public class VoiceManagementController
     @RequiresPermissions("platform:officialVoice:read") @GetMapping("/readiness")
     public AjaxResult readiness() { return AjaxResult.success(service.readiness()); }
     @RequiresPermissions("platform:officialVoice:read") @GetMapping("/tasks")
-    public AjaxResult tasks() { return AjaxResult.success(service.diagnostics()); }
+    public AjaxResult tasks(@RequestParam(required=false) Integer pageNum,@RequestParam(required=false) Integer pageSize,
+        @RequestParam(required=false) Long taskId,@RequestParam(required=false) String status)
+    { return AjaxResult.success(pageNum==null && pageSize==null && taskId==null && status==null?service.diagnostics():
+        service.pageDiagnostics(pageNum==null?1:pageNum,pageSize==null?20:pageSize,taskId,status)); }
     @RequiresPermissions("platform:officialVoice:read") @GetMapping("/references")
     public AjaxResult references() { return AjaxResult.success(service.references(SecurityUtils.getUserId())); }
     @RequiresPermissions("platform:officialVoice:write") @PostMapping("/references")

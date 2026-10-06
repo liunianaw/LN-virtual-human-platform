@@ -38,11 +38,26 @@ public class ApplicationServiceImpl implements IApplicationService
     {
         requireDeveloper(accountId);
         int page = requestedPage == null ? 1 : requestedPage, size = requestedSize == null ? 20 : requestedSize;
-        if (page < 1 || size < 1 || size > 100) throw bad("分页参数无效");
+        if (page < 1 || size < 1 || size > 100 || (long) (page - 1) * size > Integer.MAX_VALUE) throw bad("分页参数无效");
         String status = blank(requestedStatus) ? null : requestedStatus.trim();
         if (status != null && !Set.of("ACTIVE", "DISABLED").contains(status)) throw bad("应用状态筛选无效");
         return Map.of("items", mapper.selectApplications(accountId, status, (page - 1) * size, size),
             "total", mapper.countApplications(accountId, status), "pageNum", page, "pageSize", size);
+    }
+
+    @Override
+    public Map<String, Object> search(long accountId, Integer requestedPage, Integer requestedSize, String requestedStatus, String keyword)
+    {
+        if (blank(keyword)) return list(accountId, requestedPage, requestedSize, requestedStatus);
+        requireDeveloper(accountId);
+        int page = requestedPage == null ? 1 : requestedPage, size = requestedSize == null ? 20 : requestedSize;
+        if (page < 1 || size < 1 || size > 100 || (long) (page - 1) * size > Integer.MAX_VALUE) throw bad("分页参数无效");
+        String status = blank(requestedStatus) ? null : requestedStatus.trim();
+        if (status != null && !Set.of("ACTIVE", "DISABLED").contains(status)) throw bad("应用状态筛选无效");
+        String filter = keyword.trim();
+        if (filter.length() > 100) throw bad("搜索名称不能超过 100 字符");
+        return Map.of("items", mapper.searchApplications(accountId, status, filter, (page - 1) * size, size),
+            "total", mapper.countSearchApplications(accountId, status, filter), "pageNum", page, "pageSize", size);
     }
 
     @Override

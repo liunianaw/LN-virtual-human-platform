@@ -66,7 +66,7 @@ class VoiceResourceSafetyTest
         var storage=new TemporaryWavStorage(properties);var store=mock(PersistentRuntimeStore.class);
         var cleanup=mock(TemporaryAudioCleanupQueue.class);var events=mock(RuntimeEventPublisher.class);
         var principal=new RuntimePrincipal(1,2,3,4,Set.of("speak:write"),new VoiceRuntimeBinding(5,TtsProviderKind.OFFICIAL,"voice",6L,1L));
-        when(store.createSpeakTurn(eq(principal),eq("request"),anyList(),eq(2L))).thenReturn(11L);
+        when(store.createSpeakTurn(eq(principal),eq("request"),anyList(),eq(2L))).thenReturn(new PersistentRuntimeStore.SpeakTurnCreated(11L, true));
         when(store.currentConnection(principal,2L)).thenReturn(true);
         when(store.markAudioReady(eq(11L),eq(0),eq(principal),any(),anyLong(),anyLong()))
             .thenThrow(new IllegalStateException("DB unavailable"));
@@ -92,7 +92,7 @@ class VoiceResourceSafetyTest
         var storage=new TemporaryWavStorage(properties);var store=mock(PersistentRuntimeStore.class);
         var cleanup=mock(TemporaryAudioCleanupQueue.class);var events=mock(RuntimeEventPublisher.class);
         var principal=new RuntimePrincipal(1,2,3,4,Set.of("speak:write"),new VoiceRuntimeBinding(5,TtsProviderKind.OFFICIAL,"voice",6L,1L));
-        when(store.createSpeakTurn(eq(principal),eq("request"),anyList(),eq(2L))).thenReturn(11L);
+        when(store.createSpeakTurn(eq(principal),eq("request"),anyList(),eq(2L))).thenReturn(new PersistentRuntimeStore.SpeakTurnCreated(11L, true));
         when(store.currentConnection(principal,2L)).thenReturn(true);
         when(store.markAudioReady(eq(11L),eq(0),eq(principal),any(),anyLong(),anyLong())).thenReturn(true);
         when(store.turnState(principal,"11")).thenReturn(java.util.Map.of("status","FAILED"));

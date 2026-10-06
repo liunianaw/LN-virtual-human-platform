@@ -20,10 +20,21 @@ public class VoiceAttemptController
     @GetMapping public java.util.List<java.util.Map<String,Object>> diagnostics(@RequestHeader("Authorization") String bearer,
         @RequestParam(required=false) Long accountId)
     { new InternalBearerGuard().requireSystem(bearer); return service.diagnostics(accountId); }
+    @GetMapping("/page") public java.util.Map<String,Object> pageDiagnostics(@RequestHeader("Authorization") String bearer,
+        @RequestParam(required=false) Long accountId, @RequestParam(defaultValue="1") int pageNum,
+        @RequestParam(defaultValue="20") int pageSize, @RequestParam(required=false) Long taskId,
+        @RequestParam(required=false) String status)
+    { new InternalBearerGuard().requireSystem(bearer); return service.pageDiagnostics(accountId,pageNum,pageSize,taskId,status); }
     private void require(String bearer)
     {
         String secret=System.getenv("LN_VOICE_CALLBACK_BEARER");
         if(secret==null || secret.length()<32 || bearer==null || !MessageDigest.isEqual(("Bearer "+secret).getBytes(StandardCharsets.UTF_8),bearer.getBytes(StandardCharsets.UTF_8)))
             throw new RuntimeProblem(org.springframework.http.HttpStatus.UNAUTHORIZED,"INTERNAL_AUTH_REQUIRED","Voice executor identity required");
+    }
+    @ExceptionHandler(RuntimeProblem.class)
+    public org.springframework.http.ResponseEntity<RuntimeVoiceController.RuntimeEnvelope<Void>> problem(RuntimeProblem problem)
+    {
+        return org.springframework.http.ResponseEntity.status(problem.status())
+            .body(RuntimeVoiceController.RuntimeEnvelope.error(problem.code(), problem.getMessage()));
     }
 }

@@ -35,7 +35,7 @@ const classObj = computed(() => ({
 }))
 
 const { width, height } = useWindowSize()
-const WIDTH = 992 // refer to Bootstrap's responsive design
+const WIDTH = 768 // LN: collapse navigation at the narrow-screen breakpoint
 
 watch(() => device.value, () => {
   if (device.value === 'mobile' && sidebar.value.opened) {

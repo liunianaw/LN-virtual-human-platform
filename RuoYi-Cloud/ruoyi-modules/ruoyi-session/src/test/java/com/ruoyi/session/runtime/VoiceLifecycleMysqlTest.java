@@ -23,7 +23,7 @@ class VoiceLifecycleMysqlTest
         var server=new JdbcTemplate(admin); server.execute("create database `"+schema+"`");
         try
         {
-            var ds=new DriverManagerDataSource(System.getenv("VOICE_TEST_MYSQL_URL")+schema+"?serverTimezone=UTC",
+            var ds=new DriverManagerDataSource(System.getenv("VOICE_TEST_MYSQL_URL")+schema+"?serverTimezone=UTC&forceConnectionTimeZoneToSession=true",
                 System.getenv("VOICE_TEST_MYSQL_USER"),System.getenv("VOICE_TEST_MYSQL_PASSWORD"));
             org.flywaydb.core.Flyway.configure().dataSource(ds).load().migrate();
             var jdbc=new JdbcTemplate(ds);
@@ -68,6 +68,15 @@ class VoiceLifecycleMysqlTest
             for(int i=0;i<12;i++) mapper.retry(22,"RELEASE","TEST_UNAVAILABLE");
             assertEquals("REVIEW_REQUIRED",jdbc.queryForObject("select settlement_status from s_operation where id=22",String.class));
             assertEquals(0,mapper.prepare(8,3,11,3,"segment3",2,"boot",Instant.now().plusSeconds(120)));
+            var principal=new RuntimePrincipal(7,8,3,4,java.util.Set.of("speak:write"),new VoiceRuntimeBinding(5,TtsProviderKind.OFFICIAL,"tone",6L,1L));
+            for(int i=0;i<2;i++) jdbc.update("insert into s_temp_object(id,media_id,created_at,updated_at,account_id,session_id,turn_id,purpose,storage_provider,bucket,object_key,size_bytes,status,expires_at) values(?,?,utc_timestamp(3),utc_timestamp(3),7,3,11,'TTS_AUDIO','LOCAL_TEMP','session-audio',?,48,'ACTIVE',?)",
+                81+i,"utc-media-"+i,"utc-media-"+i+".wav",Instant.now().plusSeconds(i==0?60:-1));
+            assertNotNull(store.readableAudio(principal,"utc-media-0"));
+            assertEquals(org.springframework.http.HttpStatus.NOT_FOUND,assertThrows(RuntimeProblem.class,()->store.readableAudio(principal,"utc-media-1")).status());
+            var expiredAudio=store.cleanupCandidates(8);
+            assertEquals(1,expiredAudio.size());assertEquals("utc-media-1",expiredAudio.get(0).mediaId());
+            store.markDeleted(expiredAudio.get(0));
+            assertEquals(0,jdbc.queryForObject("select count(*) from s_temp_object where id=82 and status!='DELETED'",Integer.class));
             System.out.println("Voice lifecycle MySQL: V8, dispatch CAS, stop, boot recovery, late success, retry ceiling passed");
             System.out.println("Finalization EXPLAIN: "+jdbc.queryForList("explain select id from s_operation where settlement_status='PENDING' and settlement_next_at<=utc_timestamp(3) order by settlement_next_at,id limit 8"));
         }

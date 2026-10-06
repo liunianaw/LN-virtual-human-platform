@@ -1,4 +1,5 @@
 import auth from '@/plugins/auth'
+import useUserStore from '@/store/modules/user'
 import { filterPlatformMenus } from '@/utils/platform-menu'
 import router, { constantRoutes, dynamicRoutes } from '@/router'
 import { getRouters } from '@/api/menu'
@@ -40,7 +41,7 @@ const usePermissionStore = defineStore(
         return new Promise(resolve => {
           // 向后端请求路由数据
           getRouters().then(res => {
-            const menus = filterPlatformMenus(res.data, import.meta.env.VITE_ENABLE_DEVTOOLS === 'true')
+            const menus = filterPlatformMenus(res.data, import.meta.env.VITE_ENABLE_DEVTOOLS === 'true', useUserStore().isAdmin)
             const sdata = JSON.parse(JSON.stringify(menus))
             const rdata = JSON.parse(JSON.stringify(menus))
             const defaultData = JSON.parse(JSON.stringify(menus))

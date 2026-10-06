@@ -67,6 +67,17 @@ def mixed_g2p(text, zh, en):
     return " ".join((en if i % 2 else zh)(part)[0] for i, part in enumerate(parts) if part.strip()), None
 
 
+def kokoro_chunks(text, g2p, deadline):
+    remaining(deadline)
+    if len(g2p(text)[0]) <= 510:
+        return [text]
+    if len(text) < 2:
+        raise ProviderFailure("VOICE_PARAMETER_INVALID", "BEFORE_DISPATCH")
+    middle = len(text) // 2
+    boundary = max((i + 1 for i in range(middle) if text[i] in "。！？；，、.!?;,\n "), default=middle)
+    return kokoro_chunks(text[:boundary], g2p, deadline) + kokoro_chunks(text[boundary:], g2p, deadline)
+
+
 class KokoroBackend:
     def __init__(self, weights, descriptor):
         from kokoro import KModel, KPipeline
@@ -92,10 +103,10 @@ class KokoroBackend:
             raise ProviderFailure("VOICE_CAPABILITY_UNSUPPORTED", "BEFORE_DISPATCH")
         pipeline = self.pipelines[binding["language"]]
         voice = str(self.weights / "voices" / (binding["providerVoiceRef"] + ".pt"))
-        # Official non-English pipeline truncates >510 phonemes. Reject before inference instead.
-        if binding["language"] == "zh-CN" and len(pipeline.g2p(request["text"])[0]) > 510:
-            raise ProviderFailure("VOICE_PARAMETER_INVALID", "BEFORE_DISPATCH")
-        output = pipeline(request["text"], voice=voice, speed=binding["parameters"].get("speed", 1))
+        # Feed bounded text pieces to the official pipeline to avoid its 510-phone truncation.
+        text = kokoro_chunks(request["text"], pipeline.g2p, request["deadlineAt"]) \
+            if binding["language"] == "zh-CN" else request["text"]
+        output = pipeline(text, voice=voice, speed=binding["parameters"].get("speed", 1))
         return encode_chunks((item.audio for item in output), 24000, request["deadlineAt"])
 
 

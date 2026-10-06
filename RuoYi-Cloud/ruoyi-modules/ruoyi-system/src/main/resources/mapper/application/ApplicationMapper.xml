@@ -12,6 +12,17 @@
     where account_id=#{accountId} and purpose='USER' and status!='DELETED' and (#{status} is null or status=#{status})</select>
   <select id="selectApplication" resultType="map">select <include refid="applicationColumns"/>
     from p_application a where a.id=#{applicationId} and a.account_id=#{accountId} and a.purpose='USER' and a.status!='DELETED'</select>
+  <sql id="applicationSearchScope">
+    a.account_id=#{accountId} and a.purpose='USER' and a.status!='DELETED'
+    and (#{status} is null or a.status=#{status}) and a.name like concat('%',#{keyword},'%')
+  </sql>
+  <select id="searchApplications" resultType="map">
+    select <include refid="applicationColumns"/> from p_application a where <include refid="applicationSearchScope"/>
+    order by a.created_at desc,a.id desc limit #{limit} offset #{offset}
+  </select>
+  <select id="countSearchApplications" resultType="int">
+    select count(*) from p_application a where <include refid="applicationSearchScope"/>
+  </select>
   <select id="selectApplicationForUpdate" resultType="map">select id,account_id accountId,name,description,
     avatar_id avatarId,voice_id voiceId,system_prompt systemPrompt,status,revision,auth_epoch authEpoch
     from p_application where id=#{applicationId} and account_id=#{accountId} and purpose='USER' and status!='DELETED' for update</select>
@@ -31,7 +42,7 @@
       and (a.account_id=#{accountId} and a.visibility='PRIVATE' or a.visibility='OFFICIAL') for update</select>
   <select id="countAvailableVoice" resultType="int">select count(*) from p_voice voice
     join p_voice_version v on v.id=voice.current_version_id join p_official_service s on s.id=v.official_service_id
-    where voice.id=#{voiceId} and voice.visibility='OFFICIAL' and voice.status in ('PUBLISHED','UNLISTED')
+    where voice.id=#{voiceId} and voice.visibility='OFFICIAL' and voice.status='PUBLISHED'
       and v.service_type='OFFICIAL' and s.capability='TTS' and s.status='ACTIVE' <include refid="com.ruoyi.system.voice.mapper.VoiceBindingMapper.dependenciesAvailable"><property name="v" value="v"/></include> for update</select>
   <select id="selectSkillBindingForUpdate" resultType="map">select cast(s.id as char) skillId,s.skill_type skillType,
     s.tool_name toolName from p_skill s where s.id=#{skillId} and s.status in ('PUBLISHED','UNLISTED')
@@ -79,6 +90,6 @@
     order by a.updated_at desc,a.id desc</select>
   <select id="selectVoiceChoices" resultType="map">select cast(voice.id as char) voiceId,voice.name,v.voice_code voiceAlias
     from p_voice voice join p_voice_version v on v.id=voice.current_version_id join p_official_service s on s.id=v.official_service_id
-    where v.service_type='OFFICIAL' and voice.visibility='OFFICIAL' and voice.status in ('PUBLISHED','UNLISTED')
+    where v.service_type='OFFICIAL' and voice.visibility='OFFICIAL' and voice.status='PUBLISHED'
       and s.capability='TTS' and s.status='ACTIVE' <include refid="com.ruoyi.system.voice.mapper.VoiceBindingMapper.dependenciesAvailable"><property name="v" value="v"/></include> order by voice.updated_at desc,voice.id desc</select>
 </mapper>

@@ -4,6 +4,8 @@ export interface RouterVo {
   name?: string;
   /** 路由地址 */
   path?: string;
+  /** Compatibility address for bookmarks after menu regrouping. */
+  alias?: string;
   /** 是否隐藏路由，当设置 true 的时候该路由不会再侧边栏出现 */
   hidden?: boolean;
   /** 重定向地址，当设置 noRedirect 的时候该路由在面包屑导航中不可被点击 */
@@ -28,6 +30,8 @@ export interface MetaVo {
   icon?: string
   /** 设置为true，则不会被 <keep-alive>缓存 */
   noCache?: boolean
+  /** Canonical menu destination for a compatibility route alias. */
+  activeMenu?: string
   /** 内链地址（http(s)://开头） */
   link?: string
 }

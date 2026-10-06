@@ -9,6 +9,7 @@
     </router-view>
     <iframe-toggle />
     <copyright />
+    <footer v-if="!route.path.endsWith('/applications')" class="console-bottom-bar"><strong>{{ route.meta.title }}</strong><span>LN 虚拟人平台</span></footer>
   </section>
 </template>
 
