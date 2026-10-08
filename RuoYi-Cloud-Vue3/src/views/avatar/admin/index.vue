@@ -70,6 +70,7 @@
             </el-form-item>
             <el-alert title="管理员制作的角色将作为官方公共角色，发布后供所有平台用户选择。" type="info" :closable="false" class="mb16" />
             <el-form-item>
+              <el-alert title="先补全为纯色背景的全身站立形象，再制作八个动作；形象补全按一个动作收费，当前为50积分。" type="info" :closable="false" />
               <el-button type="primary" :loading="creating" :disabled="!reference || !taskForm.officialServiceId" @click="createTask">开始制作</el-button>
             </el-form-item>
           </el-form>
@@ -133,6 +134,16 @@
           <el-button link type="primary" :loading="productionLoading" @click="loadProduction()">刷新</el-button>
         </div>
         <el-row :gutter="12">
+          <el-col v-if="production.characterCompletion" :span="24">
+            <el-card shadow="never" class="mb12">
+              <strong>角色形象补全</strong>
+              <el-tag class="ml12">{{ production.characterCompletion.stage }}</el-tag>
+              <p>先生成纯色背景的全身默认站立图，完成后自动用于八个动作。</p>
+              <el-image v-if="production.characterCompletion.imageUrl" :src="production.characterCompletion.imageUrl" style="width: 120px; height: 160px" fit="contain" :preview-src-list="[production.characterCompletion.imageUrl]" />
+              <p v-if="production.characterCompletion.errorCode">{{ production.characterCompletion.errorCode }}</p>
+              <el-button v-if="production.characterCompletion.allowedOperations.includes('recovery')" size="small" @click="recoverAction(production.characterCompletion)">核对 / 恢复原补全结果</el-button>
+            </el-card>
+          </el-col>
           <el-col v-for="action in production.actions" :key="action.actionCode" :xs="24" :sm="12" :lg="6">
             <el-card shadow="never" class="action-card">
               <template #header>
@@ -485,7 +496,7 @@ function stopProductionPolling() {
 }
 
 function hasRunningActions(snapshot: AvatarProductionSnapshot) {
-  return snapshot.actions.some(action => isActionActive(action.stage))
+  return Boolean(snapshot.characterCompletion && isActionActive(snapshot.characterCompletion.stage)) || snapshot.actions.some(action => isActionActive(action.stage))
 }
 
 function isActionActive(stage: string) {
@@ -631,7 +642,7 @@ function actionStageType(stage: string): 'success' | 'warning' | 'danger' | 'inf
 }
 
 function actionLabel(action: string) {
-  return ({ idle: '待机', speaking: '说话', listening: '倾听', thinking: '思考', nod: '点头', shake_head: '摇头', wave: '挥手', happy: '开心' } as Record<string, string>)[action] || action
+  return ({ character_completion: '角色形象补全', idle: '待机', speaking: '说话', listening: '倾听', thinking: '思考', nod: '点头', shake_head: '摇头', wave: '挥手', happy: '开心' } as Record<string, string>)[action] || action
 }
 
 function finalActionFrames(layout?: string): Array<{ x: number; y: number; width: number; height: number }> {

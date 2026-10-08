@@ -65,5 +65,5 @@ public interface UsageMapper
         @Param("units") long units);
     int insertGrantEntry(@Param("accountId") long accountId, @Param("quotaType") String quotaType,
         @Param("eventKey") String eventKey, @Param("units") long units,
-        @Param("operatorId") long operatorId, @Param("reason") String reason);
+        @Param("operatorId") Long operatorId, @Param("reason") String reason);
 }

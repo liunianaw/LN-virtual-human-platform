@@ -160,17 +160,34 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
             || objects == null || objects.isEmpty()) throw new ServiceException("Worker result 参数无效");
         transactions.executeWithoutResult(status -> {
             ClaimedGenerationStep claim = currentLease(accountId, taskId, stepId, workerId, leaseEpoch);
-            if (manifest == null || !claim.getActionCode().equals(manifest.get("action"))
+            boolean completion = "COMPLETE_CHARACTER".equals(claim.getStepType());
+            if (completion)
+            {
+                if (manifest == null || !"CHARACTER_COMPLETION".equals(manifest.get("kind")) || objects.size() != 1
+                    || !objects.get(0).objectKey().endsWith("/character.png") || !"image/png".equals(objects.get(0).contentType()))
+                    throw new ServiceException("Worker 角色补全结果无效");
+            }
+            else if (manifest == null || !claim.getActionCode().equals(manifest.get("action"))
                 || !(manifest.get("frames") instanceof List<?> frames) || frames.size() != 6
                 || !(manifest.get("frameCount") instanceof Number count) || count.intValue() != 6)
                 throw new ServiceException("Worker 动作布局不完整或动作不匹配");
             Map<String, AssetFile> files = registerObjects(claim, objects);
-            AssetFile atlas = files.get("atlas.png");
-            AssetFile manifestFile = files.get("manifest.json");
-            if (atlas == null || manifestFile == null) throw new ServiceException("Worker 缺少动作图集或清单");
-            Long primaryFileId = atlas.getId();
-            workerMapper.insertActionResult(nextId(), claim, attemptId, atlas.getId(), manifestFile.getId(),
-                json(manifest), atlas.getSha256());
+            Long primaryFileId;
+            if (completion)
+            {
+                primaryFileId = files.get("character.png").getId();
+                if (workerMapper.saveCompletedCharacter(claim, primaryFileId) != 1) throw staleLease();
+                workerMapper.unblockCompletedActions(accountId, taskId);
+            }
+            else
+            {
+                AssetFile atlas = files.get("atlas.png");
+                AssetFile manifestFile = files.get("manifest.json");
+                if (atlas == null || manifestFile == null) throw new ServiceException("Worker 缺少动作图集或清单");
+                primaryFileId = atlas.getId();
+                workerMapper.insertActionResult(nextId(), claim, attemptId, atlas.getId(), manifestFile.getId(),
+                    json(manifest), atlas.getSha256());
+            }
             String metadata = json(Map.of("manifest", manifest == null ? Map.of() : manifest, "objectCount", objects.size()));
             if (workerMapper.updateStepSuccess(accountId, taskId, stepId, workerId, leaseEpoch, primaryFileId, metadata) != 1
                 || workerMapper.updateAttemptSuccess(attemptId, stepId, claim.getAttemptNo(), leaseEpoch, primaryFileId) != 1)
@@ -197,6 +214,7 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
             if (workerMapper.finishTerminalStep(accountId, taskId, stepId, workerId, leaseEpoch, state) != 1
                 || workerMapper.finishTerminalAttempt(attemptId, stepId, claim.getAttemptNo(), leaseEpoch, state) != 1)
                 throw staleLease();
+            if ("COMPLETE_CHARACTER".equals(claim.getStepType())) workerMapper.blockUnsubmittedActions(accountId, taskId);
             workerMapper.updateTaskProgress(accountId, taskId);
             if (workerMapper.markTaskFailed(accountId, taskId) == 1) quota.finish(accountId, taskId);
             callFacts.generation(attemptId, accountId, state, null, null);
@@ -235,7 +253,7 @@ public class GenerationWorkerServiceImpl implements IGenerationWorkerService
             String name = object.objectKey().substring(prefix.length());
             AssetFile file = new AssetFile();
             file.setId(nextId()); file.setAccountId(claim.getAccountId());
-            file.setPurpose("manifest.json".equals(name) ? "MANIFEST"
+            file.setPurpose("character.png".equals(name) ? "AVATAR_SOURCE" : "manifest.json".equals(name) ? "MANIFEST"
                 : "atlas.png".equals(name) ? "ATLAS"
                 : "frame-00.png".equals(name) ? "BASE" : "PREVIEW");
             file.setStorageProvider(storage.provider()); file.setBucket(storage.bucket()); file.setObjectKey(object.objectKey());

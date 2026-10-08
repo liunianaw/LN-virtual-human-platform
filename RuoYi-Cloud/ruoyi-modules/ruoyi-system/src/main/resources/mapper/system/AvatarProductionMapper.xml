@@ -1,6 +1,35 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.ruoyi.system.asset.mapper.AvatarProductionMapper">
+    <select id="characterCompletion" resultType="map">
+        select 'character_completion' actionCode, s.status stage, s.lease_epoch actionRevision,
+            cast(t.id as char) taskId, cast(coalesce(a.id, s.reserved_attempt_id) as char) latestAttemptId,
+            s.error_code errorCode, f.object_key objectKey,
+            case when a.id is not null and (a.provider_task_id is not null
+                or json_extract(s.result_metadata, '$.providerReceipt.providerTaskId') is not null
+                or json_extract(s.result_metadata, '$.providerReceipt.imageUrl') is not null) then 1 else 0 end recoverable
+        from p_generation_step s join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
+        left join p_generation_attempt a on a.step_id = s.id and a.attempt_no = s.attempt_no
+        left join p_file f on f.id = s.result_file_id and f.account_id = s.account_id and f.status = 'AVAILABLE'
+        where t.account_id = #{accountId} and t.avatar_version_id = #{versionId} and s.step_type = 'COMPLETE_CHARACTER'
+        order by s.id desc limit 1
+    </select>
+    <update id="recoverCharacterCompletion">
+        update p_generation_step s join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
+        join p_generation_attempt a on a.step_id = s.id and a.account_id = s.account_id and a.task_id = t.id
+        join p_avatar_version v on v.id = t.avatar_version_id and v.account_id = t.account_id
+        set s.status = 'POLLING', s.error_code = null, s.next_run_at = utc_timestamp(3), s.lease_owner = null,
+            s.lease_expires_at = null, s.stage_started_at = utc_timestamp(3), s.updated_at = utc_timestamp(3),
+            a.status = 'SUBMITTED', a.completed_at = null, a.error_code = null, a.updated_at = utc_timestamp(3),
+            t.status = 'PROCESSING', t.internal_state = 'RUNNING', t.finished_at = null,
+            t.error_code = null, t.error_message = null, t.updated_at = utc_timestamp(3)
+        where t.account_id = #{accountId} and t.avatar_version_id = #{versionId} and v.status = 'BUILDING'
+          and s.step_type = 'COMPLETE_CHARACTER' and s.lease_epoch = #{revision}
+          and a.id = #{attemptId} and a.attempt_no = s.attempt_no
+          and s.status in ('UNKNOWN','FAILED') and a.status in ('UNKNOWN','FAILED')
+          and (a.provider_task_id is not null or json_extract(s.result_metadata, '$.providerReceipt.providerTaskId') is not null
+              or json_extract(s.result_metadata, '$.providerReceipt.imageUrl') is not null)
+    </update>
     <select id="lockVersion" resultType="map">
         select status, candidate_revision as candidateRevision from p_avatar_version
         where id = #{versionId} and account_id = #{accountId} for update
@@ -35,6 +64,9 @@
         left join p_generation_attempt a on a.step_id = s.id and a.attempt_no = s.attempt_no
         left join p_avatar_action_selection sel on sel.avatar_version_id = v.id and sel.action_code = #{actionCode}
         where v.id = #{versionId} and v.account_id = #{accountId}
+          and not exists (select 1 from p_generation_step completion join p_generation_task ct on ct.id = completion.task_id
+              where ct.avatar_version_id = v.id and ct.account_id = v.account_id
+                and completion.step_type = 'COMPLETE_CHARACTER' and completion.status != 'SUCCEEDED')
         for update
     </select>
     <insert id="insertActionTask">

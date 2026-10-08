@@ -32,6 +32,7 @@ _SAFE_TOKEN = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 _MAX_JSON_BYTES = 1024 * 1024
 _MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 _ACTION_PROMPTS = {
+    "character_completion": "complete character",
     "idle": "idle, relaxed neutral pose",
     "speaking": "speaking, natural explanatory gesture",
     "listening": "listening attentively, receptive pose",
@@ -176,7 +177,8 @@ class SystemGenerationPlatform(GenerationPlatformPort):
                     raise PlatformTransportError("platform recovery request hash is invalid")
             else:
                 reference_png = self._read_reference(_required_string(data.get("referenceUrl"), "referenceUrl"))
-                reference_png, layout_guide_png = _generation_references(reference_png)
+                if action != "character_completion":
+                    reference_png, layout_guide_png = _generation_references(reference_png)
         except PlatformTransportError as error:
             # The platform lease is already RUNNING at this point, but no
             # provider request or attempt exists.  Return it to READY so an
@@ -427,6 +429,14 @@ def _parameters(value: object) -> dict[str, object]:
 
 
 def _action_prompt(action: str) -> str:
+    if action == "character_completion":
+        return (
+            "根据参考照片补全同一个角色。保留人物身份、脸部特征、发型、服装风格和原画风，"
+            "即使参考图是半身图或侧视图，也请推断并补全缺失的身体和服装。"
+            "只绘制一个人物，正面朝向镜头、自然默认站立、双手自然下垂，完整展示从头顶到双脚，"
+            "人物居中且四周留有空白，不裁切头发、手或脚。"
+            "背景必须为连续、均匀的纯品红色，不要场景、道具、文字、边框、阴影或动作拼图。"
+        )
     return (
         "第一张图只提供角色身份，第二张图只提供六个角色的排布、大小与脚底位置。"
         "按第二张图的两行三列布局重新绘制六个连续动作帧，禁止改成单行或改变人物数量。"

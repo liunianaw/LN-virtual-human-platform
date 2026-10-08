@@ -10,6 +10,7 @@ public class ClaimedGenerationStep
     private Long sourceFileId;
     private String sourceObjectKey;
     private String actionCode;
+    private String stepType;
     private Integer attemptNo;
     private Long leaseEpoch;
     private String modelId;
@@ -54,6 +55,8 @@ public class ClaimedGenerationStep
     public void setSourceObjectKey(String value) { sourceObjectKey = value; }
     public String getActionCode() { return actionCode; }
     public void setActionCode(String value) { actionCode = value; }
+    public String getStepType() { return stepType; }
+    public void setStepType(String value) { stepType = value; }
     public Integer getAttemptNo() { return attemptNo; }
     public void setAttemptNo(Integer value) { attemptNo = value; }
     public Long getLeaseEpoch() { return leaseEpoch; }

@@ -227,12 +227,13 @@ public class AssetServiceImpl implements IAssetService
         Long avatarVersionId = nextId();
         Long taskId = nextId();
         Long reservationId = nextId();
-        quota.reserve(accountId, taskId, reservationId, 8);
+        quota.reserve(accountId, taskId, reservationId, 9);
         assetMapper.insertAvatar(avatarId, accountId, request.getName().trim(), visibility);
         assetMapper.insertAvatarVersion(avatarVersionId, avatarId, accountId, sourceFile.getId(), PIPELINE_VERSION,
             json(Map.of("pipelineVersion", PIPELINE_VERSION, "sourceSha256", hex(sourceFile.getSha256()))));
         assetMapper.insertGenerationTask(taskId, accountId, avatarId, avatarVersionId, sourceFile.getId(), service.getId(),
             serviceSnapshot(service), PIPELINE_VERSION, reservationId, request.getRequestId(), requestHash);
+        assetMapper.insertCharacterCompletionStep(nextId(), accountId, taskId, nextId());
         for (String action : List.of("idle", "speaking", "listening", "thinking", "nod", "shake_head", "wave", "happy"))
             assetMapper.insertGenerationActionStep(nextId(), accountId, taskId, "ACTION_" + action, action, nextId());
         String eventId = UUID.randomUUID().toString().replace("-", "");

@@ -170,6 +170,7 @@ import { listConfig, getConfig, delConfig, addConfig, updateConfig, refreshCache
 
 const { proxy } = getCurrentInstance()
 const { sys_yes_no } = useDict("sys_yes_no")
+const route = useRoute()
 
 const configList = ref<SysConfig[]>([])
 const open = ref<boolean>(false)
@@ -313,5 +314,8 @@ function handleRefreshCache() {
   })
 }
 
-getList()
+watch(() => route.query.configKey, (value: unknown) => {
+  queryParams.value.configKey = typeof value === 'string' ? value : undefined
+  handleQuery()
+}, { immediate: true })
 </script>

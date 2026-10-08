@@ -97,6 +97,7 @@ export interface AvatarProductionSnapshot {
   acceptedActionCount: number
   totalActionCount: number
   canAssemble: boolean
+  characterCompletion?: AvatarProductionAction & { imageUrl?: string }
   actions: AvatarProductionAction[]
 }
 

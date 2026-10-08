@@ -1,21 +1,57 @@
 """A slow provider must renew its lease and report UNKNOWN without a retry."""
 
 import time
+import io
+import hashlib
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
 from pathlib import Path
 from types import SimpleNamespace
+from PIL import Image
 
 from ruoyi_media.providers.qwen_image import ProviderUncertain
 from ruoyi_media.worker.generation import (
     AvatarGenerationRequested, ClaimedActionStep, GenerationWorker, PreparedAttempt, StepStatus, WorkerOutcome, _request_hash,
+    StoredObject,
 )
 from ruoyi_media.worker.platform_http import PlatformHttpSettings, SystemGenerationPlatform
 
 
 class WorkerLeaseTest(unittest.TestCase):
+    def test_completion_uses_single_reference_and_persists_image_without_action_processing(self):
+        image = io.BytesIO()
+        Image.new("RGB", (512, 768), "#ff00ff").save(image, format="PNG")
+        original = image.getvalue()
+        platform = SystemGenerationPlatform(PlatformHttpSettings("http://127.0.0.1", "test-token"))
+        platform._post = Mock(return_value={
+            "accountId": 1, "taskId": 2, "stepId": 3, "action": "character_completion",
+            "attemptNo": 1, "leaseEpoch": 1, "leaseSeconds": 300,
+            "model": "qwen-image-3.0-pro", "parametersJson": "{}",
+            "outputPrefix": "avatar-generation/1/2/3/1", "officialServiceId": 9, "serviceRevision": 1,
+            "referenceUrl": "https://test.myqcloud.com/source.png",
+        })
+        platform._read_reference = Mock(return_value=original)
+        claim = platform.claim_next_action_step(AvatarGenerationRequested(1, "event", "trace", "2", "1"), "worker")
+        self.assertEqual(claim.reference_png, original)
+        self.assertIsNone(claim.layout_guide_png)
+        self.assertIn("全", claim.prompt)
+        objects = Mock()
+        def store(key, source, content_type):
+            content = source.read_bytes()
+            return StoredObject(key, hashlib.sha256(content).hexdigest(), len(content), content_type)
+        objects.upload.side_effect = store
+        worker = GenerationWorker("worker", Mock(), Mock(), objects)
+        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"RUOYI_MEDIA_ARTIFACT_DIR": directory}), patch(
+            "ruoyi_media.worker.generation.process_action_board", side_effect=AssertionError("completion is not an action board")
+        ):
+            stored, manifest = worker._process_and_upload(claim, original)
+        self.assertEqual(len(stored), 1)
+        self.assertTrue(stored[0].object_key.endswith("/character.png"))
+        self.assertEqual(manifest["kind"], "CHARACTER_COMPLETION")
+        self.assertNotIn("frames", manifest)
+
     def test_submitted_attempt_recovery_does_not_read_reference_or_change_hash(self):
         platform = SystemGenerationPlatform(PlatformHttpSettings("http://127.0.0.1", "test-token"))
         original_hash = "AB" * 32
@@ -34,9 +70,14 @@ class WorkerLeaseTest(unittest.TestCase):
         platform._read_reference.assert_not_called()
 
     def test_submitted_attempt_only_queries_existing_provider_task(self):
+        for action in ("wave", "character_completion"):
+            with self.subTest(action=action):
+                self._assert_original_task_is_only_queried(action)
+
+    def _assert_original_task_is_only_queried(self, action):
         platform = Mock()
         platform.claim_next_action_step.return_value = ClaimedActionStep(
-            account_id="1", task_id="2", step_id="3", action="wave", attempt_no=1,
+            account_id="1", task_id="2", step_id="3", action=action, attempt_no=1,
             lease_epoch=4, lease_expires_at=datetime.now(UTC) + timedelta(seconds=300),
             reference_png=b"", layout_guide_png=None, prompt="wave", model="qwen-image-3.0-pro",
             parameters={}, output_prefix="avatar-generation/1/2/3/4", request_hash="ab" * 32,

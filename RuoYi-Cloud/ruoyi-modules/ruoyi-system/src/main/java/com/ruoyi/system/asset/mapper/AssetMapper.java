@@ -95,6 +95,9 @@ public interface AssetMapper
         @Param("pipelineVersion") String pipelineVersion, @Param("quotaReservationId") Long quotaReservationId,
         @Param("requestId") String requestId, @Param("requestHash") byte[] requestHash);
 
+    int insertCharacterCompletionStep(@Param("id") Long id, @Param("accountId") Long accountId,
+        @Param("taskId") Long taskId, @Param("reservedAttemptId") Long reservedAttemptId);
+
     int insertGenerationActionStep(@Param("id") Long id, @Param("accountId") Long accountId, @Param("taskId") Long taskId,
         @Param("stepKey") String stepKey, @Param("actionCode") String actionCode,
         @Param("reservedAttemptId") Long reservedAttemptId);

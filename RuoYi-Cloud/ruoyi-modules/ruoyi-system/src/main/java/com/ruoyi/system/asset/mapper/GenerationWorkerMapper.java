@@ -6,6 +6,9 @@ import com.ruoyi.system.asset.domain.ClaimedGenerationStep;
 /** 受租约保护的制作 Worker 持久化边界。 */
 public interface GenerationWorkerMapper
 {
+    int saveCompletedCharacter(@Param("claim") ClaimedGenerationStep claim, @Param("fileId") Long fileId);
+    int blockUnsubmittedActions(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
+    int unblockCompletedActions(@Param("accountId") Long accountId, @Param("taskId") Long taskId);
     int insertActionResult(@Param("id") Long id, @Param("claim") ClaimedGenerationStep claim,
         @Param("attemptId") Long attemptId, @Param("atlasId") Long atlasId, @Param("manifestId") Long manifestId,
         @Param("manifest") String manifest, @Param("hash") byte[] hash);

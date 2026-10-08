@@ -1,5 +1,10 @@
 <template>
   <div class="app-container">
+    <el-card header="新用户注册赠送" shadow="never" class="mb8">
+      <p>配置新用户默认并发额度、存储容量（MB）和积分。修改只对之后成功注册的用户生效，历史用户额度不变。</p>
+      <el-button type="primary" plain v-hasPermi="['system:config:list', 'system:config:edit']"
+        @click="router.push({ path: '/system/config', query: { configKey: 'platform.registration.' } })">修改注册赠送配置</el-button>
+    </el-card>
     <el-card header="开发者使用总览" shadow="never">
       <el-form inline>
         <el-form-item label="统计日期"><el-date-picker v-model="usageRange" type="daterange" value-format="YYYY-MM-DD"
@@ -134,6 +139,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import useUserStore from '@/store/modules/user'
 
 const userStore = useUserStore()
+const router = useRouter()
 
 function utcDate(days: number) { const value = new Date(); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10) }
 const usageRange = ref<[string, string]>([utcDate(-6), utcDate(0)])
