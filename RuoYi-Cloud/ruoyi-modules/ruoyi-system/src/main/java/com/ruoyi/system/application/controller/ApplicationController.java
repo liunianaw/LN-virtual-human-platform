@@ -31,8 +31,8 @@ public class ApplicationController
     @RequiresPermissions("platform:application:read")
     @GetMapping
     public AjaxResult list(@RequestParam(required = false) Integer pageNum, @RequestParam(required = false) Integer pageSize,
-        @RequestParam(required = false) String status)
-    { return AjaxResult.success(applications.list(developer().getUserid(), pageNum, pageSize, status)); }
+        @RequestParam(required = false) String status, @RequestParam(required = false) String keyword)
+    { return AjaxResult.success(applications.search(developer().getUserid(), pageNum, pageSize, status, keyword)); }
 
     @RequiresPermissions("platform:application:read")
     @GetMapping("/{applicationId}/resources")

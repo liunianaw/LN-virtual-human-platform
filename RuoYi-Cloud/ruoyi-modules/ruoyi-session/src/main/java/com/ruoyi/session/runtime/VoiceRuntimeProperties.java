@@ -11,6 +11,9 @@ public class VoiceRuntimeProperties
     private int maxCodePointsPerSegment = 200;
     private int maxBufferedSegments = 2;
     private long maxAudioBytes = 5L * 1024 * 1024;
+    private long maxTemporaryAudioBytes = 128L * 1024 * 1024;
+    public long getMaxTemporaryAudioBytes() { return maxTemporaryAudioBytes; }
+    public void setMaxTemporaryAudioBytes(long value) { maxTemporaryAudioBytes = value; }
     private Duration temporaryAudioTtl = Duration.ofMinutes(15);
     private String temporaryAudioDirectory = System.getProperty("java.io.tmpdir") + "/ln-session-audio";
     private Provider official = new Provider();
@@ -82,6 +85,16 @@ public class VoiceRuntimeProperties
         private String endpoint;
         private String model;
         private String voice;
+        private int concurrency = 2;
+        private int queueCapacity = 8;
+        private Duration queueTimeout = Duration.ofSeconds(10);
+
+        public int getConcurrency() { return concurrency; }
+        public void setConcurrency(int value) { concurrency = value; }
+        public int getQueueCapacity() { return queueCapacity; }
+        public void setQueueCapacity(int value) { queueCapacity = value; }
+        public Duration getQueueTimeout() { return queueTimeout; }
+        public void setQueueTimeout(Duration value) { queueTimeout = value; }
 
         public boolean isEnabled()
         {

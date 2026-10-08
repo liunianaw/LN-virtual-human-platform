@@ -27,7 +27,7 @@ public class PersistentRuntimeStore
     }
 
     @Transactional
-    public long createSpeakTurn(RuntimePrincipal principal, String requestId, List<SegmentPlan> segments, long connectionEpoch)
+    public SpeakTurnCreated createSpeakTurn(RuntimePrincipal principal, String requestId, List<SegmentPlan> segments, long connectionEpoch)
     {
         try
         {
@@ -37,12 +37,22 @@ public class PersistentRuntimeStore
             {
                 throw unavailable();
             }
+            byte[] requestHash = hash(segments.stream().map(SegmentPlan::text).reduce("", String::concat));
+            SpeakTurnCreated existing = jdbcTemplate.query(
+                    "select id,request_hash,turn_type from s_turn where session_id=? and account_id=? and client_request_id=?",
+                    rs -> {
+                        if (!rs.next()) return null;
+                        if (!"SPEAK".equals(rs.getString(3)) || !MessageDigest.isEqual(requestHash, rs.getBytes(2)))
+                            throw new RuntimeProblem(HttpStatus.CONFLICT, "REQUEST_CONFLICT", "The request ID was used with different input.");
+                        return new SpeakTurnCreated(rs.getLong(1), false);
+                    }, principal.sessionId(), principal.accountId(), requestId);
+            if (existing != null) return existing;
             long turnId = nextId();
             Instant now = Instant.now();
             jdbcTemplate.update("update s_session set next_turn_no = ?, active_turn_id = ?, last_activity_at = ?, updated_at = ?, revision = revision + 1 where id = ?",
                     nextTurnNo + 1, turnId, now, now, principal.sessionId());
             jdbcTemplate.update("insert into s_turn (id,created_at,updated_at,account_id,session_id,turn_no,client_request_id,request_hash,turn_type,status,text_status,audio_status,playback_status,connection_epoch,input_source,include_in_history,last_event_seq,started_at) values (?,?,?,?,?,?,?,?, 'SPEAK','RUNNING','NOT_REQUESTED','RUNNING','WAITING',?,'TEXT',0,0,?)",
-                    turnId, now, now, principal.accountId(), principal.sessionId(), nextTurnNo, requestId, hash(segments.stream().map(SegmentPlan::text).reduce("", String::concat)), connectionEpoch, now);
+                    turnId, now, now, principal.accountId(), principal.sessionId(), nextTurnNo, requestId, requestHash, connectionEpoch, now);
             for (SegmentPlan segment : segments)
             {
                 long operationId = nextId();
@@ -51,7 +61,7 @@ public class PersistentRuntimeStore
                         operationId, now, now, principal.accountId(), principal.sessionId(), turnId, operationRequestId, "TTS", segment.ordinal(),
                         principal.voice().voiceVersionId(), (long) segment.text().codePointCount(0, segment.text().length()), hash(segment.text()), segment.segmentId());
             }
-            return turnId;
+            return new SpeakTurnCreated(turnId, true);
         }
         catch (EmptyResultDataAccessException exception)
         {
@@ -80,7 +90,7 @@ public class PersistentRuntimeStore
     public void cancelNotSubmitted(RuntimePrincipal principal, TtsSynthesisWork work)
     {
         String prior = jdbcTemplate.query("select status from s_operation where turn_id=? and ordinal=? " +
-            "and operation_type='TTS' and account_id=? and session_id=? for update",
+            "and operation_type='TTS' and account_id=? and session_id=? and settlement_outcome='RELEASE' for update",
             rs -> rs.next() ? rs.getString(1) : null, Long.parseLong(work.turnId()), work.ordinal(),
             principal.accountId(), principal.sessionId());
         if (prior == null || !java.util.Set.of("QUEUED", "RUNNING", "UNKNOWN").contains(prior)) return;
@@ -126,12 +136,12 @@ public class PersistentRuntimeStore
         long turnId = Long.parseLong(work.turnId());
         Operation operation = jdbcTemplate.query("select id,input_char_count,json_unquote(json_extract(result_summary,'$.segmentId')) " +
             "from s_operation where turn_id=? and ordinal=? and operation_type='TTS' and account_id=? " +
-            "and session_id=? and status='UNKNOWN' and playback_status='STOPPED' for update",
+            "and session_id=? and status in ('UNKNOWN','CANCELLED','FAILED') and tts_dispatch_state='SUCCEEDED' for update",
             rs -> rs.next() ? new Operation(rs.getLong(1), rs.getLong(2), rs.getString(3)) : null,
             turnId, work.ordinal(), principal.accountId(), principal.sessionId());
         if (operation == null || !work.segmentId().equals(operation.segmentId())) return;
         if (jdbcTemplate.update("update s_operation set status='SUCCEEDED',error_code=null,updated_at=utc_timestamp(3) " +
-            "where id=? and status='UNKNOWN' and playback_status='STOPPED'", operation.id()) == 1)
+            "where id=? and status in ('UNKNOWN','CANCELLED','FAILED') and tts_dispatch_state='SUCCEEDED'", operation.id()) == 1)
             callOutbox(principal.accountId(), turnId, operation.segmentId(), operation.id(), "SUCCEEDED",
                 operation.inputChars(), durationMs, null, null);
     }
@@ -144,6 +154,10 @@ public class PersistentRuntimeStore
             rs -> rs.next() ? rs.getString(1) : null, turnId, ordinal);
         if (!"QUEUED".equals(prior) && !"RUNNING".equals(prior)) return;
         String terminal = "TTS_NOT_SUBMITTED".equals(failureCode) ? "CANCELLED" : "FAILED";
+        String synthesis = jdbcTemplate.query("select tts_dispatch_state,settlement_outcome from s_operation where turn_id=? and ordinal=? and operation_type='TTS'",
+            rs -> rs.next() ? ("SUCCEEDED".equals(rs.getString(1)) ? "SUCCEEDED" : "REVIEW".equals(rs.getString(2)) ? "UNKNOWN" : null) : null,
+            turnId, ordinal);
+        if (synthesis != null) terminal = synthesis;
         int changed = jdbcTemplate.update("update s_operation set status = ?, result_summary = json_set(coalesce(result_summary,json_object()),'$.failureCode', ?), updated_at = ?, finished_at = ? where turn_id = ? and ordinal = ? and operation_type = 'TTS' and status = 'RUNNING'",
                 terminal, failureCode, now, now, turnId, ordinal);
         if ("QUEUED".equals(prior)) changed = jdbcTemplate.update("update s_operation set status='FAILED',error_code=?,updated_at=?,finished_at=? where turn_id=? and ordinal=? and operation_type='TTS' and status='QUEUED'",
@@ -281,7 +295,7 @@ public class PersistentRuntimeStore
     public TemporaryAudioReference readableAudio(RuntimePrincipal principal, String mediaId)
     {
         TemporaryAudioReference audio = jdbcTemplate.query("select o.storage_provider,o.bucket,o.object_key,o.expires_at from s_temp_object o join s_session s on s.id=o.session_id "
-                + "where o.session_id = ? and o.account_id = ? and o.media_id = ? and o.purpose = 'TTS_AUDIO' and o.status = 'ACTIVE' and o.expires_at > now(3) and s.status='ACTIVE' and o.turn_id=s.active_turn_id",
+                + "where o.session_id = ? and o.account_id = ? and o.media_id = ? and o.purpose = 'TTS_AUDIO' and o.status = 'ACTIVE' and o.expires_at > utc_timestamp(3) and s.status='ACTIVE' and o.turn_id=s.active_turn_id",
             rs -> rs.next() ? new TemporaryAudioReference(mediaId, rs.getString(1), rs.getString(2), rs.getString(3), rs.getTimestamp(4).toInstant()) : null,
             principal.sessionId(), principal.accountId(), mediaId);
         if (audio == null) throw new RuntimeProblem(HttpStatus.NOT_FOUND, "MEDIA_NOT_FOUND", "Audio is unavailable.");
@@ -292,7 +306,7 @@ public class PersistentRuntimeStore
     {
         return jdbcTemplate.query("select media_id,storage_provider,bucket,object_key,expires_at from s_temp_object where "
                 + "(status = 'DELETE_PENDING' and (delete_attempts = 0 or next_delete_at is null or next_delete_at <= utc_timestamp(3))) "
-                + "or (status = 'ACTIVE' and expires_at <= now(3)) order by updated_at asc limit ?",
+                + "or (status = 'ACTIVE' and expires_at <= utc_timestamp(3)) order by updated_at asc limit ?",
             (rs, row) -> new TemporaryAudioReference(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getTimestamp(5).toInstant()), limit);
     }
 
@@ -325,6 +339,22 @@ public class PersistentRuntimeStore
         return account;
     }
 
+    /** Repairs a crash between durable synthesis outcome and playback/call-fact persistence. */
+    @Transactional
+    public void reconcileTtsFact(long operationId)
+    {
+        record Fact(long account, long turn, String segment, long characters, String outcome, String status) { }
+        Fact fact=jdbcTemplate.query("select account_id,turn_id,json_unquote(json_extract(result_summary,'$.segmentId')),input_char_count,settlement_outcome,status " +
+            "from s_operation where id=? and operation_type='TTS' and settlement_outcome is not null for update",
+            rs->rs.next()?new Fact(rs.getLong(1),rs.getLong(2),rs.getString(3),rs.getLong(4),rs.getString(5),rs.getString(6)):null,operationId);
+        if(fact==null) return;
+        String target=switch(fact.outcome()){case "SETTLE"->"SUCCEEDED";case "RELEASE"->"CANCELLED";default->"UNKNOWN";};
+        if(target.equals(fact.status())) return;
+        jdbcTemplate.update("update s_operation set status=?,finished_at=coalesce(finished_at,utc_timestamp(3)),updated_at=utc_timestamp(3) where id=?",
+            target,operationId);
+        callOutbox(fact.account(),fact.turn(),fact.segment(),operationId,target,fact.characters(),null,"TTS_RECOVERED",null);
+    }
+
     private void callOutbox(long accountId, long turnId, String segmentId, long operationId, String status,
         Long inputChars, Long audioDurationMs, String errorCode, String providerRequestId)
     {
@@ -343,6 +373,8 @@ public class PersistentRuntimeStore
     }
 
     private record Operation(long id, long inputChars, String segmentId) { }
+
+    public record SpeakTurnCreated(long turnId, boolean created) { }
 
     private static byte[] hash(String value)
     {

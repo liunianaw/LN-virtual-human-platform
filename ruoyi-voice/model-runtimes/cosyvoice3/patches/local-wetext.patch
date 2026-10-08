@@ -1,0 +1,34 @@
+--- a/cosyvoice/cli/frontend.py
++++ b/cosyvoice/cli/frontend.py
+@@ -55,21 +55,10 @@
+-        # NOTE compatible when no text frontend tool is avaliable
+-        try:
+-            import ttsfrd
+-            self.frd = ttsfrd.TtsFrontendEngine()
+-            ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+-            assert self.frd.initialize('{}/../../pretrained_models/CosyVoice-ttsfrd/resource'.format(ROOT_DIR)) is True, \
+-                'failed to initialize ttsfrd resource'
+-            self.frd.set_lang_type('pinyinvg')
+-            self.text_frontend = 'ttsfrd'
+-            logging.info('use ttsfrd frontend')
+-        except:
+-            try:
+-                from wetext import Normalizer as ZhNormalizer
+-                from wetext import Normalizer as EnNormalizer
+-                self.zh_tn_model = ZhNormalizer(remove_erhua=False)
+-                self.en_tn_model = EnNormalizer()
+-                self.text_frontend = 'wetext'
+-                logging.info('use wetext frontend')
+-            except:
+-                self.text_frontend = ''
+-                logging.info('no frontend is avaliable')
++        # LN overlay: verified local FSTs only. Failure must abort model loading.
++        from wetext import Normalizer
++        resource_dir = os.environ['LN_VOICE_WETEXT_DIR']
++        self.zh_tn_model = Normalizer(
++            tagger_path=os.path.join(resource_dir, 'zh/tn/tagger.fst'),
++            verbalizer_path=os.path.join(resource_dir, 'zh/tn/verbalizer.fst'), lang='zh')
++        self.en_tn_model = Normalizer(
++            tagger_path=os.path.join(resource_dir, 'en/tn/tagger.fst'),
++            verbalizer_path=os.path.join(resource_dir, 'en/tn/verbalizer.fst'), lang='en')
++        self.text_frontend = 'wetext'

@@ -6,6 +6,9 @@ import org.apache.ibatis.annotations.Param;
 
 public interface AvatarProductionMapper
 {
+    Map<String, Object> characterCompletion(@Param("accountId") Long accountId, @Param("versionId") Long versionId);
+    int recoverCharacterCompletion(@Param("accountId") Long accountId, @Param("versionId") Long versionId,
+        @Param("attemptId") Long attemptId, @Param("revision") Long revision);
     Map<String, Object> lockVersion(@Param("accountId") Long accountId, @Param("versionId") Long versionId);
     Map<String, Object> operation(@Param("accountId") Long accountId, @Param("versionId") Long versionId,
         @Param("actionCode") String actionCode, @Param("requestId") String requestId);

@@ -23,7 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-/** Official Beijing DashScope realtime TTS. The API key is read only from the process environment. */
+/** Official Beijing DashScope realtime TTS; credentials come from the protected System resolver. */
 @Component
 public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
 {
@@ -32,11 +32,14 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
     private final VoiceRuntimeProperties properties;
     private final TtsAdapterSupport support;
     private final OfficialServiceResolver resolver;
+    private final VoiceExecutionPool execution;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
-    public OfficialDashScopeTtsRuntimeAdapter(VoiceRuntimeProperties properties, TtsAdapterSupport support, OfficialServiceResolver resolver)
+    public OfficialDashScopeTtsRuntimeAdapter(VoiceRuntimeProperties properties, TtsAdapterSupport support, OfficialServiceResolver resolver,
+        VoiceExecutionPool execution)
     {
         this.properties = properties; this.support = support; this.resolver = resolver;
+        this.execution = execution;
     }
 
     @Override
@@ -48,7 +51,7 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
     @Override
     public void submit(TtsSynthesisWork work, TtsCompletionSink completionSink)
     {
-        CompletableFuture.runAsync(() -> synthesize(work, completionSink));
+        execution.execute(() -> synthesize(work, completionSink), code -> support.fail(work, completionSink, code));
     }
 
     private void synthesize(TtsSynthesisWork work, TtsCompletionSink completionSink)
@@ -82,17 +85,20 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
         {
             LOG.warn("Official TTS failed at stage={} providerStage={} cause={}", stage,
                     listener == null ? "none" : listener.stage(), safeCause(exception));
-            support.fail(work, completionSink, "OFFICIAL_TTS_FAILED");
+            support.fail(work, completionSink, exception instanceof RuntimeProblem problem ? problem.code() : "OFFICIAL_TTS_FAILED");
         }
     }
 
     /** Bounded administrator audition reuses the same provider protocol without a business Session. */
+    @Override
     public byte[] audition(VoiceRuntimeBinding voice, String text, Runnable beforeExternal)
         throws InterruptedException, ExecutionException, TimeoutException
     {
-        if (text == null || text.isBlank() || text.length() > 200)
+        if (text == null || text.isBlank() || text.codePointCount(0, text.length()) > 200)
             throw new IllegalArgumentException("Audition text is invalid");
-        return synthesizeAudio(voice, text, Math.min(properties.getMaxAudioBytes(), 1048576), beforeExternal);
+        var future = execution.submit(() -> synthesizeAudio(voice, text, Math.min(properties.getMaxAudioBytes(), 1048576), beforeExternal));
+        try { return future.get(properties.getOfficial().getQueueTimeout().plus(properties.getOfficial().getTimeout()).toMillis(), TimeUnit.MILLISECONDS); }
+        finally { if (!future.isDone()) future.cancel(true); }
     }
 
     private byte[] synthesizeAudio(VoiceRuntimeBinding voice, String text, long maximumBytes, Runnable beforeExternal)
@@ -100,15 +106,41 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
     {
         if (text == null || text.isBlank() || voice.providerVoiceRef() == null || voice.providerVoiceRef().isBlank())
             throw new IllegalArgumentException("Audition text is invalid");
-        OfficialServiceResolver.Resolved config = resolver.resolve(voice);
         Duration timeout = properties.getOfficial().getTimeout();
+        if (voice.executionDeadline() != null) timeout = timeout.compareTo(Duration.between(java.time.Instant.now(), voice.executionDeadline())) < 0
+            ? timeout : Duration.between(java.time.Instant.now(), voice.executionDeadline());
+        if (timeout.isNegative() || timeout.isZero()) throw new TimeoutException("Voice deadline elapsed");
+        if (voice.executionDeadline() != null) timeout = timeout.compareTo(Duration.between(java.time.Instant.now(), voice.executionDeadline())) < 0
+            ? timeout : Duration.between(java.time.Instant.now(), voice.executionDeadline());
+        if (timeout.isNegative() || timeout.isZero()) throw new TimeoutException("Voice deadline elapsed");
+        long deadline = System.nanoTime() + timeout.toNanos();
+        OfficialServiceResolver.Resolved config = resolver.resolve(voice);
         AudioListener listener = new AudioListener(text, voice.providerVoiceRef(), maximumBytes);
+        URI target = endpoint(config.endpoint(), config.model());
+        remaining(deadline);
+        remaining(deadline);
         beforeExternal.run();
-        WebSocket socket = client.newWebSocketBuilder().header("Authorization", "Bearer " + config.credential())
-            .header("User-Agent", "LN-Session/1").buildAsync(endpoint(config.endpoint(), config.model()), listener)
-            .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        try { return pcmToWav(listener.await(timeout), maximumBytes); }
-        finally { socket.abort(); }
+        CompletableFuture<WebSocket> opening = null;
+        try
+        {
+            opening = client.newWebSocketBuilder().connectTimeout(remaining(deadline))
+                .header("Authorization", "Bearer " + config.credential()).header("User-Agent", "LN-Session/1")
+                .buildAsync(target, listener);
+            opening.get(remaining(deadline).toMillis(), TimeUnit.MILLISECONDS);
+            return pcmToWav(listener.await(remaining(deadline)), maximumBytes);
+        }
+        finally
+        {
+            listener.close();
+            if (opening != null) opening.thenAccept(WebSocket::abort);
+        }
+    }
+
+    private static Duration remaining(long deadline) throws TimeoutException
+    {
+        long nanos = deadline - System.nanoTime();
+        if (nanos < 1000000) throw new TimeoutException("Voice deadline elapsed");
+        return Duration.ofNanos(nanos);
     }
 
     private static String safeCause(Exception exception)
@@ -193,6 +225,7 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
         private volatile String stage = "open";
         private boolean audioDone;
         private boolean responseDone;
+        private volatile boolean closed;
 
         private AudioListener(String text, String voice, long maxAudioBytes)
         {
@@ -205,12 +238,20 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
         public void onOpen(WebSocket webSocket)
         {
             socket = webSocket;
+            if (closed) { webSocket.abort(); return; }
             webSocket.request(1);
         }
 
         @Override
         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last)
         {
+            if (closed || completed.isDone()) return CompletableFuture.completedFuture(null);
+            if ((long) frames.length() + data.length() > maxAudioBytes * 2 + 65536)
+            {
+                completed.completeExceptionally(new IllegalArgumentException("Provider frame exceeds limit"));
+                webSocket.abort();
+                return CompletableFuture.completedFuture(null);
+            }
             frames.append(data);
             if (last)
             {
@@ -254,7 +295,7 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
                     throw new IllegalArgumentException("Provider audio delta is invalid");
                 }
                 byte[] bytes = Base64.getDecoder().decode(delta.asText());
-                if (audio.size() + bytes.length > maxAudioBytes)
+                if (audio.size() + bytes.length + 44L > maxAudioBytes)
                 {
                     throw new IllegalArgumentException("Provider audio exceeds the configured maximum");
                 }
@@ -310,6 +351,12 @@ public class OfficialDashScopeTtsRuntimeAdapter implements TtsRuntimeAdapter
         private String stage()
         {
             return stage;
+        }
+
+        private void close()
+        {
+            closed = true;
+            if (socket != null) socket.abort();
         }
 
         private byte[] await(Duration timeout) throws InterruptedException, ExecutionException, TimeoutException

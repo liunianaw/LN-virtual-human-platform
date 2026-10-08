@@ -1,5 +1,6 @@
 import request from '@/utils/request'
 import type { AjaxResult } from '@/types'
+import type { PageResult, PageQuery } from '@/types/page'
 
 export interface ApplicationSkillBinding { skillId: string; sortOrder: number; name?: string; skillType?: string; toolName?: string }
 export interface ApplicationSummary {
@@ -24,8 +25,8 @@ const commandHeaders = (revision?: string) => ({
   'Idempotency-Key': crypto.randomUUID(), ...(revision ? { 'If-Match': revision } : {})
 })
 
-export const listApplications = (): Promise<AjaxResult<{ items: ApplicationSummary[] }>> =>
-  request({ url: '/api/v1/applications', method: 'get' })
+export const listApplications = (params: PageQuery & { status?: string; keyword?: string } = {}): Promise<AjaxResult<PageResult<ApplicationSummary>>> =>
+  request({ url: '/api/v1/applications', method: 'get', params })
 export const getApplication = (applicationId: string): Promise<AjaxResult<ApplicationDetail>> =>
   request({ url: `/api/v1/applications/${applicationId}`, method: 'get' })
 export const listApplicationChoices = (applicationId: string): Promise<AjaxResult<ApplicationChoices>> =>

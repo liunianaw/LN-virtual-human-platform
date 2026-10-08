@@ -50,12 +50,12 @@ public class BusinessSessionStore
         String operation = "business:" + UUID.randomUUID().toString().replace("-", "");
         try
         {
-            jdbc.update("insert into s_session_snapshot (id,created_at,account_id,application_id,application_revision,avatar_version_id,voice_version_id,system_prompt,developer_config,internal_skills,allowed_scopes,provider_voice_ref,official_service_id,official_service_revision) " +
-                "values (?,?,?,?,?,?,?,?,cast(? as json),cast(? as json),cast(? as json),?,?,?)",
+            jdbc.update("insert into s_session_snapshot (id,created_at,account_id,application_id,application_revision,avatar_version_id,voice_version_id,system_prompt,developer_config,internal_skills,allowed_scopes,provider_voice_ref,official_service_id,official_service_revision,voice_binding) " +
+                "values (?,?,?,?,?,?,?,?,cast(? as json),cast(? as json),cast(? as json),?,?,?,cast(? as json))",
                 id, now, accountId, applicationId, snapshot.applicationRevision(), snapshot.avatarVersionId(),
                 snapshot.voiceVersionId(), snapshot.systemPrompt(), json.writeValueAsString(snapshot.developerConfig()),
                 json.writeValueAsString(snapshot.internalSkills()), json.writeValueAsString(snapshot.allowedScopes()),
-                snapshot.providerVoiceRef(), snapshot.officialServiceId(), snapshot.officialServiceRevision());
+                snapshot.providerVoiceRef(), snapshot.officialServiceId(), snapshot.officialServiceRevision(),json.writeValueAsString(snapshot.voiceBinding()));
         }
         catch (com.fasterxml.jackson.core.JsonProcessingException error)
         { throw new IllegalStateException("Session snapshot cannot be encoded", error); }

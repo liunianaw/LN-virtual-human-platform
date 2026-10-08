@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir -r requirements.lock
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml ./
 COPY src ./src
 
 CMD ["uvicorn", "ruoyi_media.api.app:app", "--host", "0.0.0.0", "--port", "8002"]

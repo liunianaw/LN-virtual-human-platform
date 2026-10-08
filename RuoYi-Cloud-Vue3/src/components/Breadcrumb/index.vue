@@ -1,97 +1,97 @@
 <template>
-  <el-breadcrumb class="app-breadcrumb" separator="/">
-    <transition-group name="breadcrumb">
-      <el-breadcrumb-item v-for="(item, index) in levelList" :key="item.path">
-        <span v-if="item.redirect === 'noRedirect' || index == levelList.length - 1" class="no-redirect">{{ item.meta.title }}</span>
-        <a v-else @click.prevent="handleLink(item)">{{ item.meta.title }}</a>
-      </el-breadcrumb-item>
-    </transition-group>
+  <el-breadcrumb class="app-breadcrumb" separator="" aria-label="页面路径">
+    <el-breadcrumb-item v-for="(item, index) in levelList" :key="item.path">
+      <router-link :to="destination(item)" class="breadcrumb-link" :aria-current="index === levelList.length - 1 ? 'page' : undefined">
+        {{ item.meta.title }}
+      </router-link>
+      <el-dropdown v-if="item.children.length" trigger="click" placement="bottom-start" @command="navigate">
+        <button class="breadcrumb-arrow" :aria-label="`${item.meta.title}的下级菜单`" type="button">
+          <el-icon><ArrowRight /></el-icon>
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="child in item.children" :key="child.path" :command="destination(child)">
+              {{ child.meta.title }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <span v-else-if="index < levelList.length - 1" class="breadcrumb-separator" aria-hidden="true">›</span>
+    </el-breadcrumb-item>
   </el-breadcrumb>
 </template>
 
 <script setup lang="ts">
+import type { RouteLocationRaw } from 'vue-router'
 import usePermissionStore from '@/store/modules/permission'
+
+interface PathNode {
+  path: string
+  meta: { title: string; breadcrumb?: boolean }
+  query?: string
+  children: PathNode[]
+}
 
 const route = useRoute()
 const router = useRouter()
 const permissionStore = usePermissionStore()
-const levelList = ref<any[]>([])
+const levelList = ref<PathNode[]>([])
 
-function getBreadcrumb(): void {
-  // only show routes with meta.title
-  let matched: any[] = []
-  const pathNum = findPathNum(route.path)
-  // multi-level menu
-  if (pathNum > 2) {
-    const reg = /\/\w+/gi
-    const pathList = route.path.match(reg)?.map((item: string, index: number) => {
-      if (index !== 0) item = item.slice(1)
-      return item
-    }) || []
-    getMatched(pathList, permissionStore.defaultRoutes, matched)
-  } else {
-    matched = route.matched.filter((item: any) => item.meta && item.meta.title)
-  }
-  // 判断是否为首页
-  if (!isDashboard(matched[0])) {
-    matched = [{ path: "/index", meta: { title: "首页" } }].concat(matched)
-  }
-  levelList.value = matched.filter(item => item.meta && item.meta.title && (item.meta.breadcrumb as boolean) !== false)
+// Router records may flatten ParentView levels; retain the authorized menu tree.
+function menuNodes(routes: any[], base = ''): PathNode[] {
+  return routes.flatMap(item => {
+    if (item.hidden) return []
+    const path = item.path ? (item.path.startsWith('/') ? item.path : `${base}/${item.path}`.replace(/\/+/g, '/')) : (base || '/')
+    const children = menuNodes(item.children || [], path)
+    return item.meta?.title && item.meta.breadcrumb !== false ? [{ ...item, path, children }] : children
+  })
 }
-function findPathNum(str: string, char = "/"): number {
-  let index = str.indexOf(char)
-  let num = 0
-  while (index !== -1) {
-    num++
-    index = str.indexOf(char, index + 1)
-  }
-  return num
-}
-function getMatched(pathList: string[], routeList: any[], matched: any[]): void {
-  let data = routeList.find(item => item.path == pathList[0] || (item.name + '').toLowerCase() == pathList[0])
-  if (data) {
-    matched.push(data)
-    if (data.children && pathList.length) {
-      pathList.shift()
-      getMatched(pathList, data.children, matched)
-    }
+
+function findTrail(nodes: PathNode[], path: string): PathNode[] | undefined {
+  for (const node of nodes) {
+    const children = findTrail(node.children, path)
+    if (children) return [node, ...children]
+    if (node.path === path) return [node]
   }
 }
-function isDashboard(route?: any): boolean {
-  const name = route && route.name
-  if (!name) {
-    return false
-  }
-  return String(name).trim() === 'Index'
+
+function destination(item: PathNode): RouteLocationRaw {
+  if (item.path === '/index') return { path: '/index' }
+  const page = item.children.length ? destination(item.children[0]) : { path: item.path }
+  return item.query ? { ...(typeof page === 'string' ? { path: page } : page), query: JSON.parse(item.query) } : page
 }
-function handleLink(item: any): void {
-  const { redirect, path } = item
-  if (redirect) {
-    router.push(redirect as string)
-    return
-  }
-  router.push(path)
+
+function navigate(target: RouteLocationRaw): void {
+  router.push(target)
 }
 
 watchEffect(() => {
-  // if you go to the redirect page, do not update the breadcrumbs
-  if (route.path.startsWith('/redirect/')) {
-    return
+  if (route.path.startsWith('/redirect/')) return
+  const nodes = menuNodes(permissionStore.defaultRoutes)
+  const home: PathNode = { path: '/index', meta: { title: '首页' }, children: [] }
+  const topLevel = nodes.filter(item => item.path !== '/index')
+  const trail = findTrail(nodes, String(route.meta.activeMenu || route.path))
+    || route.matched.filter(item => item.meta?.title && item.meta.breadcrumb !== false)
+      .map(item => ({ path: item.path.includes(':') ? route.path : item.path, meta: item.meta as PathNode['meta'], children: [] }))
+  const currentTitle = route.meta.title as string | undefined
+  if (route.meta.activeMenu && currentTitle && currentTitle !== trail[trail.length - 1]?.meta.title) {
+    trail.push({ path: route.path, meta: { title: currentTitle }, children: [] })
   }
-  getBreadcrumb()
+  levelList.value = [{ ...home, children: topLevel }, ...trail.filter(item => item.path !== '/index')]
 })
-getBreadcrumb()
 </script>
 
-<style lang='scss' scoped>
+<style lang="scss" scoped>
 .app-breadcrumb.el-breadcrumb {
-  display: inline-block;
-  font-size: 14px;
-  line-height: 50px;
-
-  .no-redirect {
-    color: #97a8be;
-    cursor: text;
-  }
+  display: flex; align-items: center; overflow-x: auto; scrollbar-width: none;
+  font-size: 14px; line-height: var(--ln-header, 50px);
+  :deep(.el-breadcrumb__item) { flex: none; }
+  :deep(.el-breadcrumb__inner) { display: inline-flex; align-items: center; font-weight: 400; }
+  :deep(.el-breadcrumb__separator) { display: none; }
+  .breadcrumb-link { padding: 6px 8px; border-radius: 6px; line-height: 20px; white-space: nowrap; color: var(--ln-muted); font-weight: 400; }
+  .breadcrumb-link[aria-current="page"] { color: var(--ln-text); }
+  .breadcrumb-link:hover, .breadcrumb-arrow:hover { color: var(--ln-accent); background: var(--ln-selected); }
+  .breadcrumb-arrow { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ln-muted); cursor: pointer; }
+  .breadcrumb-separator { padding: 0 6px; color: var(--ln-muted); }
 }
 </style>

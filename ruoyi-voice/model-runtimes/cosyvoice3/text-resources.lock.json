@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "repo": "pengzhendong/wetext",
+  "revision": "030bb1febce0bd0168549a03e181cd9c1d70c799",
+  "sourceUrl": "https://www.modelscope.cn/pengzhendong/wetext.git",
+  "license": "Apache-2.0",
+  "normalizerVersion": "0.0.4",
+  "files": [
+    {
+      "path": "en/tn/tagger.fst",
+      "algorithm": "sha256",
+      "hash": "245e2dc9174cdd007a8e9e50f3339773d1adbbc7535b71cf67478dc1683cc3ec",
+      "byteLength": 5645674
+    },
+    {
+      "path": "en/tn/verbalizer.fst",
+      "algorithm": "sha256",
+      "hash": "03155c88f317b2795969e264c19f87faf98b9853d5ac631e419bacdc3b3ee15a",
+      "byteLength": 6398822
+    },
+    {
+      "path": "zh/tn/tagger.fst",
+      "algorithm": "sha256",
+      "hash": "cf341314c51f7ce59049f3b2c42f0ce8fd71e6d08d4d6969613aad384a5e2ae8",
+      "byteLength": 527178
+    },
+    {
+      "path": "zh/tn/verbalizer.fst",
+      "algorithm": "sha256",
+      "hash": "5a13cd679dd54637d12d2bd1bd33ee2165d91c867e14468c93195af02256e5da",
+      "byteLength": 1069758
+    }
+  ]
+}

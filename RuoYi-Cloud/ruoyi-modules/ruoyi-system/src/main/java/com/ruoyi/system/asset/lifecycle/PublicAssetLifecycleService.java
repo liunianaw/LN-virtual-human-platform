@@ -73,7 +73,7 @@ public class PublicAssetLifecycleService
             Integer activeTasks = jdbc.queryForObject("select count(*) from p_generation_task where avatar_id=? and status in ('QUEUED','PROCESSING')", Integer.class, resourceId);
             generations += activeTasks == null ? 0 : activeTasks;
         }
-        return Map.of("counts", Map.of("applications", applications, "sessions", sessions, "generations", generations),
+        return Map.of("counts", Map.of("applications", applications, "sessions", sessions, "generations", generations,"voices",count(kind,resourceId,"VOICE_VERSION")),
             "items", items, "total", total == null ? 0 : total, "pageNum", page, "pageSize", size);
     }
 
@@ -182,9 +182,9 @@ public class PublicAssetLifecycleService
     private List<FileObject> deletableFiles(String kind, long resourceId)
     {
         String candidates = AVATARS.equals(kind)
-            ? "select distinct f.id,f.object_key from p_file f join (select source_file_id file_id from p_avatar_version where avatar_id=? union select base_file_id from p_avatar_version where avatar_id=? union select manifest_file_id from p_avatar_version where avatar_id=? union select preview_file_id from p_avatar_version where avatar_id=? union select action.atlas_file_id from p_avatar_action action join p_avatar_version v on v.id=action.avatar_version_id where v.avatar_id=? union select action.preview_file_id from p_avatar_action action join p_avatar_version v on v.id=action.avatar_version_id where v.avatar_id=? union select result.atlas_file_id from p_avatar_action_result result join p_avatar_version v on v.id=result.avatar_version_id where v.avatar_id=? union select result.manifest_file_id from p_avatar_action_result result join p_avatar_version v on v.id=result.avatar_version_id where v.avatar_id=? union select f2.id from p_file f2 join p_generation_task t on t.account_id=f2.account_id and f2.object_key like concat('avatar-generation/',t.account_id,'/',t.id,'/%') where t.avatar_id=?) own on own.file_id=f.id where own.file_id is not null"
+            ? "select distinct f.id,f.object_key from p_file f join (select source_file_id file_id from p_avatar_version where avatar_id=? union select source_file_id from p_generation_task where avatar_id=? union select base_file_id from p_avatar_version where avatar_id=? union select manifest_file_id from p_avatar_version where avatar_id=? union select preview_file_id from p_avatar_version where avatar_id=? union select action.atlas_file_id from p_avatar_action action join p_avatar_version v on v.id=action.avatar_version_id where v.avatar_id=? union select action.preview_file_id from p_avatar_action action join p_avatar_version v on v.id=action.avatar_version_id where v.avatar_id=? union select result.atlas_file_id from p_avatar_action_result result join p_avatar_version v on v.id=result.avatar_version_id where v.avatar_id=? union select result.manifest_file_id from p_avatar_action_result result join p_avatar_version v on v.id=result.avatar_version_id where v.avatar_id=? union select f2.id from p_file f2 join p_generation_task t on t.account_id=f2.account_id and f2.object_key like concat('avatar-generation/',t.account_id,'/',t.id,'/%') where t.avatar_id=?) own on own.file_id=f.id where own.file_id is not null"
             : "select distinct f.id,f.object_key from p_file f join p_voice_version v on v.sample_file_id=f.id where v.voice_id=?";
-        Object[] parameters = AVATARS.equals(kind) ? new Object[] {resourceId,resourceId,resourceId,resourceId,resourceId,resourceId,resourceId,resourceId,resourceId} : new Object[] {resourceId};
+        Object[] parameters = AVATARS.equals(kind) ? new Object[] {resourceId,resourceId,resourceId,resourceId,resourceId,resourceId,resourceId,resourceId,resourceId,resourceId} : new Object[] {resourceId};
         return jdbc.query(candidates, (rs, row) -> new FileObject(rs.getLong(1), rs.getString(2)), parameters).stream()
             .filter(file -> !sharedOutsideTarget(kind, resourceId, file.id())).toList();
     }
@@ -196,6 +196,9 @@ public class PublicAssetLifecycleService
                 : "select count(*) from (select voice_id owner_id from p_voice_version where sample_file_id=? union all select -1 from p_avatar_version where source_file_id=? or base_file_id=? or manifest_file_id=? or preview_file_id=? union all select -1 from p_avatar_action where atlas_file_id=? or preview_file_id=?) uses where owner_id<>?",
             Integer.class, AVATARS.equals(kind) ? new Object[] {fileId,fileId,fileId,fileId,fileId,fileId,fileId,resourceId} : new Object[] {fileId,fileId,fileId,fileId,fileId,fileId,fileId,resourceId});
         if (uses != null && uses > 0) return true;
+        Integer taskUses = jdbc.queryForObject("select count(*) from p_generation_task where source_file_id=? and avatar_id<>?",
+            Integer.class, fileId, AVATARS.equals(kind) ? resourceId : -1L);
+        if (taskUses != null && taskUses > 0) return true;
         Integer resultUses = jdbc.queryForObject("select count(*) from p_avatar_action_result r join p_avatar_version v on v.id=r.avatar_version_id where (r.atlas_file_id=? or r.manifest_file_id=?) and v.avatar_id<>?",
             Integer.class, fileId, fileId, AVATARS.equals(kind) ? resourceId : -1L);
         return resultUses != null && resultUses > 0;
@@ -213,6 +216,7 @@ public class PublicAssetLifecycleService
                     if (owner != null) storageQuota.free(owner, file.id());
                 }
             }
+            if (VOICES.equals(kind)) jdbc.update("update p_resource_reference r join p_voice_version v on v.id=r.holder_id set r.state='RELEASED',r.released_at=utc_timestamp(3) where r.holder_type='VOICE_VERSION' and v.voice_id=?",asset.id());
             jdbc.update("update " + table(kind) + " set status='DELETED',deleted_at=utc_timestamp(3),cleanup_status='COMPLETED',cleanup_lease_owner=null,cleanup_lease_expires_at=null,last_cleanup_error_code=null,revision=revision+1,updated_at=utc_timestamp(3) where id=? and status='DELETING' and cleanup_lease_epoch=?", asset.id(), asset.leaseEpoch());
         });
     }

@@ -43,7 +43,7 @@ public class RuntimeAuthorization
         Row row = jdbc.query("select g.id,g.token_id,g.grant_source,g.account_id,g.application_id,g.session_id," +
                 "s.session_snapshot_id,g.principal_id,g.status,g.expires_at,s.status,s.expires_at,p.status," +
                 "g.principal_epoch,p.auth_epoch,g.session_epoch,s.auth_epoch,g.application_epoch,g.scopes," +
-                "snap.voice_version_id,snap.provider_voice_ref,snap.official_service_id,snap.official_service_revision " +
+                "snap.voice_version_id,snap.provider_voice_ref,snap.official_service_id,snap.official_service_revision,snap.voice_binding " +
                 "from s_session_grant g join s_session s on s.id=g.session_id " +
                 "join s_principal p on p.id=g.principal_id join s_session_snapshot snap on snap.id=s.session_snapshot_id " +
                 "where g.id=? and g.grant_source='BUSINESS_KEY' and p.principal_type='BUSINESS' " +
@@ -52,7 +52,7 @@ public class RuntimeAuthorization
                 rs.getLong(5),rs.getLong(6),rs.getLong(7),rs.getLong(8),rs.getString(9),
                 rs.getTimestamp(10).toInstant(),rs.getString(11),rs.getTimestamp(12).toInstant(),
                 rs.getString(13),rs.getLong(14),rs.getLong(15),rs.getLong(16),rs.getLong(17),
-                rs.getLong(18),rs.getString(19),rs.getLong(20),rs.getString(21),rs.getLong(22),rs.getLong(23)) : null,
+                rs.getLong(18),rs.getString(19),rs.getLong(20),rs.getString(21),rs.getLong(22),rs.getLong(23),rs.getString(24)) : null,
             grantId);
         Instant now = Instant.now();
         if (row == null || !"ACTIVE".equals(row.grantStatus()) || !"ACTIVE".equals(row.sessionStatus())
@@ -66,8 +66,11 @@ public class RuntimeAuthorization
             if (row.applicationEpoch()!=current.applicationEpoch()) throw rejected();
             scopes = scopes.stream().filter(current.allowedScopes()::contains).toList();
             if (!scopes.contains("session:read")) throw rejected();
+            var execution = row.voiceBinding()==null?null:
+                json.readValue(row.voiceBinding(),com.ruoyi.common.voice.VoiceBinding.class);
             VoiceRuntimeBinding voice = new VoiceRuntimeBinding(row.voiceVersionId(), TtsProviderKind.OFFICIAL,
-                row.providerVoiceRef(), row.officialServiceId(), row.officialServiceRevision());
+                execution==null?row.providerVoiceRef():execution.providerVoiceRef(),
+                row.officialServiceId(), row.officialServiceRevision(), execution);
             return new Grant(new RuntimePrincipal(row.accountId(),row.applicationId(),row.sessionId(),
                 row.snapshotId(),Set.copyOf(scopes),voice),row.id(),row.tokenId(),row.source(),
                 row.principalId(),row.grantExpires());
@@ -83,5 +86,5 @@ public class RuntimeAuthorization
         long snapshotId,long principalId,String grantStatus,Instant grantExpires,String sessionStatus,
         Instant sessionExpires,String principalStatus,long principalEpoch,long currentPrincipalEpoch,
         long sessionEpoch,long currentSessionEpoch,long applicationEpoch,String scopes,long voiceVersionId,
-        String providerVoiceRef,long officialServiceId,long officialServiceRevision) { }
+        String providerVoiceRef,long officialServiceId,long officialServiceRevision,String voiceBinding) { }
 }

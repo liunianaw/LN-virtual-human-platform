@@ -187,6 +187,19 @@ public class AssetServiceImpl implements IAssetService
         return assetMapper.selectTaskStepsByAccount(accountId, taskId);
     }
 
+    @Override
+    public Map<String, Object> pageConsoleGenerationTasks(Long accountId, int pageNum, int pageSize)
+    {
+        requireAccount(accountId);
+        if (!accountId.equals(SecurityUtils.getUserId())) throw forbidden("只能查看当前账号的制作任务");
+        if (pageNum < 1 || pageSize < 1 || pageSize > 100 || (long) (pageNum - 1) * pageSize > Integer.MAX_VALUE)
+            throw new ServiceException("分页参数无效", HttpStatus.BAD_REQUEST);
+        String visibility = SecurityUtils.isAdmin() ? "OFFICIAL" : "PRIVATE";
+        return Map.of("items", assetMapper.selectConsoleTasks(accountId, visibility, pageSize, (pageNum - 1) * pageSize)
+            .stream().map(this::taskResponse).toList(), "total", assetMapper.countConsoleTasks(accountId, visibility),
+            "pageNum", pageNum, "pageSize", pageSize);
+    }
+
     /** 返回当前账号可选的启用官方制作服务；Mapper 仅查询可公开展示的字段。 */
     public List<AvatarGenerationServiceResponse> listAvatarGenerationServices(Long accountId)
     {
@@ -214,12 +227,13 @@ public class AssetServiceImpl implements IAssetService
         Long avatarVersionId = nextId();
         Long taskId = nextId();
         Long reservationId = nextId();
-        quota.reserve(accountId, taskId, reservationId, 8);
+        quota.reserve(accountId, taskId, reservationId, 9);
         assetMapper.insertAvatar(avatarId, accountId, request.getName().trim(), visibility);
         assetMapper.insertAvatarVersion(avatarVersionId, avatarId, accountId, sourceFile.getId(), PIPELINE_VERSION,
             json(Map.of("pipelineVersion", PIPELINE_VERSION, "sourceSha256", hex(sourceFile.getSha256()))));
         assetMapper.insertGenerationTask(taskId, accountId, avatarId, avatarVersionId, sourceFile.getId(), service.getId(),
             serviceSnapshot(service), PIPELINE_VERSION, reservationId, request.getRequestId(), requestHash);
+        assetMapper.insertCharacterCompletionStep(nextId(), accountId, taskId, nextId());
         for (String action : List.of("idle", "speaking", "listening", "thinking", "nod", "shake_head", "wave", "happy"))
             assetMapper.insertGenerationActionStep(nextId(), accountId, taskId, "ACTION_" + action, action, nextId());
         String eventId = UUID.randomUUID().toString().replace("-", "");

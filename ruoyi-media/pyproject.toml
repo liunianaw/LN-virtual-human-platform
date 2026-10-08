@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "ruoyi-media"
 version = "0.1.0"
 description = "Independent media-service API and worker entrypoints for the LN virtual-human platform"
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "aio-pika==9.5.8",

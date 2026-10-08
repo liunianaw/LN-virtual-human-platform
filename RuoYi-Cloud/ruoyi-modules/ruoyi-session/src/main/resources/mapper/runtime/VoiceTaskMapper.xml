@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.session.runtime.mapper.VoiceTaskMapper">
+  <sql id="taskColumns">id,account_id,purpose,source_key,request_hash,voice_version_id,binding_snapshot,policy_version,status,revision,winner_attempt_id,session_id,turn_id,operation_id,connection_epoch,generation,grant_id,owner,cancel_requested_at,deadline_at,input_hash,input_char_count,error_code,result_reference</sql>
+  <sql id="attemptColumns">id,task_id,attempt_no,provider_type,service_id,voice_version_id,model_revision,capability_version,request_hash,dispatch_token_hash,state,worker_instance_id,worker_boot_id,lease_epoch,lease_expires_at,error_code,failure_stage,result_summary,provider_request_id,cost_source</sql>
+  <select id="nextId" resultType="long">select uuid_short()</select>
+  <select id="operation" resultType="long">select id from s_operation where account_id=#{account} and session_id=#{session} and turn_id=#{turn} and ordinal=#{ordinal} and operation_type='TTS' and status='RUNNING' and tts_reservation_known=true for update</select>
+  <insert id="insertTask">insert into s_voice_task
+    (<include refid="taskColumns"/>) values(#{t.id},#{t.accountId},#{t.purpose},#{t.sourceKey},#{t.requestHash},#{t.voiceVersionId},cast(#{t.bindingSnapshot} as json),#{t.policyVersion},#{t.status},#{t.revision},null,#{t.sessionId},#{t.turnId},#{t.operationId},#{t.connectionEpoch},#{t.generation},#{t.grantId},#{t.owner},null,#{t.deadlineAt},#{t.inputHash},#{t.inputCharCount},null,null)</insert>
+  <insert id="insertAttempt">insert into s_voice_attempt
+    (id,task_id,attempt_no,provider_type,service_id,voice_version_id,model_revision,capability_version,request_hash,dispatch_token_hash,state,lease_expires_at)
+    values(#{a.id},#{a.taskId},#{a.attemptNo},#{a.providerType},#{a.serviceId},#{a.voiceVersionId},#{a.modelRevision},#{a.capabilityVersion},#{a.requestHash},#{a.dispatchTokenHash},'CREATED',#{a.leaseExpiresAt})</insert>
+  <select id="task" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Task">select <include refid="taskColumns"/> from s_voice_task where id=#{id} for update</select>
+  <select id="source" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Task">select <include refid="taskColumns"/> from s_voice_task where account_id=#{account} and purpose=#{purpose} and source_key=#{source} for update</select>
+  <select id="attempt" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Attempt">select <include refid="attemptColumns"/> from s_voice_attempt where id=#{id}</select>
+  <select id="attemptForUpdate" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Attempt">select <include refid="attemptColumns"/> from s_voice_attempt where id=#{id} for update</select>
+  <select id="settlement" resultType="string">select concat(coalesce(o.settlement_outcome,'NONE'),':',o.settlement_status) from s_voice_task t join s_operation o on o.id=t.operation_id where t.id=#{task}</select>
+  <select id="latest" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Attempt">select <include refid="attemptColumns"/> from s_voice_attempt where task_id=#{task} order by attempt_no desc limit 1</select>
+  <select id="attempts" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Attempt">select <include refid="attemptColumns"/> from s_voice_attempt where task_id=#{task} order by attempt_no</select>
+  <update id="authorize">
+    update s_voice_attempt a join s_voice_task t on t.id=a.task_id
+    left join s_operation o on o.id=t.operation_id left join s_session s on s.id=t.session_id
+    set a.state='DISPATCHING',a.worker_instance_id=#{worker},a.worker_boot_id=#{boot},a.dispatched_at=utc_timestamp(3)
+    where a.id=#{id} and a.dispatch_token_hash=#{hash} and a.state in ('CREATED','QUEUED')
+    and t.revision=#{revision} and t.status in ('QUEUED','RUNNING') and t.winner_attempt_id is null
+    and t.cancel_requested_at is null and t.deadline_at &gt; utc_timestamp(3)
+    and (t.purpose='AUDITION' or (o.account_id=t.account_id and o.session_id=t.session_id and o.turn_id=t.turn_id
+      and o.status='RUNNING' and o.tts_reservation_known=true and o.settlement_status='NONE'
+      and s.status='ACTIVE' and s.expires_at &gt; utc_timestamp(3) and s.active_turn_id=t.turn_id and s.connection_epoch=t.connection_epoch))
+  </update>
+  <update id="dispatchOperation">update s_operation o join s_voice_task t on t.operation_id=o.id set o.tts_dispatch_state='DISPATCHING' where t.id=#{task} and o.account_id=t.account_id and o.tts_dispatch_state='PREPARED' and o.settlement_status='NONE'</update>
+  <update id="running">update s_voice_task set status='RUNNING',updated_at=utc_timestamp(3) where id=#{id} and status='QUEUED'</update>
+  <select id="eventHash" resultType="string">select payload_hash from s_voice_event where attempt_id=#{attempt} and event_id=#{event}</select>
+  <insert id="event">insert into s_voice_event(attempt_id,event_id,payload_hash) values(#{attempt},#{event},#{hash})</insert>
+  <insert id="fact">insert into s_outbox(id,created_at,updated_at,account_id,event_id,event_type,aggregate_type,aggregate_id,schema_version,trace_id,payload,status,attempt_count,next_run_at)
+    select uuid_short(),utc_timestamp(3),utc_timestamp(3),t.account_id,sha2(concat('voice-attempt:',a.id,':',#{event}),256),'VOICE_ATTEMPT_FACT','VOICE_ATTEMPT',cast(a.id as char),1,sha2(#{event},256),
+    json_object('eventId',sha2(concat('voice-attempt:',a.id,':',#{event}),256),'accountId',t.account_id,'taskId',t.id,'attemptId',a.id,'purpose',t.purpose,
+      'applicationId',s.application_id,'sessionId',t.session_id,'turnId',t.turn_id,'logicalOperationKey',if(t.purpose='BUSINESS',concat('tts:',t.turn_id,':',json_unquote(json_extract(o.result_summary,'$.segmentId'))),null),
+      'serviceId',a.service_id,'providerType',a.provider_type,'modelId',json_unquote(json_extract(t.binding_snapshot,if(a.attempt_no=1,'$.modelId','$.fallback.modelId'))),
+      'status',a.state,'providerRequestId',a.provider_request_id,'costSource',a.cost_source,'errorCode',a.error_code),'PENDING',0,utc_timestamp(3)
+    from s_voice_attempt a join s_voice_task t on t.id=a.task_id left join s_session s on s.id=t.session_id left join s_operation o on o.id=t.operation_id where a.id=#{attempt}
+  </insert>
+  <update id="finishAttempt">update s_voice_attempt set state=#{state},error_code=#{code},failure_stage=#{stage},result_summary=cast(#{summary} as json),provider_request_id=#{providerRequest},cost_source=#{cost},query_next_at=utc_timestamp(3),finished_at=utc_timestamp(3),updated_at=utc_timestamp(3)
+    where id=#{id} and state in ('CREATED','QUEUED','DISPATCHING','ACCEPTED','UNKNOWN')</update>
+  <update id="winner">update s_voice_task t join s_voice_attempt a on a.task_id=t.id and a.id=#{attempt}
+    set t.winner_attempt_id=a.id,t.status='SUCCEEDED',t.result_reference=cast(#{result} as json),t.error_code=null,t.finished_at=utc_timestamp(3),t.updated_at=utc_timestamp(3)
+    where t.id=#{task} and t.winner_attempt_id is null and a.state='SUCCEEDED'
+    and a.attempt_no=t.revision and t.status in ('QUEUED','RUNNING','UNKNOWN','CANCELLED')
+  </update>
+  <update id="finishTask">update s_voice_task set status=#{state},error_code=#{code},finished_at=utc_timestamp(3),updated_at=utc_timestamp(3)
+    where id=#{task} and winner_attempt_id is null and status in ('QUEUED','RUNNING','UNKNOWN')</update>
+  <update id="fallback">update s_voice_task t set revision=2,status='QUEUED',updated_at=utc_timestamp(3) where id=#{task} and revision=1 and winner_attempt_id is null and cancel_requested_at is null and deadline_at &gt; utc_timestamp(3)
+    and exists(select 1 from s_voice_attempt a where a.task_id=#{task} and a.attempt_no=1 and a.state='FAILED')
+    and (purpose='AUDITION' or exists(select 1 from s_session s where s.id=t.session_id and s.status='ACTIVE' and s.active_turn_id=t.turn_id and s.connection_epoch=t.connection_epoch))</update>
+  <update id="settle">update s_operation o join s_voice_task t on t.operation_id=o.id
+    set o.tts_dispatch_state=if(#{outcome}='SETTLE','SUCCEEDED','FAILED'),o.settlement_outcome=#{outcome},o.settlement_status='PENDING',o.settlement_next_at=utc_timestamp(3),o.settlement_attempts=0,o.settlement_error=null
+    where t.id=#{task} and o.account_id=t.account_id and o.session_id=t.session_id
+    and (o.settlement_outcome is null or o.settlement_outcome='REVIEW') and o.tts_dispatch_state!='SUCCEEDED'</update>
+  <update id="cancel">update s_voice_task set cancel_requested_at=coalesce(cancel_requested_at,utc_timestamp(3)) where id=#{task}</update>
+  <select id="deliveryReview" resultType="int">select count(*) from s_outbox x join s_voice_attempt a on cast(a.id as char character set utf8mb4) collate utf8mb4_0900_as_cs=x.aggregate_id where a.task_id=#{task} and x.event_type='VOICE_ATTEMPT_FACT' and x.status!='SENT' and x.attempt_count&gt;=12</select>
+  <select id="queries" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Attempt">select <include refid="attemptColumns"/> from s_voice_attempt where state='UNKNOWN' and query_count &lt; 12 and query_next_at &lt;= utc_timestamp(3) order by query_next_at,id limit 4</select>
+  <update id="claimQuery">update s_voice_attempt set query_count=query_count+1,query_next_at=date_add(utc_timestamp(3),interval 30 second) where id=#{id} and state='UNKNOWN' and query_count &lt; 12 and query_next_at &lt;= utc_timestamp(3)</update>
+  <select id="recoverable" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Task">select <include refid="taskColumns"/> from s_voice_task t where status in ('QUEUED','RUNNING') and (owner!=#{owner} or deadline_at &lt;= utc_timestamp(3) or (purpose='BUSINESS' and not exists(select 1 from s_session s where s.id=t.session_id and s.active_turn_id=t.turn_id and s.status='ACTIVE' and s.connection_epoch=t.connection_epoch))) order by deadline_at,id limit 32</select>
+  <select id="diagnostics" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Task">select <include refid="taskColumns"/> from s_voice_task <where><if test="account != null">account_id=#{account}</if></where> order by created_at desc,id desc limit 100</select>
+  <sql id="diagnosticFilters">
+    <where>
+      <if test="account != null">and account_id=#{account}</if>
+      <if test="taskId != null">and id=#{taskId}</if>
+      <if test="status != null">and status=#{status}</if>
+    </where>
+  </sql>
+  <select id="pageDiagnostics" resultType="com.ruoyi.session.runtime.mapper.VoiceTaskMapper$Task">
+    select <include refid="taskColumns"/> from s_voice_task <include refid="diagnosticFilters"/>
+    order by created_at desc,id desc limit #{limit} offset #{offset}
+  </select>
+  <select id="countDiagnostics" resultType="long">
+    select count(*) from s_voice_task <include refid="diagnosticFilters"/>
+  </select>
+</mapper>

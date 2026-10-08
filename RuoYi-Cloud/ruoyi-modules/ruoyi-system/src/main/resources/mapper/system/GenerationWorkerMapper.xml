@@ -6,6 +6,7 @@
         <result property="taskId" column="task_id"/><result property="accountId" column="account_id"/>
         <result property="avatarVersionId" column="avatar_version_id"/><result property="sourceFileId" column="source_file_id"/>
         <result property="sourceObjectKey" column="source_object_key"/><result property="actionCode" column="action_code"/>
+        <result property="stepType" column="step_type"/>
         <result property="attemptNo" column="attempt_no"/><result property="leaseEpoch" column="lease_epoch"/>
         <result property="modelId" column="model_id"/><result property="parameters" column="parameters"/>
         <result property="officialServiceId" column="official_service_id"/><result property="serviceRevision" column="service_revision"/>
@@ -16,7 +17,7 @@
     </resultMap>
     <sql id="claimColumns">
         s.id as step_id, t.id as task_id, t.account_id, t.avatar_version_id, t.source_file_id, f.object_key as source_object_key,
-        s.action_code, s.attempt_no, s.lease_epoch, json_unquote(json_extract(t.service_snapshot, '$.modelId')) as model_id,
+        s.step_type, coalesce(s.action_code, 'character_completion') as action_code, s.attempt_no, s.lease_epoch, json_unquote(json_extract(t.service_snapshot, '$.modelId')) as model_id,
         json_unquote(json_extract(t.service_snapshot, '$.parameters')) as parameters, t.official_service_id,
         cast(json_unquote(json_extract(t.service_snapshot, '$.revision')) as unsigned) as service_revision,
         s.status as step_status, a.id as existing_attempt_id, hex(a.request_hash) as existing_request_hash,
@@ -26,12 +27,19 @@
     <select id="selectReadyActionForUpdate" resultMap="ClaimResult">
         select <include refid="claimColumns"/> from p_generation_step s
         join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
-        join p_file f on f.id = t.source_file_id and f.account_id = t.account_id and f.status = 'AVAILABLE'
+        join p_avatar_version v on v.id = t.avatar_version_id and v.account_id = t.account_id
+        left join p_file f on f.id = case when s.step_type = 'COMPLETE_CHARACTER' then t.source_file_id else v.source_file_id end
+            and f.account_id = t.account_id and f.status = 'AVAILABLE'
         left join p_generation_attempt a on a.step_id = s.id and a.attempt_no = s.attempt_no
         where s.account_id = #{accountId} and s.task_id = #{taskId}
+          and (f.id is not null or a.id is not null)
           and (s.status = 'READY' or (s.status = 'POLLING' and (s.next_run_at is null or s.next_run_at &lt;= utc_timestamp(3)))
                or (s.status = 'RUNNING' and s.lease_expires_at &lt;= utc_timestamp(3)))
-          and s.step_type = 'GENERATE_ACTION' and t.status in ('QUEUED', 'PROCESSING')
+          and s.step_type in ('GENERATE_ACTION','COMPLETE_CHARACTER') and t.status in ('QUEUED', 'PROCESSING')
+          and (s.step_type = 'COMPLETE_CHARACTER' or not exists (
+              select 1 from p_generation_step completion where completion.task_id = s.task_id
+                and completion.account_id = s.account_id and completion.step_type = 'COMPLETE_CHARACTER'
+                and completion.status != 'SUCCEEDED'))
           and not exists (select 1 from p_generation_attempt previous_attempt
               where previous_attempt.step_id = s.id and previous_attempt.attempt_no &lt; s.attempt_no)
           and exists (select 1 from p_official_service svc join p_secret secret on secret.id = svc.secret_id
@@ -42,9 +50,12 @@
     <select id="selectLeaseForUpdate" resultMap="ClaimResult">
         select <include refid="claimColumns"/> from p_generation_step s
         join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
-        join p_file f on f.id = t.source_file_id and f.account_id = t.account_id and f.status = 'AVAILABLE'
+        join p_avatar_version v on v.id = t.avatar_version_id and v.account_id = t.account_id
+        left join p_file f on f.id = case when s.step_type = 'COMPLETE_CHARACTER' then t.source_file_id else v.source_file_id end
+            and f.account_id = t.account_id and f.status = 'AVAILABLE'
         left join p_generation_attempt a on a.step_id = s.id and a.attempt_no = s.attempt_no
         where s.account_id = #{accountId} and s.task_id = #{taskId} and s.id = #{stepId}
+          and (f.id is not null or a.id is not null)
           and s.lease_owner = #{workerId} and s.lease_epoch = #{leaseEpoch} and s.lease_expires_at > utc_timestamp(3)
         for update
     </select>
@@ -65,7 +76,8 @@
     </insert>
     <insert id="upsertLatestAttempt">
         insert into p_avatar_action_selection (avatar_version_id, action_code, account_id, latest_attempt_id, updated_at)
-        values (#{claim.avatarVersionId}, #{claim.actionCode}, #{claim.accountId}, #{attemptId}, utc_timestamp(3))
+        select #{claim.avatarVersionId}, #{claim.actionCode}, #{claim.accountId}, #{attemptId}, utc_timestamp(3)
+        where #{claim.stepType} = 'GENERATE_ACTION'
         on duplicate key update latest_attempt_id = values(latest_attempt_id), updated_at = utc_timestamp(3)
     </insert>
     <insert id="insertActionResult">
@@ -142,13 +154,17 @@
     <update id="expireStalledUnsubmittedSteps">
         update p_generation_step s
         join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
+        left join p_generation_step completion on completion.task_id = s.task_id and completion.account_id = s.account_id
+            and s.step_type = 'GENERATE_ACTION' and completion.step_type = 'COMPLETE_CHARACTER'
+            and completion.status in ('RUNNING','POLLING','UNKNOWN')
         set s.status = 'FAILED', s.stage_started_at = utc_timestamp(3),
             s.error_code = coalesce(s.error_code, 'GENERATION_START_TIMEOUT'),
             s.lease_owner = null, s.lease_expires_at = null, s.next_run_at = null,
             s.heartbeat_at = utc_timestamp(3), s.updated_at = utc_timestamp(3)
         where t.status in ('QUEUED','PROCESSING')
           and t.updated_at &lt;= date_sub(utc_timestamp(3), interval #{timeoutSeconds} second)
-          and s.step_type = 'GENERATE_ACTION' and s.status in ('READY','RUNNING')
+          and s.step_type in ('GENERATE_ACTION','COMPLETE_CHARACTER') and s.status in ('READY','RUNNING')
+          and completion.id is null
           and (s.lease_expires_at is null or s.lease_expires_at &lt;= utc_timestamp(3))
           and not exists (select 1 from p_generation_attempt a where a.step_id = s.id
               and a.attempt_no = s.attempt_no)
@@ -160,7 +176,7 @@
             t.finished_at = utc_timestamp(3), t.updated_at = utc_timestamp(3)
         where t.status in ('QUEUED','PROCESSING')
           and not exists (select 1 from p_generation_step active_step where active_step.task_id = t.id
-              and active_step.account_id = t.account_id and active_step.step_type = 'GENERATE_ACTION'
+              and active_step.account_id = t.account_id and active_step.step_type in ('GENERATE_ACTION','COMPLETE_CHARACTER')
               and active_step.status in ('READY','RUNNING','POLLING'))
           and exists (select 1 from p_generation_step timed_out_step where timed_out_step.task_id = t.id
               and timed_out_step.account_id = t.account_id and timed_out_step.error_code = 'GENERATION_START_TIMEOUT')
@@ -168,11 +184,12 @@
     <update id="markTaskFailed">
         update p_generation_task set status = 'FAILED', internal_state = 'FINISHED',
             error_code = (select s.error_code from p_generation_step s where s.account_id = #{accountId}
-                and s.task_id = #{taskId} and s.status in ('FAILED','UNKNOWN') order by s.updated_at desc limit 1),
+                and s.task_id = #{taskId} and s.status in ('FAILED','UNKNOWN')
+                order by (s.step_type = 'COMPLETE_CHARACTER') desc, s.updated_at desc limit 1),
             finished_at = utc_timestamp(3), updated_at = utc_timestamp(3)
         where account_id = #{accountId} and id = #{taskId} and status in ('QUEUED', 'PROCESSING')
           and not exists (select 1 from p_generation_step active_step where active_step.task_id = #{taskId}
-              and active_step.step_type = 'GENERATE_ACTION' and active_step.status in ('READY','RUNNING','POLLING'))
+              and active_step.step_type in ('GENERATE_ACTION','COMPLETE_CHARACTER') and active_step.status in ('READY','RUNNING','POLLING'))
           and exists (select 1 from p_generation_step failed_step where failed_step.task_id = #{taskId}
               and failed_step.status in ('FAILED','UNKNOWN'))
     </update>
@@ -193,8 +210,29 @@
     <select id="countActiveSteps" resultType="int">
         select count(*) from p_generation_step s join p_generation_task t on t.id = s.task_id and t.account_id = s.account_id
         where s.account_id = #{accountId} and s.task_id = #{taskId} and t.status in ('QUEUED','PROCESSING')
-          and s.step_type = 'GENERATE_ACTION' and s.status in ('READY','RUNNING','POLLING')
+          and s.step_type in ('GENERATE_ACTION','COMPLETE_CHARACTER') and s.status in ('READY','RUNNING','POLLING')
     </select>
+    <update id="saveCompletedCharacter">
+        update p_avatar_version v join p_generation_task t on t.avatar_version_id = v.id and t.account_id = v.account_id
+        set v.source_file_id = #{fileId}, v.generation_recipe = json_set(v.generation_recipe,
+            '$.originalSourceFileId', cast(t.source_file_id as char), '$.completedSourceFileId', cast(#{fileId} as char)),
+            v.updated_at = utc_timestamp(3)
+        where t.id = #{claim.taskId} and v.id = #{claim.avatarVersionId} and v.account_id = #{claim.accountId}
+          and v.status = 'BUILDING' and #{claim.stepType} = 'COMPLETE_CHARACTER'
+    </update>
+    <update id="unblockCompletedActions">
+        update p_generation_step s set s.status = 'READY', s.error_code = null, s.next_run_at = utc_timestamp(3),
+            s.stage_started_at = utc_timestamp(3), s.updated_at = utc_timestamp(3)
+        where s.account_id = #{accountId} and s.task_id = #{taskId} and s.step_type = 'GENERATE_ACTION'
+          and s.status = 'FAILED' and s.error_code = 'CHARACTER_COMPLETION_REQUIRED'
+          and not exists (select 1 from p_generation_attempt a where a.step_id = s.id)
+    </update>
+    <update id="blockUnsubmittedActions">
+        update p_generation_step s set s.status = 'FAILED', s.error_code = 'CHARACTER_COMPLETION_REQUIRED',
+            s.stage_started_at = utc_timestamp(3), s.updated_at = utc_timestamp(3)
+        where s.account_id = #{accountId} and s.task_id = #{taskId} and s.step_type = 'GENERATE_ACTION'
+          and s.status = 'READY' and not exists (select 1 from p_generation_attempt a where a.step_id = s.id)
+    </update>
     <update id="updateStepSuccess">
         update p_generation_step set status = 'SUCCEEDED', stage_started_at = utc_timestamp(3), result_file_id = #{fileId},
             result_metadata = json_merge_patch(coalesce(result_metadata, json_object()), cast(#{metadata} as json)),

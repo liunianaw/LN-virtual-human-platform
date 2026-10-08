@@ -32,7 +32,7 @@ export interface SessionState {
   effectiveScopes: string[]; activeTurn: { turnId: string } | null;
 }
 interface Ticket { ticket: string; expiresAt: string; webSocketUrl: string; protocol: string }
-interface AudioSegment { segmentId: string; ordinal: number; mediaId: string; expiresAt: string }
+export interface AudioSegment { segmentId: string; ordinal: number; mediaId: string; expiresAt: string; degraded?: boolean; actualVoiceDisplayName?: string; reasonCode?: string }
 
 /** Browser-only short grant client. The callback belongs to the developer backend; it never accepts an Application Secret. */
 export class SessionClient {

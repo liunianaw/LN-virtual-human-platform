@@ -15,6 +15,8 @@ public class TtsRuntimeAdapterRegistry
 
     public TtsRuntimeAdapterRegistry(List<TtsRuntimeAdapter> adapters)
     {
+        if(!java.util.Set.of("bridge","executor").contains(System.getenv().getOrDefault("LN_VOICE_QWEN_ROUTE","bridge")))
+            throw new IllegalStateException("LN_VOICE_QWEN_ROUTE must be bridge or executor");
         for (TtsRuntimeAdapter adapter : adapters)
         {
             if (this.adapters.put(adapter.providerKind(), adapter) != null)
@@ -34,4 +36,7 @@ public class TtsRuntimeAdapterRegistry
         }
         return adapter;
     }
+    /** Maintenance-window switch. One route per process; never retry via the other route. */
+    public boolean usesLegacyBridge(String providerType)
+    { return "DASHSCOPE_QWEN_TTS".equals(providerType) && !"executor".equals(System.getenv("LN_VOICE_QWEN_ROUTE")); }
 }

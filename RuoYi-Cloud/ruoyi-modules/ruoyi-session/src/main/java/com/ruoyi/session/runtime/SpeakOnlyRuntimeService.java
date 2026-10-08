@@ -10,11 +10,14 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Speech playback turns; each turn belongs to one BUSINESS connection epoch. */
 @Service
 public class SpeakOnlyRuntimeService implements TtsCompletionSink
 {
+    private static final Logger LOG = LoggerFactory.getLogger(SpeakOnlyRuntimeService.class);
     private final VoiceRuntimeProperties properties;
     private final TemporaryAudioCleanupQueue cleanupQueue;
     private final PersistentRuntimeStore persistentStore;
@@ -36,11 +39,13 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         principal.requireSpeakScope();
         validateRequest(requestId, text);
         List<SegmentPlan> chunks = plans(split(text, properties.getMaxCodePointsPerSegment()));
+        PersistentRuntimeStore.SpeakTurnCreated created = persistentStore.createSpeakTurn(principal, requestId, chunks, connectionEpoch);
+        if (!created.created())
+            return new SpeechStarted(Long.toString(created.turnId()), 1L, chunks.size(), List.of());
         String priorTurnId = activeTurnBySession.get(principal.sessionId());
         TurnState prior = priorTurnId == null ? null : turns.get(priorTurnId);
         if (prior != null && prior.connectionEpoch <= connectionEpoch) stop(principal, priorTurnId);
-        long persistentTurnId = persistentStore.createSpeakTurn(principal, requestId, chunks, connectionEpoch);
-        TurnState state = new TurnState(principal, persistentTurnId, chunks, connectionEpoch);
+        TurnState state = new TurnState(principal, created.turnId(), chunks, connectionEpoch);
         turns.put(state.turnId, state);
         activeTurnBySession.put(principal.sessionId(), state.turnId);
         synchronized (state)
@@ -69,7 +74,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 return AudioReadyResult.ignored();
             }
             if (state.stopped || input.generation() != state.generation
-                    || !state.acceptAudio(input, properties.getMaxAudioBytes(), properties.getTemporaryAudioTtl()))
+                    || !state.canAcceptAudio(input, properties.getMaxAudioBytes(), properties.getTemporaryAudioTtl()))
             {
                 cleanupQueue.schedule(input.temporaryAudio());
                 return AudioReadyResult.ignored();
@@ -81,8 +86,19 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 cleanupQueue.schedule(input.temporaryAudio());
                 return AudioReadyResult.ignored();
             }
+            state.acceptAudio(input);
             List<AudioSegmentEvent> ready = state.drainOrderedEvents();
-            ready.forEach(event -> events.audioSegment(principal, state.connectionEpoch, event));
+            try
+            {
+                ready.forEach(event -> events.audioSegment(principal, state.connectionEpoch, event));
+            }
+            catch (RuntimeException error)
+            {
+                try { finishFailed(state); }
+                catch (RuntimeException closeError) { error.addSuppressed(closeError); }
+                LOG.warn("Registered TTS audio could not be delivered turnId={} ordinal={}", state.turnId, input.ordinal(), error);
+                return new AudioReadyResult(true, List.of(), List.of());
+            }
             return new AudioReadyResult(true, ready, List.of());
         }
     }
@@ -101,9 +117,15 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
             {
                 return;
             }
-            persistentStore.markAudioFailed(Long.parseLong(state.turnId), work.ordinal(), failureCode);
-            events.audioFailed(principal, state.connectionEpoch, work.turnId(), work.segmentId(), work.ordinal(), failureCode);
-            finishFailed(state);
+            try { persistentStore.markAudioFailed(Long.parseLong(state.turnId), work.ordinal(), failureCode); }
+            catch (RuntimeException error)
+            { LOG.warn("Could not persist TTS delivery failure turnId={} ordinal={}", state.turnId, work.ordinal(), error); }
+            try { events.audioFailed(principal, state.connectionEpoch, work.turnId(), work.segmentId(), work.ordinal(), failureCode); }
+            catch (RuntimeException error)
+            { LOG.warn("Could not notify TTS delivery failure turnId={} ordinal={}", state.turnId, work.ordinal(), error); }
+            try { finishFailed(state); }
+            catch (RuntimeException error)
+            { LOG.warn("Could not persist failed TTS turn turnId={}", state.turnId, error); }
         }
     }
 
@@ -206,11 +228,17 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
 
     private void finishFailed(TurnState turn)
     {
-        turn.stop(cleanupQueue);
-        persistentStore.fail(Long.parseLong(turn.turnId));
-        events.failed(turn.principal, turn.connectionEpoch, turn.turnId, persistentStore.turnState(turn.principal, turn.turnId));
-        turns.remove(turn.turnId, turn);
-        activeTurnBySession.remove(turn.principal.sessionId(), turn.turnId);
+        try
+        {
+            turn.stop(cleanupQueue);
+            persistentStore.fail(Long.parseLong(turn.turnId));
+            events.failed(turn.principal, turn.connectionEpoch, turn.turnId, persistentStore.turnState(turn.principal, turn.turnId));
+        }
+        finally
+        {
+            turns.remove(turn.turnId, turn);
+            activeTurnBySession.remove(turn.principal.sessionId(), turn.turnId);
+        }
     }
 
     private void validateRequest(String requestId, String text)
@@ -364,7 +392,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
             return List.copyOf(work);
         }
 
-        private boolean acceptAudio(AudioReadyInput input, long maxAudioBytes, java.time.Duration maximumTtl)
+        private boolean canAcceptAudio(AudioReadyInput input, long maxAudioBytes, java.time.Duration maximumTtl)
         {
             SegmentState segment = byId.get(input.segmentId());
             if (segment == null || segment.ordinal != input.ordinal() || segment.status != SegmentStatus.DISPATCHED
@@ -374,10 +402,16 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
             {
                 return false;
             }
+            return true;
+        }
+
+        private void acceptAudio(AudioReadyInput input)
+        {
+            SegmentState segment = byId.get(input.segmentId());
             segment.audio = input.temporaryAudio();
             segment.durationMs = input.durationMs();
+            segment.degraded=input.degraded(); segment.actualVoiceDisplayName=input.actualVoiceDisplayName();segment.reasonCode=input.reasonCode();
             segment.status = SegmentStatus.READY;
-            return true;
         }
 
         private boolean failAudio(String segmentId, int ordinal)
@@ -403,7 +437,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
                 }
                 segment.status = SegmentStatus.DELIVERED;
                 events.add(new AudioSegmentEvent(turnId, segment.segmentId, segment.ordinal, segment.audio.mediaId(), "audio/wav",
-                        segment.durationMs, segment.audio.expiresAt()));
+                        segment.durationMs, segment.audio.expiresAt(),segment.degraded,segment.actualVoiceDisplayName,segment.reasonCode));
                 nextDelivery++;
             }
             return List.copyOf(events);
@@ -475,6 +509,7 @@ public class SpeakOnlyRuntimeService implements TtsCompletionSink
         private SegmentStatus status = SegmentStatus.NEW;
         private TemporaryAudioReference audio;
         private long durationMs;
+        private boolean degraded; private String actualVoiceDisplayName="", reasonCode="";
 
         private SegmentState(String segmentId, int ordinal, String text)
         {

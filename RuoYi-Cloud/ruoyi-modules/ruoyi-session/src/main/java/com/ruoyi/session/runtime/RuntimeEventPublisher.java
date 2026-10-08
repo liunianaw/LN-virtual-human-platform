@@ -148,7 +148,8 @@ public class RuntimeEventPublisher
             "connectionEpoch", Long.toString(connection.epoch()), "turnId", event.turnId(),
             "requestId", "runtime", "occurredAt", Instant.now().toString(),
             "data", Map.of("segmentId", event.segmentId(), "ordinal", event.ordinal(), "mediaId", event.mediaId(),
-                "mimeType", event.mimeType(), "durationMs", event.durationMs(), "expiresAt", event.expiresAt().toString())));
+                "mimeType", event.mimeType(), "durationMs", event.durationMs(), "expiresAt", event.expiresAt().toString(),
+                "degraded",event.degraded(),"actualVoiceDisplayName",event.actualVoiceDisplayName(),"reasonCode",event.reasonCode())));
     }
 
     public void audioFailed(RuntimePrincipal principal, long turnEpoch, String turnId, String segmentId, int ordinal, String code)

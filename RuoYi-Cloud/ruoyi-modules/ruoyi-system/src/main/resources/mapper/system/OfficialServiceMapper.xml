@@ -26,7 +26,7 @@
     <select id="selectByIdForUpdate" resultMap="Service">select <include refid="serviceColumns"/> from p_official_service s where s.id=#{serviceId} for update</select>
     <select id="selectResolvable" resultMap="Service">
         select <include refid="serviceColumns"/> from p_official_service s join p_secret ps on ps.id=s.secret_id and ps.status='ACTIVE'
-        where s.id=#{serviceId} and s.revision=#{expectedRevision} and s.capability=#{capability} and s.status='ACTIVE'
+        where s.id=#{serviceId} and (s.revision=#{expectedRevision} or #{capability}='TTS') and s.capability=#{capability} and s.status='ACTIVE'
     </select>
     <select id="selectDefaultResolvable" resultMap="Service">
         select <include refid="serviceColumns"/> from p_official_service s
@@ -36,6 +36,7 @@
     <select id="selectSecret" resultMap="Secret">select id,ciphertext,nonce,auth_tag,key_version,algorithm,status from p_secret where id=#{secretId} and status='ACTIVE'</select>
     <select id="selectIdempotencyForUpdate" resultMap="Idempotency">select request_hash,resource_id from p_api_idempotency where account_id=#{accountId} and scope=#{scope} and request_id=#{requestId} for update</select>
     <select id="countGenerationBinding" resultType="int">select count(*) from p_generation_task where id=#{taskId} and official_service_id=#{serviceId} and cast(json_unquote(json_extract(service_snapshot,'$.revision')) as unsigned)=#{revision}</select>
+    <select id="voiceBinding" resultType="string">select execution_binding from p_voice_version where id=#{voiceVersionId}</select>
     <select id="countVoiceBinding" resultType="int">select count(*) from p_voice_version where id=#{voiceVersionId} and official_service_id=#{serviceId} and cast(json_unquote(json_extract(official_config_snapshot,'$.revision')) as unsigned)=#{revision}</select>
     <insert id="insert">insert into p_official_service (id,created_at,updated_at,account_id,name,capability,provider_code,endpoint,model_id,secret_id,parameters,status,revision)
         values (#{id},utc_timestamp(3),utc_timestamp(3),#{accountId},#{name},#{capability},#{providerCode},#{endpoint},#{modelId},#{secretId},cast(#{parameters} as json),#{status},#{revision})</insert>

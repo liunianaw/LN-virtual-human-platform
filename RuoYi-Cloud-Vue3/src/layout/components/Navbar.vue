@@ -1,7 +1,8 @@
 <template>
   <div class="navbar" :class="'nav' + settingsStore.navType">
+    <router-link to="/index" class="console-brand"><strong>LN</strong><span>虚拟人平台</span></router-link>
     <hamburger id="hamburger-container" :is-active="appStore.sidebar.opened" class="hamburger-container" @toggleClick="toggleSideBar" />
-    <breadcrumb v-if="settingsStore.navType == 1" id="breadcrumb-container" class="breadcrumb-container" />
+    <div id="breadcrumb-container" class="breadcrumb-container"><breadcrumb /><div id="console-page-path"></div></div>
     <top-nav v-if="settingsStore.navType == 2" id="topmenu-container" class="topmenu-container" />
     <template v-if="settingsStore.navType == 3">
       <logo v-show="settingsStore.sidebarLogo" :collapse="false"></logo>
@@ -36,10 +37,10 @@
             <router-link to="/user/profile">
               <el-dropdown-item>个人中心</el-dropdown-item>
             </router-link>
-            <el-dropdown-item command="setLayout" v-if="settingsStore.showSettings">
+            <el-dropdown-item command="setLayout" v-if="userStore.isAdmin && settingsStore.showSettings">
                 <span>布局设置</span>
             </el-dropdown-item>
-            <el-dropdown-item command="lockScreen">
+            <el-dropdown-item command="lockScreen" v-if="userStore.isAdmin">
                 <span>锁定屏幕</span>
             </el-dropdown-item>
             <el-dropdown-item divided command="logout">

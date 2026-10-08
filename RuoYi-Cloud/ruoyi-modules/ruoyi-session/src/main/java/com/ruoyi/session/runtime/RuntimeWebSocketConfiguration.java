@@ -203,8 +203,11 @@ public class RuntimeWebSocketConfiguration implements WebSocketConfigurer
             if ("BUSINESS_KEY".equals(grant.source())) business.successfulActivity(principal.sessionId());
             send(session, event("request.ack", principal, epoch, started.turnId(), requestId,
                 Map.of("requestId", requestId, "turnId", started.turnId(), "status", "ACCEPTED")));
-            send(session, event("turn.started", principal, epoch, started.turnId(), requestId, Map.of("mode", "SPEAK")));
-            submissions.submit(grant, epoch, started.initialWork());
+            if (!started.initialWork().isEmpty())
+            {
+                send(session, event("turn.started", principal, epoch, started.turnId(), requestId, Map.of("mode", "SPEAK")));
+                submissions.submit(grant, epoch, started.initialWork());
+            }
         }
 
 

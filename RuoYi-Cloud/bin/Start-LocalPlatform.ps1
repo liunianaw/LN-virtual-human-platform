@@ -460,7 +460,7 @@ try {
         PLATFORM_STORAGE_COS_SECRETID = $cosEnvironment.RUOYI_MEDIA_COS_SECRET_ID
         PLATFORM_STORAGE_COS_SECRETKEY = $cosEnvironment.RUOYI_MEDIA_COS_SECRET_KEY
         PLATFORM_STORAGE_COS_SESSIONTOKEN = $cosEnvironment.RUOYI_MEDIA_COS_SESSION_TOKEN
-        PLATFORM_DB_URL = 'jdbc:mysql://127.0.0.1:3306/platform_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai'
+        PLATFORM_DB_URL = 'jdbc:mysql://127.0.0.1:3306/platform_db?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&forceConnectionTimeZoneToSession=true'
         PLATFORM_DB_USER = 'root'
         PLATFORM_DB_PASSWORD = '123456'
         RUOYI_MEDIA_INTERNAL_TOKEN = $internalToken
@@ -472,7 +472,7 @@ try {
         LN_SESSION_TO_SYSTEM_INTERNAL_BEARER = $sessionToSystemBearer
     }
     $sessionEnvironment = @{} + $commonEnvironment + @{
-        SESSION_DB_URL = 'jdbc:mysql://127.0.0.1:3306/session_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai'
+        SESSION_DB_URL = 'jdbc:mysql://127.0.0.1:3306/session_db?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&forceConnectionTimeZoneToSession=true'
         SESSION_DB_USER = 'root'
         SESSION_DB_PASSWORD = '123456'
         LN_PUBLIC_RUNTIME_WS_URL = 'ws://127.0.0.1:8080/api/v1/realtime'

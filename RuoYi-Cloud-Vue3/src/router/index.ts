@@ -112,6 +112,7 @@ export const dynamicRoutes = [
     path: '/asset/avatar',
     component: Layout,
     hidden: true,
+    permissions: ['system:asset:list'],
     children: [
       {
         path: 'index',

@@ -1,7 +1,7 @@
 spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${SESSION_DB_URL:jdbc:mysql://localhost:3306/session_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    url: ${SESSION_DB_URL:jdbc:mysql://localhost:3306/session_db?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&forceConnectionTimeZoneToSession=true}
     username: ${SESSION_DB_USER:root}
     password: ${SESSION_DB_PASSWORD:}
   flyway:
@@ -19,20 +19,22 @@ management:
       probes:
         enabled: true
 
-# Runtime limits and enablement only. Provider credentials stay outside Nacos,
-# database rows, logs and public request DTOs; adapters read them from their
-# protected deployment environment when they are implemented.
+# Runtime limits only. Credentials are resolved through the protected System boundary.
 ln:
   session:
     voice:
       max-code-points-per-segment: ${LN_SESSION_TTS_MAX_CODEPOINTS:200}
       max-buffered-segments: ${LN_SESSION_TTS_MAX_BUFFERED_SEGMENTS:2}
       max-audio-bytes: ${LN_SESSION_TTS_MAX_AUDIO_BYTES:5242880}
+      max-temporary-audio-bytes: ${LN_SESSION_TTS_MAX_TEMP_AUDIO_BYTES:134217728}
       temporary-audio-ttl: ${LN_SESSION_TTS_TEMP_AUDIO_TTL:15m}
       temporary-audio-directory: ${LN_SESSION_TTS_TEMP_DIRECTORY:${java.io.tmpdir}/ln-session-audio}
       official:
         enabled: ${LN_SESSION_TTS_OFFICIAL_ENABLED:false}
         timeout: ${LN_SESSION_TTS_OFFICIAL_TIMEOUT:30s}
+        concurrency: ${LN_SESSION_TTS_CONCURRENCY:2}
+        queue-capacity: ${LN_SESSION_TTS_QUEUE_CAPACITY:8}
+        queue-timeout: ${LN_SESSION_TTS_QUEUE_TIMEOUT:10s}
         endpoint: ${LN_SESSION_TTS_OFFICIAL_ENDPOINT:wss://dashscope.aliyuncs.com/api-ws/v1/realtime}
         model: ${LN_SESSION_TTS_OFFICIAL_MODEL:qwen3-tts-flash-realtime}
         voice: ${LN_SESSION_TTS_OFFICIAL_VOICE:Cherry}

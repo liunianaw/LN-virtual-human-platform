@@ -1,6 +1,11 @@
 <template>
   <div class="app-container">
-    <el-card header="平台用户使用总览" shadow="never">
+    <el-card header="新用户注册赠送" shadow="never" class="mb8">
+      <p>配置新用户默认并发额度、存储容量（MB）和积分。修改只对之后成功注册的用户生效，历史用户额度不变。</p>
+      <el-button type="primary" plain v-hasPermi="['system:config:list', 'system:config:edit']"
+        @click="router.push({ path: '/system/config', query: { configKey: 'platform.registration.' } })">修改注册赠送配置</el-button>
+    </el-card>
+    <el-card header="开发者使用总览" shadow="never">
       <el-form inline>
         <el-form-item label="统计日期"><el-date-picker v-model="usageRange" type="daterange" value-format="YYYY-MM-DD"
           range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" :disabled-date="disableFuture" /></el-form-item>
@@ -53,7 +58,8 @@
     </el-card>
     <el-card :header="loadedAccountId ? `用户额度与使用详情 · ${loadedAccountId}` : '用户额度与使用详情'" shadow="never" class="section">
       <el-alert title="积分用于生成动作和音频合成；存储当前免费但容量限制仍生效。旧次数和字符额度仅用于历史请求收尾。" type="warning" :closable="false" />
-      <el-form inline class="section"><el-form-item label="账号 ID"><el-input v-model.trim="adminAccountId" placeholder="输入开发者账号 ID" @keyup.enter="loadAdminQuotas" /></el-form-item><el-form-item><el-button :loading="adminBusy" @click="loadAdminQuotas">读取用户详情</el-button></el-form-item></el-form>
+      <el-form inline class="section"><el-form-item label="账号 ID"><el-input v-model.trim="adminAccountId" placeholder="输入管理员或开发者账号 ID" @keyup.enter="loadAdminQuotas" /></el-form-item><el-form-item><el-button :loading="adminBusy" @click="loadAdminQuotas">读取用户详情</el-button></el-form-item><el-form-item><el-button :loading="adminBusy" @click="selectCurrentAccount">读取当前账号</el-button></el-form-item></el-form>
+      <p class="form-hint">管理员制作公共角色也使用当前账号的存储容量；这里的容量由平台分配，与云存储服务商的套餐余额分别管理。</p>
       <template v-if="loadedAccountId && adminUsage">
         <el-descriptions :column="4" border class="section">
           <el-descriptions-item label="用户名">{{ adminUsage.account.userName }}</el-descriptions-item>
@@ -115,9 +121,10 @@
         </el-form>
         <el-form inline class="section">
           <el-form-item label="容量类型"><el-select v-model="grant.quotaType" style="width: 175px" @change="grantKey = ''"><el-option label="存储字节" value="STORAGE_BYTE" /></el-select></el-form-item>
-          <el-form-item label="增加单位"><el-input-number v-model="grant.units" :min="1" :max="1000000000000" @change="grantKey = ''" /></el-form-item>
+          <el-form-item label="增加字节"><el-input-number v-model="grant.units" :min="1" :max="1000000000000" @change="grantKey = ''" /></el-form-item>
           <el-form-item label="授予依据"><el-input v-model.trim="grant.reason" maxlength="500" placeholder="填写测试或运营依据" @input="grantKey = ''" /></el-form-item>
           <el-form-item><el-button type="primary" :loading="adminBusy" @click="submitGrant">授予额度</el-button></el-form-item>
+          <el-form-item><span class="form-hint">1 GiB = 1,073,741,824 字节</span></el-form-item>
         </el-form>
       </template>
     </el-card>
@@ -129,6 +136,10 @@ import { getAdminAccountUsage, getAdminUsageAccounts, getAdminUsageOverview, get
   type AdminAccountUsageRow, type AdminUsageOverview, type Page, type PointRate, type PointRateInput,
   type QuotaGrantInput, type UsageLimits } from '@/api/developer/usage'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import useUserStore from '@/store/modules/user'
+
+const userStore = useUserStore()
+const router = useRouter()
 
 function utcDate(days: number) { const value = new Date(); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10) }
 const usageRange = ref<[string, string]>([utcDate(-6), utcDate(0)])
@@ -169,6 +180,7 @@ async function loadPlatformUsage() { overviewBusy.value = true; try { await Prom
 async function refreshUsageRange() { accountQuery.pageNum = 1; await loadPlatformUsage(); if (loadedAccountId.value) await loadAdminQuotas() }
 async function searchAccounts() { accountQuery.pageNum = 1; await loadAccounts() }
 async function selectAccount(row: AdminAccountUsageRow) { adminAccountId.value = row.userId; await loadAdminQuotas() }
+async function selectCurrentAccount() { adminAccountId.value = String(userStore.id); await loadAdminQuotas() }
 async function loadAdminQuotas() {
   const id = accountId()
   if (!id) return
@@ -235,7 +247,7 @@ Promise.all([loadPointRates(), loadPlatformUsage()])
 .section { margin-top: 20px; }
 .metric-grid { margin-top: 6px; }
 .metric { min-height: 92px; padding: 18px; margin-top: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; background: var(--el-fill-color-extra-light); }
-.metric-label { color: var(--el-text-color-secondary); font-size: 13px; }
+.metric-label { color: var(--el-text-color-secondary); font-size: 14px; }
 .metric-value { margin-top: 10px; color: var(--el-text-color-primary); font-size: 24px; font-weight: 600; }
 .list-toolbar { display: flex; gap: 10px; max-width: 620px; margin: 24px 0 12px; }
 .pagination { justify-content: flex-end; margin-top: 16px; }

@@ -15,6 +15,21 @@ import com.ruoyi.system.operations.service.PointBillingService;
 class GenerationQuotaServiceTest
 {
     @Test
+    void completionAndEightActionsUseNineExistingBillingUnits()
+    {
+        AssetMapper mapper = mock(AssetMapper.class);
+        PointBillingService billing = mock(PointBillingService.class);
+        GenerationQuotaServiceImpl quota = new GenerationQuotaServiceImpl(mapper, billing);
+        when(mapper.maxGenerationTasksForUpdate(7L)).thenReturn(2);
+        quota.reserve(7L, 11L, 21L, 9);
+        verify(billing).reserve(7L, 21L, "GENERATION", "11", 1, PointBillingService.GENERATION_ACTION, 9);
+        when(mapper.taskReservation(7L, 11L)).thenReturn(Map.of("reservationId", 21L, "state", "RESERVED",
+            "taskStatus", "FAILED", "unknownAttempts", 0, "successfulAttempts", 1, "measuredUnits", 9L, "ledgerType", "POINT"));
+        quota.finish(7L, 11L);
+        verify(billing).finish(7L, "GENERATION", "11", "SETTLE", 1L);
+    }
+
+    @Test
     void admissionReservesOneUnitAndRejectsExceededConcurrency()
     {
         AssetMapper mapper = mock(AssetMapper.class);

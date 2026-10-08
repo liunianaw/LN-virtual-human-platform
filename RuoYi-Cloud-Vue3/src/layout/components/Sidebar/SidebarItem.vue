@@ -83,6 +83,10 @@ function resolvePath(routePath: string, routeQuery?: string): string | { path: s
   if (isExternal(props.basePath)) {
     return props.basePath
   }
+  // Vue Router also supports absolute paths in server-provided child records.
+  if (routePath.startsWith('/')) {
+    return routeQuery ? { path: routePath, query: JSON.parse(routeQuery) } : routePath
+  }
   if (routeQuery) {
     const query = JSON.parse(routeQuery)
     return { path: getNormalPath(props.basePath + '/' + routePath), query: query }

@@ -21,7 +21,8 @@ public class TemporaryAudioCleanupQueue
     public void schedule(TemporaryAudioReference reference)
     {
         store.scheduleCleanup(reference);
-        pending.offer(reference);
+        // The database and private-directory TTL sweep are authoritative after restart.
+        if (pending.size() < 64) pending.offer(reference);
     }
 
     public List<TemporaryAudioReference> drain(int limit)

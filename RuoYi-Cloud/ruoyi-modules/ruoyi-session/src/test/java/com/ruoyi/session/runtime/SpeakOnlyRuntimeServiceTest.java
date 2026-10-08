@@ -32,7 +32,7 @@ class SpeakOnlyRuntimeServiceTest
         RuntimePrincipal principal = new RuntimePrincipal(1, 2, 3, 4,
             Set.of("session:read", "speak:write"),
             new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", 6L, 1L));
-        when(store.createSpeakTurn(eq(principal), eq("request"), anyList(), eq(2L))).thenReturn(10L);
+        when(store.createSpeakTurn(eq(principal), eq("request"), anyList(), eq(2L))).thenReturn(new PersistentRuntimeStore.SpeakTurnCreated(10L, true));
         SpeakOnlyRuntimeService runtime = new SpeakOnlyRuntimeService(new VoiceRuntimeProperties(),
             mock(TemporaryAudioCleanupQueue.class), store, mock(RuntimeEventPublisher.class));
         runtime.start(principal, "request", "Hello", 2);
@@ -50,7 +50,7 @@ class SpeakOnlyRuntimeServiceTest
         RuntimePrincipal principal = new RuntimePrincipal(1, 2, 3, 4,
             Set.of("session:read", "speak:write"),
             new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", 6L, 1L));
-        when(store.createSpeakTurn(eq(principal), eq("request"), anyList(), eq(2L))).thenReturn(10L);
+        when(store.createSpeakTurn(eq(principal), eq("request"), anyList(), eq(2L))).thenReturn(new PersistentRuntimeStore.SpeakTurnCreated(10L, true));
         SpeakOnlyRuntimeService runtime = new SpeakOnlyRuntimeService(new VoiceRuntimeProperties(),
             mock(TemporaryAudioCleanupQueue.class), store, mock(RuntimeEventPublisher.class));
         runtime.start(principal, "request", "Hello", 2);
@@ -69,7 +69,7 @@ class SpeakOnlyRuntimeServiceTest
         RuntimePrincipal principal = new RuntimePrincipal(1, 2, 3, 4,
             Set.of("session:read", "speak:write"),
             new VoiceRuntimeBinding(5, TtsProviderKind.OFFICIAL, "voice", 6L, 1L));
-        when(store.createSpeakTurn(eq(principal), eq("request"), anyList(), eq(2L))).thenReturn(10L);
+        when(store.createSpeakTurn(eq(principal), eq("request"), anyList(), eq(2L))).thenReturn(new PersistentRuntimeStore.SpeakTurnCreated(10L, true));
         SpeakOnlyRuntimeService runtime = new SpeakOnlyRuntimeService(new VoiceRuntimeProperties(),
             cleanup, store, mock(RuntimeEventPublisher.class));
         TtsSynthesisWork work = runtime.start(principal, "request", "Hello", 2).initialWork().get(0);

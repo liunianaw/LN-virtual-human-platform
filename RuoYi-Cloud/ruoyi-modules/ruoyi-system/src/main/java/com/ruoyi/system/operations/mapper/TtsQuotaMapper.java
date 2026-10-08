@@ -8,9 +8,10 @@ import org.apache.ibatis.annotations.Param;
 public interface TtsQuotaMapper
 {
     String applicationPurpose(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
-    Map<String, Object> balanceForUpdate(@Param("accountId") long accountId);
-    Map<String, Object> reservation(@Param("accountId") long accountId, @Param("businessId") String businessId);
-    Map<String, Object> reservationForUpdate(@Param("accountId") long accountId, @Param("businessId") String businessId);
+    record Reservation(long id, long reservedUnits, String state) { }
+    Long balanceForUpdate(@Param("accountId") long accountId);
+    Reservation reservation(@Param("accountId") long accountId, @Param("businessId") String businessId);
+    Reservation reservationForUpdate(@Param("accountId") long accountId, @Param("businessId") String businessId);
     int reserveBalance(@Param("accountId") long accountId, @Param("units") long units);
     int finishBalance(@Param("accountId") long accountId, @Param("units") long units, @Param("usedUnits") long usedUnits);
     void insertReservation(@Param("id") long id, @Param("accountId") long accountId,

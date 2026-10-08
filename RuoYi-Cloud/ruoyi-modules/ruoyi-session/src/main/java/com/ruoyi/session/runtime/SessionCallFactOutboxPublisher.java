@@ -27,8 +27,8 @@ public class SessionCallFactOutboxPublisher
     public void publishOne()
     {
         Event event = transactions.execute(status -> {
-            Event candidate = jdbc.query("select id,event_id,payload from s_outbox where event_type='CALL_FACT_RECORDED' and ((status='PENDING' and (next_run_at is null or next_run_at<=utc_timestamp(3))) or (status='SENDING' and (lease_expires_at is null or lease_expires_at<=utc_timestamp(3)))) order by created_at,id limit 1 for update",
-                rs -> rs.next() ? new Event(rs.getLong(1), rs.getString(2), rs.getString(3)) : null);
+            Event candidate = jdbc.query("select id,event_id,payload,event_type from s_outbox where event_type in ('CALL_FACT_RECORDED','VOICE_ATTEMPT_FACT') and (event_type!='VOICE_ATTEMPT_FACT' or attempt_count<12) and ((status='PENDING' and (next_run_at is null or next_run_at<=utc_timestamp(3))) or (status='SENDING' and (lease_expires_at is null or lease_expires_at<=utc_timestamp(3)))) order by created_at,id limit 1 for update",
+                rs -> rs.next() ? new Event(rs.getLong(1), rs.getString(2), rs.getString(3),rs.getString(4)) : null);
             if (candidate != null) jdbc.update("update s_outbox set status='SENDING',lease_expires_at=date_add(utc_timestamp(3),interval 30 second),attempt_count=attempt_count+1,updated_at=utc_timestamp(3) where id=?", candidate.id());
             return candidate;
         });
@@ -37,7 +37,7 @@ public class SessionCallFactOutboxPublisher
         {
             String base = System.getenv("LN_SESSION_TO_SYSTEM_URL"), bearer = System.getenv("LN_SESSION_TO_SYSTEM_INTERNAL_BEARER");
             if (blank(base) || blank(bearer)) throw new IllegalStateException("system call-fact ingress is not configured");
-            HttpRequest request = HttpRequest.newBuilder(URI.create(base + "/internal/v1/call-records/events")).timeout(Duration.ofSeconds(5))
+            HttpRequest request = HttpRequest.newBuilder(URI.create(base + ("VOICE_ATTEMPT_FACT".equals(event.type())?"/internal/v1/voice-attempt-facts":"/internal/v1/call-records/events"))).timeout(Duration.ofSeconds(5))
                 .header("Authorization", "Bearer " + bearer).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(event.payload())).build();
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
@@ -53,5 +53,5 @@ public class SessionCallFactOutboxPublisher
     }
 
     private static boolean blank(String value) { return value == null || value.isBlank(); }
-    private record Event(long id, String eventId, String payload) { }
+    private record Event(long id, String eventId, String payload,String type) { }
 }

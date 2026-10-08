@@ -35,6 +35,7 @@ public class OperationsService
     public Map<String, Object> accept(CallFactEvent event)
     {
         validateEvent(event);
+        if(event.operationKey().startsWith("tts-attempt:")) throw problem(HttpStatus.BAD_REQUEST,"Voice 尝试须使用版本化专用事实入口");
         lockUsageAccount(event.accountId());
         byte[] payloadHash = hash(canonical(event));
         Map<String, Object> prior = jdbc.query("select payload_hash from p_inbox where consumer_name=? and event_id=? for update",
@@ -173,6 +174,7 @@ public class OperationsService
         Map<String,Object> current = jdbc.query("select id,account_id,operation_key,capability,status,application_id,session_id,turn_id,provider_request_id,input_tokens,output_tokens,input_chars,image_count,audio_duration_ms,usage_available,cost_amount,currency,cost_source,error_code,created_at,updated_at,date(created_at) from p_call_record where id=? for update",
             rs -> rs.next() ? callRow(rs) : null, callId);
         if (current == null) throw problem(HttpStatus.NOT_FOUND, "调用记录不存在");
+        if(String.valueOf(current.get("operationKey")).startsWith("tts-attempt:")) throw problem(HttpStatus.CONFLICT,"Voice 尝试通过原执行证据核对，不能修改逻辑用量");
         if (!etag(current).equals(normalizeEtag(ifMatch))) throw problem(HttpStatus.PRECONDITION_FAILED, "调用事实已变化");
         if (!"UNKNOWN".equals(current.get("status"))) throw problem(HttpStatus.CONFLICT, "只有未知调用可由人工核对终态");
         long operationId = nextId();
@@ -282,7 +284,7 @@ public class OperationsService
 
     private Map<String,Object> taskSummary(Map<String,Object> row) { Map<String,Object> result = new LinkedHashMap<>(row); result.put("taskId", Long.toString((Long) result.remove("id"))); result.put("accountId", Long.toString((Long) result.get("accountId"))); result.remove("updatedAt"); return result; }
     private Map<String,Object> attempt(Map<String,Object> row) { Map<String,Object> result = new LinkedHashMap<>(row); result.put("attemptId", Long.toString((Long) result.get("attemptId"))); result.put("stepId", Long.toString((Long) result.get("stepId"))); result.put("etag", etag(result)); boolean canReconcile=("UNKNOWN".equals(result.get("status")) || "FAILED".equals(result.get("status"))) && asBoolean(result.remove("hasRecoveryEvidence")); result.put("allowedOperations", canReconcile ? List.of("reconcile") : List.of()); return result; }
-    private Map<String,Object> callSummary(Map<String,Object> row) { Map<String,Object> result = new LinkedHashMap<>(row); Object id=result.remove("id"); if (id != null) result.put("callId", Long.toString((Long) id)); else if (result.get("callId") instanceof Long callId) result.put("callId", Long.toString(callId)); result.put("accountId", Long.toString((Long) result.get("accountId"))); result.put("etag", etag(result)); return result; }
+    private Map<String,Object> callSummary(Map<String,Object> row) { Map<String,Object> result = new LinkedHashMap<>(row); Object id=result.remove("id"); if (id != null) result.put("callId", Long.toString((Long) id)); else if (result.get("callId") instanceof Long callId) result.put("callId", Long.toString(callId)); result.put("accountId", Long.toString((Long) result.get("accountId"))); result.put("etag", etag(result)); result.put("factKind",String.valueOf(result.get("operationKey")).startsWith("tts-attempt:")?"ATTEMPT":"LOGICAL"); return result; }
     private static Map<String,Object> row(java.sql.ResultSet rs, String... names) throws java.sql.SQLException { Map<String,Object> result=new LinkedHashMap<>(); for (int i=0;i<names.length;i++) { Object value=rs.getObject(i+1); if (value instanceof java.sql.Timestamp stamp) value=stamp.toInstant().toString(); result.put(names[i],value); } return result; }
     private static Map<String,Object> callRow(java.sql.ResultSet rs) throws java.sql.SQLException { return row(rs,"id","accountId","operationKey","capability","status","applicationId","sessionId","turnId","providerRequestId","inputTokens","outputTokens","inputChars","imageCount","audioDurationMs","usageAvailable","costAmount","currency","costSource","errorCode","createdAt","updatedAt","usageDate"); }
     private static String etag(Map<String,Object> row) { return java.util.HexFormat.of().formatHex(hash(row.get("status")+"|"+row.get("updatedAt")+"|"+row.getOrDefault("providerTaskId",row.get("providerRequestId"))+"|"+row.get("costAmount"))); }

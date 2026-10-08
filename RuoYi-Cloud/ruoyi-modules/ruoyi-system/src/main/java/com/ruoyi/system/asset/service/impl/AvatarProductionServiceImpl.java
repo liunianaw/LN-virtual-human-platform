@@ -45,6 +45,18 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
     public Map<String, Object> production(Long accountId, Long avatarId, Long versionId)
     {
         Map<String, Object> response = requireOwned(accountId, avatarId, versionId);
+        Map<String, Object> completion = mapper.characterCompletion(accountId, versionId);
+        boolean completionReady = completion == null || "SUCCEEDED".equals(completion.get("stage"));
+        if (completion != null)
+        {
+            completion.put("resultIds", List.of());
+            completion.put("allowedOperations", asBoolean(completion.remove("recoverable"))
+                && List.of("UNKNOWN", "FAILED").contains(completion.get("stage")) ? List.of("recovery") : List.of());
+            Object key = completion.remove("objectKey");
+            if (key instanceof String objectKey && storage.getIfAvailable() != null)
+                completion.put("imageUrl", storage.getIfAvailable().readUrl(objectKey));
+            response.put("characterCompletion", completion);
+        }
         Map<String, Map<String, Object>> cards = new LinkedHashMap<>();
         for (String action : ACTIONS)
         {
@@ -88,12 +100,13 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
             if (card.get("latestAttemptId") != null && card.get("acceptedResultId") != null && !asBoolean(card.get("selectionClosed")))
                 operations.add("discard");
             card.remove("recoverable");
+            if (!completionReady) operations.clear();
             card.put("allowedOperations", operations);
         }
         response.put("actions", new ArrayList<>(cards.values())); response.put("totalActionCount", 8);
         response.put("completedActionCount", completed); response.put("acceptedActionCount", accepted);
         // Enabled by the assembly command only after the full snapshot is validated.
-        boolean canAssemble = accepted == 8 && mapper.countAssemblyBlockers(accountId, versionId) == 0;
+        boolean canAssemble = completionReady && accepted == 8 && mapper.countAssemblyBlockers(accountId, versionId) == 0;
         response.put("canAssemble", canAssemble);
         response.put("assemblyStage", "REVIEW".equals(response.get("versionStatus")) ? "READY" : "BUILDING");
         return response;
@@ -222,6 +235,7 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
         AvatarAttemptRequest request)
     {
         requireOwned(accountId, avatarId, versionId);
+        if ("character_completion".equals(actionCode)) return recoverCompletion(accountId, avatarId, versionId, attemptId, request);
         validateAttemptRequest(actionCode, attemptId, request);
         try {
             byte[] hash = operationHash(Map.of("attemptId", attemptId.toString(),
@@ -361,9 +375,10 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
                     "sourceSha256", java.util.HexFormat.of().formatHex(source.getSha256())));
                 mapper.insertCandidateVersion(versionId, accountId, avatarId, versionNo, source.getId(), PIPELINE_VERSION, recipe);
                 Long generationTaskId = nextId(), reservationId = nextId();
-                quota.reserve(accountId, generationTaskId, reservationId, ACTIONS.size());
+                quota.reserve(accountId, generationTaskId, reservationId, ACTIONS.size() + 1);
                 assetMapper.insertGenerationTask(generationTaskId, accountId, avatarId, versionId, source.getId(),
                     generationService.getId(), snapshot, PIPELINE_VERSION, reservationId, request.requestId(), hash);
+                assetMapper.insertCharacterCompletionStep(nextId(), accountId, generationTaskId, nextId());
                 for (String action : ACTIONS)
                     assetMapper.insertGenerationActionStep(nextId(), accountId, generationTaskId, "ACTION_" + action, action, nextId());
                 assetMapper.insertOutbox(nextId(), accountId, java.util.UUID.randomUUID().toString().replace("-", ""),
@@ -480,6 +495,36 @@ public class AvatarProductionServiceImpl implements IAvatarProductionService
             return response;
         } catch (ServiceException error) { throw error; }
         catch (Exception error) { throw new ServiceException("无法组装角色版本"); }
+    }
+
+    private Object recoverCompletion(Long accountId, Long avatarId, Long versionId, Long attemptId, AvatarAttemptRequest request)
+    {
+        validateAttemptRequest("idle", attemptId, request);
+        try
+        {
+            byte[] hash = operationHash(Map.of("attemptId", attemptId.toString(), "expectedActionRevision", request.expectedActionRevision()));
+            Map<String, Object> previous = mapper.attemptOperation(accountId, versionId, "character_completion", "RECOVERY", request.requestId());
+            if (previous != null) return previousOperation(previous, hash, "同一请求编号的补全恢复参数不同");
+            mapper.lockVersion(accountId, versionId);
+            Map<String, Object> context = mapper.characterCompletion(accountId, versionId);
+            if (context == null || !attemptId.toString().equals(context.get("latestAttemptId"))
+                || !asBoolean(context.get("recoverable")) || !List.of("UNKNOWN", "FAILED").contains(context.get("stage"))
+                || ((Number) context.get("actionRevision")).longValue() != request.expectedActionRevision())
+                throw new ServiceException("角色补全状态已变化或没有可安全恢复的原结果", 409);
+            Long taskId = Long.valueOf((String) context.get("taskId"));
+            quota.resume(accountId, taskId);
+            if (mapper.recoverCharacterCompletion(accountId, versionId, attemptId, request.expectedActionRevision()) < 1)
+                throw new ServiceException("角色补全恢复状态已变化", 409);
+            assetMapper.insertOutbox(nextId(), accountId, java.util.UUID.randomUUID().toString().replace("-", ""),
+                "AVATAR_GENERATION_REQUESTED", "GENERATION_TASK", taskId.toString(),
+                java.util.UUID.randomUUID().toString().replace("-", ""), json.writeValueAsString(Map.of(
+                    "taskId", taskId.toString(), "avatarId", avatarId.toString(), "avatarVersionId", versionId.toString(), "recoveryOnly", true)));
+            Map<String, Object> response = Map.of("attemptId", attemptId.toString(), "stage", "POLLING", "recoveryScheduled", true);
+            mapper.rememberAttemptOperation(accountId, versionId, "character_completion", "RECOVERY", request.requestId(), hash, json.writeValueAsString(response));
+            return response;
+        }
+        catch (ServiceException error) { throw error; }
+        catch (Exception error) { throw new ServiceException("无法安排角色补全结果恢复"); }
     }
 
     private Map<String, Object> requireOwned(Long accountId, Long avatarId, Long versionId)

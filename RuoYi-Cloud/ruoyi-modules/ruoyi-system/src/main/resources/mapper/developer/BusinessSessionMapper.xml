@@ -5,8 +5,9 @@
     select a.account_id accountId,a.id applicationId,a.status applicationStatus,a.admin_disabled adminDisabled,
       a.auth_epoch applicationEpoch,a.revision applicationRevision,a.system_prompt systemPrompt,
       u.status accountStatus,u.del_flag accountDeleted,
-      av.id avatarVersionId,vv.id voiceVersionId,vv.voice_code providerVoiceRef,
-      vv.official_service_id officialServiceId,
+      av.id avatarVersionId,vv.id voiceVersionId,
+      coalesce(json_unquote(json_extract(vv.execution_binding,'$.providerVoiceRef')),vv.voice_code) providerVoiceRef,
+      vv.official_service_id officialServiceId,vv.execution_binding voiceBinding,
       cast(json_unquote(json_extract(vv.official_config_snapshot,'$.revision')) as unsigned) officialServiceRevision
     from p_application a
     join sys_user u on u.user_id=a.account_id
@@ -35,6 +36,7 @@
     select 'APPLICATION_SNAPSHOT' resourceType,a.id resourceId from p_application a where a.id=#{applicationId}
     union all select 'AVATAR_VERSION',avatar.current_version_id from p_application a join p_avatar avatar on avatar.id=a.avatar_id where a.id=#{applicationId}
     union all select 'VOICE_VERSION',voice.current_version_id from p_application a join p_voice voice on voice.id=a.voice_id where a.id=#{applicationId}
+    union all select 'VOICE_VERSION',v.fallback_voice_version_id from p_application a join p_voice voice on voice.id=a.voice_id join p_voice_version v on v.id=voice.current_version_id where a.id=#{applicationId} and v.fallback_voice_version_id is not null
     union all select 'SKILL',skill_id from p_application_skill where application_id=#{applicationId}
   </select>
   <select id="availableSession" resultType="int">
@@ -51,7 +53,7 @@
         where r.account_id=#{accountId} and r.holder_type='SESSION' and r.holder_id=#{sessionId}
           and r.state='CONFIRMED' and (
             r.resource_type='AVATAR_VERSION' and (av.id is null or avatar.status not in ('PUBLISHED','UNLISTED') or av.status!='PUBLISHED')
-            or r.resource_type='VOICE_VERSION' and (vv.id is null or voice.status not in ('PUBLISHED','UNLISTED') or service.status!='ACTIVE')
+            or r.resource_type='VOICE_VERSION' and (vv.id is null or voice.status not in ('PUBLISHED','UNLISTED') or service.status!='ACTIVE' or (vv.reference_asset_id is not null and not exists(select 1 from p_file rf where rf.id=vv.reference_asset_id and rf.purpose='VOICE_SAMPLE' and rf.status='AVAILABLE')))
             or r.resource_type='SKILL' and (skill.id is null or skill.status not in ('PUBLISHED','UNLISTED'))))
   </select>
   <select id="maxRecordingBytes" resultType="long">select max_file_bytes from p_account_limit where account_id=#{accountId}</select>
@@ -70,7 +72,7 @@
       and a.status='ACTIVE' and a.admin_disabled=0 and av.status='PUBLISHED'
       and avatar.status in ('PUBLISHED','UNLISTED') and voice.visibility='OFFICIAL'
       and voice.status in ('PUBLISHED','UNLISTED') and vv.service_type='OFFICIAL'
-      and official.capability='TTS' and official.status='ACTIVE'
+      and official.capability='TTS' and official.status='ACTIVE' <include refid="com.ruoyi.system.voice.mapper.VoiceBindingMapper.dependenciesAvailable"><property name="v" value="vv"/></include>
       and not exists (select 1 from p_application_skill x join p_skill s on s.id=x.skill_id
         where x.application_id=a.id and s.status not in ('PUBLISHED','UNLISTED'))
   </select>

@@ -34,7 +34,7 @@ public class OfficialServiceResolver
             if (response.statusCode() != 200) throw unavailable("OFFICIAL_SERVICE_UNAVAILABLE");
             JsonNode value = json.readTree(response.body());
             String endpoint = value.path("endpoint").asText(), model = value.path("modelId").asText(), credential = value.path("credential").asText();
-            if (!"DASHSCOPE_BEIJING".equals(value.path("providerCode").asText()) || blank(endpoint) || blank(model) || blank(credential)) throw unavailable("OFFICIAL_SERVICE_INVALID");
+            if (!"DASHSCOPE_QWEN_TTS".equals(com.ruoyi.common.voice.VoiceCatalog.canonical(value.path("providerCode").asText())) || blank(endpoint) || blank(model) || blank(credential)) throw unavailable("OFFICIAL_SERVICE_INVALID");
             return new Resolved(endpoint, model, credential);
         }
         catch (RuntimeProblem e) { throw e; }

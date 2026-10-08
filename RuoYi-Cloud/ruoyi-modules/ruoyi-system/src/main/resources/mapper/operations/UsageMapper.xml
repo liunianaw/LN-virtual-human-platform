@@ -107,9 +107,8 @@
   <select id="adminAccountCount" resultType="long">select count(*) from sys_user u
     <include refid="adminAccountWhere"/></select>
   <select id="adminAccount" resultType="map">select u.user_id userId,u.user_name userName,u.nick_name nickName,
-    u.email,u.status,u.create_time createdAt from sys_user u where u.user_id=#{accountId} and u.del_flag='0'
-    and exists (select 1 from sys_user_role ur join sys_role r on r.role_id=ur.role_id
-      where ur.user_id=u.user_id and r.role_key='developer')</select>
+    u.email,u.status,u.create_time createdAt from sys_user u
+    where u.user_id=#{accountId} and u.del_flag='0'</select>
   <select id="adminAccountSummary" resultType="map">select coalesce(b.granted_cent,0)/100.0 grantedPoints,
     coalesce(b.used_cent,0)/100.0 usedPoints,coalesce(b.reserved_cent,0)/100.0 reservedPoints,
     coalesce(b.granted_cent-b.used_cent-b.reserved_cent,0)/100.0 availablePoints,

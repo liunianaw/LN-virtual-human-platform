@@ -4,7 +4,7 @@ import type { AjaxResult } from '@/types'
 export interface Page<T> { items: T[]; total: number; pageNum: number; pageSize: number }
 export interface GenerationTask { taskId: string; accountId: string; status: string; internalState: string; progress: number; errorCode?: string; createdAt: string; unknown_attempts?: number }
 export interface Attempt { attemptId: string; stepId: string; status: string; providerRequestId?: string; providerTaskId?: string; errorCode?: string; etag: string; allowedOperations: string[] }
-export interface CallRecord { callId: string; accountId: string; operationKey: string; capability: string; status: string; usageAvailable: boolean; costAmount?: string | null; currency?: string | null; costSource: string; errorCode?: string; etag: string; createdAt: string }
+export interface CallRecord { callId: string; accountId: string; operationKey: string; factKind?: 'LOGICAL' | 'ATTEMPT'; capability: string; status: string; usageAvailable: boolean; costAmount?: string | null; currency?: string | null; costSource: string; errorCode?: string; etag: string; createdAt: string }
 const headers = (etag: string) => ({ 'If-Match': etag, 'Idempotency-Key': crypto.randomUUID(), repeatSubmit: false })
 
 export const listTasks = (params: Record<string, unknown>): Promise<AjaxResult<Page<GenerationTask>>> => request({ url: '/api/v1/admin/generation-tasks', method: 'get', params })

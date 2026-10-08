@@ -15,7 +15,7 @@ public class OfficialVoiceAuditionClient
     private final ObjectMapper json;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     public OfficialVoiceAuditionClient(ObjectMapper json) { this.json = json; }
-    public byte[] audition(long versionId, long serviceId, long revision, String alias, String text)
+    public byte[] audition(long versionId, long administratorId, String auditionKey, String text)
     {
         String base = System.getenv("LN_SYSTEM_TO_SESSION_URL");
         String bearer = System.getenv("LN_SYSTEM_TO_SESSION_INTERNAL_BEARER");
@@ -26,8 +26,7 @@ public class OfficialVoiceAuditionClient
             HttpRequest request = HttpRequest.newBuilder(URI.create(base + "/internal/v1/official-voice-auditions"))
                 .timeout(Duration.ofSeconds(65)).header("Authorization", "Bearer " + bearer)
                 .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(
-                    json.writeValueAsString(Map.of("voiceVersionId", versionId, "serviceId", serviceId,
-                        "serviceRevision", revision, "voiceAlias", alias, "text", text)))).build();
+                    json.writeValueAsString(new Audition(versionId,administratorId,auditionKey,text)))).build();
             HttpResponse<java.io.InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
             try (var stream = response.body())
             {
@@ -42,4 +41,5 @@ public class OfficialVoiceAuditionClient
         { Thread.currentThread().interrupt(); throw new ServiceException("官方声音试听中断", 503); }
         catch (Exception error) { throw new ServiceException("官方声音试听不可用", 503); }
     }
+    private record Audition(long voiceVersionId,long administratorId,String auditionKey,String text) { }
 }

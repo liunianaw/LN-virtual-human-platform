@@ -1,0 +1,177 @@
+[
+  {
+    "schemaVersion": 1,
+    "providerType": "DASHSCOPE_QWEN_TTS",
+    "adapterVersion": "qwen-realtime-1",
+    "capabilityVersion": "qwen-realtime-v1",
+    "modelId": "qwen3-tts-flash-realtime",
+    "modelRevision": "qwen3-tts-flash-realtime",
+    "languages": [
+      "zh-CN",
+      "en-US"
+    ],
+    "voices": [
+      {
+        "id": "Cherry",
+        "displayName": "Cherry",
+        "languages": [
+          "zh-CN",
+          "en-US"
+        ]
+      }
+    ],
+    "maxInputChars": 200,
+    "parameters": {},
+    "referenceVoice": false,
+    "audioStreaming": false,
+    "cancelMode": "QUEUED_ONLY",
+    "queryMode": "PROCESS",
+    "fallbackTarget": false
+  },
+  {
+    "schemaVersion": 1,
+    "providerType": "TEST_TONE",
+    "adapterVersion": "1",
+    "capabilityVersion": "test-tone-v1",
+    "modelId": "test-tone",
+    "modelRevision": "1",
+    "languages": [
+      "zh-CN",
+      "en-US"
+    ],
+    "voices": [
+      {
+        "id": "tone",
+        "displayName": "协议测试音（非语音模型）",
+        "languages": [
+          "zh-CN",
+          "en-US"
+        ]
+      }
+    ],
+    "maxInputChars": 200,
+    "parameters": {},
+    "referenceVoice": false,
+    "audioStreaming": false,
+    "cancelMode": "QUEUED_ONLY",
+    "queryMode": "PROCESS",
+    "fallbackTarget": true
+  },
+  {
+    "schemaVersion": 1,
+    "providerType": "KOKORO",
+    "adapterVersion": "official-source-overlay-2",
+    "capabilityVersion": "kokoro-v1",
+    "modelId": "Kokoro-82M",
+    "modelRevision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
+    "languages": [
+      "zh-CN",
+      "en-US"
+    ],
+    "voices": [
+      {
+        "id": "zf_xiaobei",
+        "displayName": "zf_xiaobei",
+        "languages": [
+          "zh-CN"
+        ]
+      },
+      {
+        "id": "zf_xiaoni",
+        "displayName": "zf_xiaoni",
+        "languages": [
+          "zh-CN"
+        ]
+      },
+      {
+        "id": "zf_xiaoxiao",
+        "displayName": "zf_xiaoxiao",
+        "languages": [
+          "zh-CN"
+        ]
+      },
+      {
+        "id": "zf_xiaoyi",
+        "displayName": "zf_xiaoyi",
+        "languages": [
+          "zh-CN"
+        ]
+      },
+      {
+        "id": "zm_yunjian",
+        "displayName": "zm_yunjian",
+        "languages": [
+          "zh-CN"
+        ]
+      },
+      {
+        "id": "zm_yunxi",
+        "displayName": "zm_yunxi",
+        "languages": [
+          "zh-CN"
+        ]
+      },
+      {
+        "id": "zm_yunxia",
+        "displayName": "zm_yunxia",
+        "languages": [
+          "zh-CN"
+        ]
+      },
+      {
+        "id": "zm_yunyang",
+        "displayName": "zm_yunyang",
+        "languages": [
+          "zh-CN"
+        ]
+      },
+      {
+        "id": "af_heart",
+        "displayName": "Heart",
+        "languages": [
+          "en-US"
+        ]
+      }
+    ],
+    "maxInputChars": 200,
+    "parameters": {
+      "speed": {
+        "minimum": 0.5,
+        "maximum": 2.0,
+        "defaultValue": 1.0
+      }
+    },
+    "referenceVoice": false,
+    "audioStreaming": false,
+    "cancelMode": "QUEUED_ONLY",
+    "queryMode": "PROCESS",
+    "fallbackTarget": true
+  },
+  {
+    "schemaVersion": 1,
+    "providerType": "COSYVOICE3",
+    "adapterVersion": "official-source-overlay-2",
+    "capabilityVersion": "cosyvoice3-v1",
+    "modelId": "Fun-CosyVoice3-0.5B-2512",
+    "modelRevision": "29e01c4e8d000f4bcd70751be16fa94bf3d85a18",
+    "languages": [
+      "zh-CN",
+      "en-US"
+    ],
+    "voices": [],
+    "maxInputChars": 200,
+    "parameters": {
+      "speed": {
+        "minimum": 0.5,
+        "maximum": 2.0,
+        "defaultValue": 1.0
+      }
+    },
+    "referenceVoice": true,
+    "audioStreaming": false,
+    "cancelMode": "QUEUED_ONLY",
+    "queryMode": "PROCESS",
+    "fallbackTarget": false,
+    "referenceMaxDurationMs": 30000
+  }
+]

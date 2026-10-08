@@ -22,6 +22,9 @@ import com.ruoyi.common.core.utils.StringUtils;
 import com.ruoyi.system.api.domain.RegisterCodeRequest;
 import com.ruoyi.system.api.domain.RegisterRequest;
 import com.ruoyi.system.api.domain.SysUser;
+import com.ruoyi.system.account.domain.RegistrationBenefits;
+import com.ruoyi.system.operations.mapper.PointBillingMapper;
+import com.ruoyi.system.operations.mapper.UsageMapper;
 
 /** Owns the one-time registration code and the atomic developer-account creation. */
 @Service
@@ -29,19 +32,29 @@ public class AccountRegistrationService
 {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int MAX_ATTEMPTS = 5;
+    private static final String STORAGE_GRANT_KEY = "registration:storage-grant";
+    private static final String POINT_GRANT_KEY = "registration:point-grant";
+    private static final String GRANT_REASON = "新用户注册初始赠送";
 
     private final JdbcTemplate jdbc;
     private final ISysUserService users;
     private final ObjectProvider<JavaMailSender> mailSenders;
+    private final UsageMapper quotas;
+    private final PointBillingMapper points;
+    private final ISysConfigService configs;
 
     @Value("${platform.mail.from:}")
     private String senderAddress;
 
-    public AccountRegistrationService(JdbcTemplate jdbc, ISysUserService users, ObjectProvider<JavaMailSender> mailSenders)
+    public AccountRegistrationService(JdbcTemplate jdbc, ISysUserService users, ObjectProvider<JavaMailSender> mailSenders,
+        UsageMapper quotas, PointBillingMapper points, ISysConfigService configs)
     {
         this.jdbc = jdbc;
         this.users = users;
         this.mailSenders = mailSenders;
+        this.quotas = quotas;
+        this.points = points;
+        this.configs = configs;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -95,7 +108,40 @@ public class AccountRegistrationService
         user.setPwdUpdateDate(DateUtils.getNowDate());
         user.setPassword(request.getPassword());
         if (!users.registerUser(user)) throw new ServiceException("注册失败，请稍后再试");
-        jdbc.update("update sys_user set email_verified_at=utc_timestamp(3) where user_id=?", user.getUserId());
+        if (jdbc.update("update sys_user set email_verified_at=utc_timestamp(3) where user_id=?", user.getUserId()) != 1)
+            throw new ServiceException("注册邮箱验证状态写入失败");
+        grantInitialBenefits(user.getUserId());
+    }
+
+    /** Called only after creating a new self-registered user, in the registration transaction. */
+    private void grantInitialBenefits(Long accountId)
+    {
+        if (accountId == null || accountId <= 0 || quotas.lockActiveAccount(accountId) == null)
+            throw new ServiceException("注册账号初始化失败");
+        Map<String, Object> storageGrant = quotas.grantByKey(accountId, STORAGE_GRANT_KEY);
+        Map<String, Object> pointGrant = points.grantByKey(accountId, POINT_GRANT_KEY);
+        if (storageGrant != null || pointGrant != null)
+        {
+            if (storageGrant != null && pointGrant != null
+                && "STORAGE_BYTE".equals(storageGrant.get("quotaType"))
+                && GRANT_REASON.equals(storageGrant.get("reason")) && GRANT_REASON.equals(pointGrant.get("reason"))) return;
+            throw new ServiceException("注册赠送记录冲突");
+        }
+        // Existing accounts and their grants are never changed by this initialization.
+        if (quotas.limits(accountId) != null || quotas.quotaBalanceForUpdate(accountId, "STORAGE_BYTE") != null
+            || points.balanceForUpdate(accountId) != null) throw new ServiceException("注册账号已有额度记录");
+        RegistrationBenefits benefits = RegistrationBenefits.from(
+            configs.selectConfigByKey(RegistrationBenefits.CONCURRENCY_KEY),
+            configs.selectConfigByKey(RegistrationBenefits.STORAGE_MB_KEY),
+            configs.selectConfigByKey(RegistrationBenefits.POINTS_KEY));
+        Long entryId = points.nextId();
+        if (entryId == null || entryId <= 0) throw new ServiceException("注册赠送流水标识生成失败");
+        if (quotas.insertLimits(accountId, benefits.storageBytes(), benefits.concurrency(), benefits.concurrency(), benefits.concurrency()) != 1
+            || quotas.insertQuotaBalance(accountId, "STORAGE_BYTE", benefits.storageBytes()) != 1
+            || quotas.insertGrantEntry(accountId, "STORAGE_BYTE", STORAGE_GRANT_KEY, benefits.storageBytes(), null, GRANT_REASON) != 1
+            || points.insertBalance(accountId, benefits.pointsCent()) != 1
+            || points.insertEntry(entryId, accountId, null, POINT_GRANT_KEY, "GRANT", benefits.pointsCent(), 0, 0, null, GRANT_REASON) != 1)
+            throw new ServiceException("注册初始额度赠送失败");
     }
 
     private void requireAvailable(String username, String email)

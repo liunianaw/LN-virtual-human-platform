@@ -1,5 +1,6 @@
 <template>
   <div class="app-container">
+    <header class="console-page-heading"><div><h1>Skills</h1><p>配置提示词与工具，供应用按需选择。</p></div></header>
     <el-alert :title="isAdmin ? '这里只维护公共 Skills；不能查看或编辑开发者私有 Skill。' : '这里只维护本账号私有 Skills；公共 Skill 可在 Application 中只读选择。'" type="info" :closable="false" />
     <div class="toolbar"><el-button type="primary" @click="startCreate">创建{{ isAdmin ? '公共' : '私有' }} Skill</el-button><el-button @click="reload">刷新</el-button></div>
     <el-table v-loading="loading" :data="items">
@@ -8,6 +9,7 @@
       <el-table-column prop="status" label="状态" width="120" />
       <el-table-column label="操作" width="100"><template #default="{ row }"><el-button link type="primary" @click="openDetail(row.skillId)">编辑</el-button></template></el-table-column>
     </el-table>
+    <pagination v-show="total > 0" :total="total" :page="pageNum" :limit="pageSize" :page-sizes="[10, 20, 50, 100]" :auto-scroll="false" @pagination="changePage" />
 
     <el-drawer v-model="editorOpen" :title="detail ? '编辑当前配置' : '创建 Skill'" size="720px" @closed="form.accessToken = ''">
       <el-form label-width="125px">
@@ -56,13 +58,16 @@ import useUserStore from '@/store/modules/user'
 
 const isAdmin = computed(() => useUserStore().roles.includes('admin'))
 const blank = (): SkillInput => ({ name: '', description: '', skillType: 'PROMPT', instructions: '', contextRequirements: {}, httpMethod: 'GET', timeoutMs: 5000, maxResultBytes: 65536, maxCallsPerSession: 10 })
+const pageNum = ref(1), pageSize = ref(20), total = ref(0)
 const loading = ref(false), editorOpen = ref(false), items = ref<SkillSummary[]>([]), detail = ref<SkillDetail>()
 const form = reactive<SkillInput>(blank()), importText = ref('')
 const inputSchemaText = ref('{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}')
 const outputSchemaText = ref('{"type":"object","properties":{"summary":{"type":"string"}}}')
 const frontendFieldsText = ref(''), bindExternalUser = ref(true)
 const canSave = computed(() => !!form.name.trim() && (form.skillType === 'PROMPT' ? !!form.instructions?.trim() : !!form.toolName?.trim() && !!form.toolUrl?.trim()))
-function reload() { loading.value = true; listSkills(isAdmin.value).then(res => { items.value = res.data?.items || [] }).finally(() => { loading.value = false }) }
+let listRequest = 0
+function reload() { const request = ++listRequest; loading.value = true; listSkills(isAdmin.value, { pageNum: pageNum.value, pageSize: pageSize.value }).then(res => { if (request !== listRequest) return; items.value = res.data?.items || []; total.value = res.data?.total || 0 }).finally(() => { if (request === listRequest) loading.value = false }) }
+function changePage({ page, limit }: { page: number; limit: number }) { pageNum.value = pageSize.value === limit ? page : 1; pageSize.value = limit; reload() }
 function reset(value?: SkillDetail) { Object.keys(form).forEach(key => Reflect.deleteProperty(form, key)); Object.assign(form, blank(), value || {}, { accessToken: '' }); inputSchemaText.value = value?.inputSchema ? JSON.stringify(value.inputSchema) : '{"type":"object"}'; outputSchemaText.value = value?.outputSchema ? JSON.stringify(value.outputSchema) : '{"type":"object"}'; frontendFieldsText.value = value?.frontendFields?.join(', ') || ''; bindExternalUser.value = value?.identityBinding?.externalUserId === 'HEADER' }
 function startCreate() { detail.value = undefined; reset(); editorOpen.value = true }
 function openDetail(id: string) { getSkill(id, isAdmin.value).then(res => { if (!res.data) return; detail.value = res.data; reset(res.data); editorOpen.value = true }) }

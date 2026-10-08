@@ -15,6 +15,22 @@ import com.ruoyi.system.application.service.impl.ApplicationServiceImpl;
 class ApplicationServiceTest
 {
     @Test
+    void searchPagesAndCountsTheSameAccountAndFiltersAndRejectsOverflow()
+    {
+        var mapper = mock(ApplicationMapper.class);
+        var service = new ApplicationServiceImpl(mapper, new ObjectMapper());
+        when(mapper.searchApplications(7, "ACTIVE", "应用", 20, 20)).thenReturn(List.of());
+        when(mapper.countSearchApplications(7, "ACTIVE", "应用")).thenReturn(35);
+        var page = service.search(7, 2, 20, "ACTIVE", " 应用 ");
+        assertEquals(35, page.get("total"));
+        assertEquals(2, page.get("pageNum"));
+        verify(mapper).searchApplications(7, "ACTIVE", "应用", 20, 20);
+        verify(mapper).countSearchApplications(7, "ACTIVE", "应用");
+        assertThrows(ServiceException.class, () -> service.search(7, Integer.MAX_VALUE, 100, null, "应用"));
+        assertThrows(ServiceException.class, () -> service.list(7, Integer.MAX_VALUE, 100, null));
+        verifyNoMoreInteractions(mapper);
+    }
+    @Test
     void currentSaveRejectsStaleRevisionUnavailableVoiceAndDuplicateToolNames()
     {
         ApplicationMapper mapper = mock(ApplicationMapper.class);

@@ -1,0 +1,3 @@
+# Lightweight executor only; model requirements stay in independent model-runtimes.
+setuptools==75.8.0
+websockets==15.0.1

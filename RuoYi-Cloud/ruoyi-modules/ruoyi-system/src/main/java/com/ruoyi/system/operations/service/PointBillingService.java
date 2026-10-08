@@ -18,11 +18,34 @@ public class PointBillingService
     public static final String GENERATION_ACTION="GENERATION_ACTION", TTS_CHARACTER="TTS_CHARACTER";
     private final PointBillingMapper mapper;
     public PointBillingService(PointBillingMapper mapper) { this.mapper=mapper; }
+    public Long findTtsReservation(long accountId,String businessId) { return mapper.ttsReservationId(accountId,businessId); }
 
     @Transactional
     public long reserve(long accountId,long reservationId,String businessType,String businessId,int reservationNo,
         String item,long measuredUnits)
     {
+        return reserveLocked(accountId,reservationId,businessType,businessId,reservationNo,item,measuredUnits,null,null);
+    }
+
+    @Transactional
+    public long reserveTts(long accountId,long applicationId,long reservationId,String businessId,long units)
+    {
+        if (applicationId<=0 || businessId==null || !businessId.matches("[1-9][0-9]{0,18}:[0-9]{1,5}"))
+            throw new ServiceException("TTS 积分请求无效",400);
+        return reserveLocked(accountId,reservationId,"TTS_SEGMENT",businessId,1,TTS_CHARACTER,units,
+            businessId.substring(0,businessId.indexOf(':')),applicationId);
+    }
+
+    private long reserveLocked(long accountId,long reservationId,String businessType,String businessId,int reservationNo,
+        String item,long measuredUnits,String requestKey,Long applicationId)
+    {
+        if (measuredUnits<=0) throw new ServiceException("积分计量无效",400);
+        // Serialize the whole request's first price selection, including two concurrently starting segments.
+        if(mapper.balanceForUpdate(accountId)==null)
+            throw new ServiceException("积分余额不存在或不足",429);
+        PointBillingMapper.TtsPrice fixed=requestKey==null?null:mapper.ttsPrice(accountId,requestKey);
+        if (fixed!=null && fixed.applicationId()!=null && !fixed.applicationId().equals(applicationId))
+            throw new ServiceException("TTS 请求归属冲突",409);
         Map<String,Object> old=mapper.reservation(accountId,businessType,businessId,reservationNo);
         if(old!=null)
         {
@@ -30,20 +53,12 @@ public class PointBillingService
                 || "RELEASED".equals(old.get("state"))) throw new ServiceException("积分预占请求冲突",409);
             return number(old.get("id"));
         }
-        Quote quote=quote(item,measuredUnits);
-        if(mapper.balanceForUpdate(accountId)==null)
-            throw new ServiceException("积分不足，需要 "+points(quote.amountCent())+" 积分",429);
-        old=mapper.reservation(accountId,businessType,businessId,reservationNo);
-        if(old!=null)
-        {
-            if(number(old.get("measuredUnits"))!=measuredUnits || !item.equals(old.get("billingItem"))
-                || "RELEASED".equals(old.get("state"))) throw new ServiceException("积分预占请求冲突",409);
-            return number(old.get("id"));
-        }
+        Quote quote=fixed==null?quote(item,measuredUnits):new Quote(fixed.rateVersionId(),fixed.unitPriceCent(),
+            Math.multiplyExact(measuredUnits,fixed.unitPriceCent()));
         if(mapper.reserveBalance(accountId,quote.amountCent())!=1)
             throw new ServiceException("积分不足，需要 "+points(quote.amountCent())+" 积分",429);
         mapper.insertReservation(reservationId,accountId,businessType,businessId,reservationNo,item,measuredUnits,
-            quote.unitPriceCent(),quote.rateVersionId(),quote.amountCent());
+            quote.unitPriceCent(),quote.rateVersionId(),quote.amountCent(),requestKey,applicationId);
         entry(accountId,reservationId,businessType+":"+businessId+":reserve:"+reservationNo,"RESERVE",0,0,quote.amountCent(),null,null);
         return reservationId;
     }
@@ -59,7 +74,7 @@ public class PointBillingService
         long amount=number(old.get("reservedCent"));
         if(mapper.reserveBalance(accountId,amount)!=1) throw new ServiceException("积分不足，需要 "+points(amount)+" 积分",429);
         mapper.insertReservation(reservationId,accountId,businessType,businessId,no,String.valueOf(old.get("billingItem")),
-            number(old.get("measuredUnits")),number(old.get("unitPriceCent")),number(old.get("rateVersionId")),amount);
+            number(old.get("measuredUnits")),number(old.get("unitPriceCent")),number(old.get("rateVersionId")),amount,null,null);
         entry(accountId,reservationId,businessType+":"+businessId+":reserve:"+no,"RESERVE",0,0,amount,null,null);
         return mapper.reservation(accountId,businessType,businessId,no);
     }
@@ -67,18 +82,19 @@ public class PointBillingService
     @Transactional
     public void finish(long accountId,String businessType,String businessId,String outcome,long successfulItems)
     {
+        if (!List.of("SETTLE","RELEASE","REVIEW").contains(outcome)) throw new ServiceException("积分终态无效",400);
         if(mapper.balanceForUpdate(accountId)==null) throw new ServiceException("积分余额不存在",404);
         Map<String,Object> row=mapper.latestReservationForUpdate(accountId,businessType,businessId);
         if(row==null) throw new ServiceException("积分预占不存在",404);
         String state=String.valueOf(row.get("state"));
         if("REVIEW".equals(outcome))
         {
-            if("REVIEW_REQUIRED".equals(state)) return;
+            if("REVIEW_REQUIRED".equals(state) || "SETTLED".equals(state) || "RELEASED".equals(state)) return;
             if(!"RESERVED".equals(state) || mapper.reviewReservation(number(row.get("id")))!=1)
                 throw new ServiceException("积分待核对状态已变化",409);
             return;
         }
-        String target="RELEASE".equals(outcome)?"RELEASED":"SETTLED";
+        String target="RELEASE".equals(outcome) || number(row.get("reservedCent"))==0 ?"RELEASED":"SETTLED";
         if(target.equals(state)) return;
         if(!"RESERVED".equals(state) && !"REVIEW_REQUIRED".equals(state)) throw new ServiceException("积分终态冲突",409);
         long reserved=number(row.get("reservedCent"));

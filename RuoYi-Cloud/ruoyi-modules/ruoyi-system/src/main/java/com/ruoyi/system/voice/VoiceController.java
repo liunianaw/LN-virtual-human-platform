@@ -20,8 +20,8 @@ import com.ruoyi.system.api.model.LoginUser;
 @RequestMapping("/api/v1")
 public class VoiceController
 {
-    private final VoiceService voices;
-    public VoiceController(VoiceService voices) { this.voices = voices; }
+    private final IOfficialVoiceService voices;
+    public VoiceController(IOfficialVoiceService voices) { this.voices = voices; }
 
     /** Only published OFFICIAL voices are visible to ordinary signed-in users. */
     @GetMapping("/voices")
@@ -51,13 +51,13 @@ public class VoiceController
 
     @RequiresPermissions("platform:officialVoice:write")
     @PostMapping("/admin/public-voices")
-    public AjaxResult create(@RequestBody VoiceService.OfficialVoiceInput request,
+    public AjaxResult create(@jakarta.validation.Valid @RequestBody VoiceServiceImpl.OfficialVoiceInput request,
         @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey)
     { return AjaxResult.success(voices.createOfficialCandidate(requireAdministrator().getUserid(), request, idempotencyKey)); }
 
     @RequiresPermissions("platform:officialVoice:write")
     @PostMapping("/admin/public-voices/{voiceId}/versions")
-    public AjaxResult createVersion(@PathVariable long voiceId, @RequestBody VoiceService.OfficialVoiceInput request,
+    public AjaxResult createVersion(@PathVariable long voiceId, @jakarta.validation.Valid @RequestBody VoiceServiceImpl.OfficialVoiceInput request,
         @RequestHeader(value = "If-Match", required = false) String ifMatch,
         @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey)
     { return AjaxResult.success(voices.createOfficialVersion(requireAdministrator().getUserid(), voiceId, request, ifMatch, idempotencyKey)); }
@@ -77,7 +77,7 @@ public class VoiceController
     @RequiresPermissions("platform:officialVoice:write")
     @PostMapping("/admin/public-voices/{voiceId}/versions/{versionId}/publish")
     public AjaxResult publish(@PathVariable long voiceId, @PathVariable long versionId,
-        @RequestBody VoiceService.PublishRequest request, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+        @jakarta.validation.Valid @RequestBody VoiceServiceImpl.PublishRequest request, @RequestHeader(value = "If-Match", required = false) String ifMatch,
         @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey)
     { return AjaxResult.success(voices.publishOfficial(requireAdministrator().getUserid(), voiceId, versionId, request, ifMatch, idempotencyKey)); }
 

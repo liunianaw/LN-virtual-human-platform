@@ -16,6 +16,7 @@ public interface IAssetService
     GenerationTaskResponse readGenerationTask(Long accountId, Long taskId);
     List<GenerationTaskResponse> listGenerationTasks(Long accountId);
     Map<String, Object> pageGenerationTasks(Long accountId, int pageNum, int pageSize);
+    Map<String, Object> pageConsoleGenerationTasks(Long accountId, int pageNum, int pageSize);
     List<Map<String, Object>> listGenerationSteps(Long accountId, Long taskId);
     List<AvatarGenerationServiceResponse> listAvatarGenerationServices(Long accountId);
 }

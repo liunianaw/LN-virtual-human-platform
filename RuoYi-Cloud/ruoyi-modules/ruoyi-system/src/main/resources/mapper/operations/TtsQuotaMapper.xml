@@ -5,15 +5,15 @@
     select purpose from p_application where id=#{applicationId} and account_id=#{accountId}
       and status='ACTIVE' and admin_disabled=0
   </select>
-  <select id="balanceForUpdate" resultType="map">
+  <select id="balanceForUpdate" resultType="long">
     select id from p_quota_balance where account_id=#{accountId} and quota_type='TTS_CHAR' for update
   </select>
-  <select id="reservation" resultType="map">
+  <select id="reservation" resultType="com.ruoyi.system.operations.mapper.TtsQuotaMapper$Reservation">
     select id,reserved_units reservedUnits,state from p_quota_reservation
     where account_id=#{accountId} and quota_type='TTS_CHAR' and business_type='TTS_SEGMENT'
       and business_id=#{businessId} and reservation_no=1
   </select>
-  <select id="reservationForUpdate" resultType="map">
+  <select id="reservationForUpdate" resultType="com.ruoyi.system.operations.mapper.TtsQuotaMapper$Reservation">
     select id,reserved_units reservedUnits,state from p_quota_reservation
     where account_id=#{accountId} and quota_type='TTS_CHAR' and business_type='TTS_SEGMENT'
       and business_id=#{businessId} and reservation_no=1 for update
@@ -40,7 +40,7 @@
     update p_quota_reservation set state=#{state},settled_units=#{settledUnits},
       settled_at=case when #{state}='SETTLED' then utc_timestamp(3) else null end,
       released_at=case when #{state}='RELEASED' then utc_timestamp(3) else null end,
-      updated_at=utc_timestamp(3) where id=#{id} and state='RESERVED'
+      updated_at=utc_timestamp(3) where id=#{id} and state in ('RESERVED','REVIEW_REQUIRED')
   </update>
   <update id="reviewReservation">
     update p_quota_reservation set state='REVIEW_REQUIRED',updated_at=utc_timestamp(3)

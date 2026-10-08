@@ -17,6 +17,10 @@ validation/workspace/
 **/dist/
 **/test-results/
 **/.pytest_cache/
+ruoyi-voice/model-runtimes/**/metadata.local.json
+ruoyi-voice/model-runtimes/**/weights/
+ruoyi-voice/*.egg-info/
+ruoyi-voice/build/
 # Pristine upstream checkouts; pinned sources are recorded in docs/framework-bootstrap.md
 upstream/
 
@@ -40,3 +44,10 @@ upstream/
 *.ppt
 *.pptx
 **/[Rr][Ee][Aa][Dd][Mm][Ee].txt
+
+# Local console acceptance scripts and evidence; production tests remain tracked
+/validation/console-ui/
+/validation/console-experience-check.mjs
+/validation/header-navigation-check.mjs
+/validation/menu-management-check.mjs
+/validation/system-permission-check.py

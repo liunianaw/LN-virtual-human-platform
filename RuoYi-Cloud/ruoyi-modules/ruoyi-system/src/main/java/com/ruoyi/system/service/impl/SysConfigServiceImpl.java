@@ -12,6 +12,7 @@ import com.ruoyi.common.core.text.Convert;
 import com.ruoyi.common.core.utils.StringUtils;
 import com.ruoyi.common.redis.service.RedisService;
 import com.ruoyi.system.domain.SysConfig;
+import com.ruoyi.system.account.domain.RegistrationBenefits;
 import com.ruoyi.system.mapper.SysConfigMapper;
 import com.ruoyi.system.service.ISysConfigService;
 
@@ -98,6 +99,8 @@ public class SysConfigServiceImpl implements ISysConfigService
     @Override
     public int insertConfig(SysConfig config)
     {
+        RegistrationBenefits.validate(config.getConfigKey(), config.getConfigValue());
+        if (RegistrationBenefits.isBenefitKey(config.getConfigKey())) config.setConfigType(UserConstants.YES);
         int row = configMapper.insertConfig(config);
         if (row > 0)
         {
@@ -116,6 +119,10 @@ public class SysConfigServiceImpl implements ISysConfigService
     public int updateConfig(SysConfig config)
     {
         SysConfig temp = configMapper.selectConfigById(config.getConfigId());
+        if (RegistrationBenefits.isBenefitKey(temp.getConfigKey()) && !StringUtils.equals(temp.getConfigKey(), config.getConfigKey()))
+            throw new ServiceException("新用户注册赠送参数键名不能修改");
+        RegistrationBenefits.validate(config.getConfigKey(), config.getConfigValue());
+        if (RegistrationBenefits.isBenefitKey(config.getConfigKey())) config.setConfigType(UserConstants.YES);
         if (!StringUtils.equals(temp.getConfigKey(), config.getConfigKey()))
         {
             redisService.deleteObject(getCacheKey(temp.getConfigKey()));
@@ -140,7 +147,7 @@ public class SysConfigServiceImpl implements ISysConfigService
         for (Long configId : configIds)
         {
             SysConfig config = selectConfigById(configId);
-            if (StringUtils.equals(UserConstants.YES, config.getConfigType()))
+            if (StringUtils.equals(UserConstants.YES, config.getConfigType()) || RegistrationBenefits.isBenefitKey(config.getConfigKey()))
             {
                 throw new ServiceException(String.format("内置参数【%1$s】不能删除 ", config.getConfigKey()));
             }

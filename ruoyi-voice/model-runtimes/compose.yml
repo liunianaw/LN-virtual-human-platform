@@ -1,0 +1,30 @@
+# Explicit opt-in deployment, never started by the platform launcher.
+services:
+  kokoro:
+    build:
+      context: ../..
+      dockerfile: ruoyi-voice/model-runtimes/kokoro/Dockerfile
+    ports: ["127.0.0.1:8011:8011"]
+    environment:
+      LN_VOICE_MODEL_BEARER: ${LN_VOICE_KOKORO_BEARER:?dedicated model bearer required}
+    volumes: ["${LN_VOICE_KOKORO_MODEL_DIR:?locked weights directory required}:/models/kokoro:ro"]
+    mem_limit: 3g
+    cpus: 2
+    pids_limit: 128
+    restart: "no"
+  cosyvoice3:
+    build:
+      context: ../..
+      dockerfile: ruoyi-voice/model-runtimes/cosyvoice3/Dockerfile
+    ports: ["127.0.0.1:8012:8012"]
+    environment:
+      LN_VOICE_MODEL_BEARER: ${LN_VOICE_COSYVOICE3_BEARER:?dedicated model bearer required}
+      LN_VOICE_REFERENCE_HOSTS: ${LN_VOICE_REFERENCE_HOSTS:?controlled COS hostname required}
+    volumes:
+      - "${LN_VOICE_COSYVOICE3_MODEL_DIR:?locked weights directory required}:/models/cosyvoice3:ro"
+      - "${LN_VOICE_COSYVOICE3_TEXT_RESOURCE_DIR:?locked wetext directory required}:/models/wetext:ro"
+    mem_limit: 8g
+    cpus: 4
+    pids_limit: 256
+    gpus: all
+    restart: "no"

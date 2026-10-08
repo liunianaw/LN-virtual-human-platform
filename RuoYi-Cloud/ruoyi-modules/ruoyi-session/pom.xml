@@ -10,6 +10,9 @@
     <artifactId>ruoyi-modules-session</artifactId>
     <description>ruoyi-modules-session 会话服务</description>
     <dependencies>
+        <dependency><groupId>com.ruoyi</groupId><artifactId>ruoyi-common-voice</artifactId><version>${ruoyi.version}</version></dependency>
+        <dependency><groupId>org.mybatis</groupId><artifactId>mybatis</artifactId><version>3.5.19</version></dependency>
+        <dependency><groupId>org.mybatis</groupId><artifactId>mybatis-spring</artifactId></dependency>
         <dependency><groupId>com.alibaba.cloud</groupId><artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId></dependency>
         <dependency><groupId>com.alibaba.cloud</groupId><artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>

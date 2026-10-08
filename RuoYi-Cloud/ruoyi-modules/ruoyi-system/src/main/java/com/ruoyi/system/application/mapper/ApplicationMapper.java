@@ -11,6 +11,9 @@ public interface ApplicationMapper
     List<Map<String, Object>> selectApplications(@Param("accountId") long accountId, @Param("status") String status,
         @Param("offset") int offset, @Param("limit") int limit);
     int countApplications(@Param("accountId") long accountId, @Param("status") String status);
+    List<Map<String, Object>> searchApplications(@Param("accountId") long accountId, @Param("status") String status,
+        @Param("keyword") String keyword, @Param("offset") int offset, @Param("limit") int limit);
+    int countSearchApplications(@Param("accountId") long accountId, @Param("status") String status, @Param("keyword") String keyword);
     Map<String, Object> selectApplication(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
     Map<String, Object> selectApplicationForUpdate(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
     List<Map<String, Object>> selectApplicationSkills(@Param("applicationId") long applicationId);
@@ -35,6 +38,7 @@ public interface ApplicationMapper
     int countCurrentConfigAvailable(@Param("applicationId") long applicationId);
     Long selectAvatarVersion(@Param("accountId") long accountId, @Param("avatarId") long avatarId);
     Long selectVoiceVersion(@Param("voiceId") long voiceId);
+    Long selectVoiceFallback(@Param("version") long version);
     void releaseCurrentReferences(@Param("accountId") long accountId, @Param("applicationId") long applicationId);
     void insertCurrentReference(@Param("id") long id, @Param("accountId") long accountId,
         @Param("applicationId") long applicationId, @Param("operationId") String operationId,

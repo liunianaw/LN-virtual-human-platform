@@ -8,6 +8,7 @@ that enforce platform-side claim, attempt, and result semantics.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import tempfile
@@ -20,6 +21,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
+from PIL import Image
 
 from ruoyi_media.media import ACTIONS, process_action_board
 from ruoyi_media.providers.qwen_image import (
@@ -382,6 +384,17 @@ class GenerationWorker:
         artifact_root = Path(os.environ.get("RUOYI_MEDIA_ARTIFACT_DIR", str(Path(tempfile.gettempdir()) / "ruoyi-media-generation")))
         directory = artifact_root / f"{claim.task_id}-{claim.step_id}-{claim.lease_epoch}"
         directory.mkdir(parents=True, exist_ok=True)
+        if claim.action == "character_completion":
+            source = directory / "character.png"
+            with Image.open(io.BytesIO(image_png)) as opened:
+                width, height = opened.size
+                if width < 256 or height < 256 or width > 4096 or height > 4096:
+                    raise ValueError("character completion image dimensions are invalid")
+                opened.convert("RGB").save(source, format="PNG")
+            key = _output_key(claim.output_prefix, "character.png")
+            stored = self._objects.upload(key, source, "image/png")
+            _validate_stored_object(stored, key, source, "image/png")
+            return [stored], {"kind": "CHARACTER_COMPLETION", "width": width, "height": height}
         board_path = directory / "action-board.png"
         board_path.write_bytes(image_png)
         print(json.dumps({"event": "processing_start", "taskId": claim.task_id, "sourcePath": str(board_path)}), flush=True)
@@ -470,7 +483,7 @@ def _positive_identifier(value: object, field: str) -> str:
 
 
 def _validate_claim(claim: ClaimedActionStep, event: AvatarGenerationRequested) -> None:
-    if claim.action not in ACTIONS:
+    if claim.action not in ACTIONS and claim.action != "character_completion":
         raise ValueError("claim action is not one of the eight standard actions")
     if claim.task_id != event.task_id or claim.account_id != event.account_id or claim.lease_epoch < 1:
         raise ValueError("claim does not match the controlled task event")

@@ -1,0 +1,646 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ln:voice:v1",
+  "$defs": {
+    "SynthesisAttemptRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "traceId",
+        "taskId",
+        "attemptId",
+        "taskRevision",
+        "requestHash",
+        "voiceVersionId",
+        "dispatchToken",
+        "text",
+        "textHash",
+        "inputCharCount",
+        "deadlineAt",
+        "maxAudioBytes"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "traceId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+        },
+        "taskId": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "attemptId": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "taskRevision": {
+          "enum": [
+            1,
+            2
+          ]
+        },
+        "requestHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "voiceVersionId": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "dispatchToken": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "textHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "inputCharCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "deadlineAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "maxAudioBytes": {
+          "type": "integer",
+          "minimum": 45,
+          "maximum": 5242880
+        }
+      }
+    },
+    "DispatchPermit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taskRevision",
+        "workerInstanceId",
+        "workerBootId",
+        "dispatchToken"
+      ],
+      "properties": {
+        "taskRevision": {
+          "enum": [
+            1,
+            2
+          ]
+        },
+        "workerInstanceId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+        },
+        "workerBootId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+        },
+        "dispatchToken": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "VoiceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "voiceVersionId",
+        "providerType",
+        "serviceId",
+        "serviceRevision",
+        "modelId",
+        "modelRevision",
+        "capabilityVersion",
+        "providerVoiceRef",
+        "language",
+        "parameters",
+        "referenceAssetId",
+        "referenceText",
+        "fallback",
+        "allowVoiceChange",
+        "policyVersion",
+        "endpoint"
+      ],
+      "properties": {
+        "voiceVersionId": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "providerType": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+        },
+        "serviceId": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "serviceRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "modelId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "modelRevision": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "capabilityVersion": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "providerVoiceRef": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "language": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "referenceAssetId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,19}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "referenceText": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 2000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fallback": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VoiceBinding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "allowVoiceChange": {
+          "type": "boolean"
+        },
+        "policyVersion": {
+          "const": "1"
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2000
+        }
+      }
+    },
+    "DispatchAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorized",
+        "binding"
+      ],
+      "properties": {
+        "authorized": {
+          "type": "boolean"
+        },
+        "binding": {
+          "$ref": "#/$defs/VoiceBinding"
+        },
+        "execution": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "credential",
+                "referenceAudioUrl",
+                "referenceAudioSha256",
+                "referenceAudioBytes"
+              ],
+              "properties": {
+                "credential": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                },
+                "referenceAudioUrl": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "referenceAudioSha256": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "referenceAudioBytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 45,
+                      "maximum": 5242880
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "AudioMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mimeType",
+        "codec",
+        "sampleRateHz",
+        "channels",
+        "sampleWidthBits",
+        "byteLength",
+        "durationMs",
+        "sha256"
+      ],
+      "properties": {
+        "mimeType": {
+          "const": "audio/wav"
+        },
+        "codec": {
+          "const": "PCM_S16LE"
+        },
+        "sampleRateHz": {
+          "const": 24000
+        },
+        "channels": {
+          "const": 1
+        },
+        "sampleWidthBits": {
+          "const": 16
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 45,
+          "maximum": 5242880
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "AttemptEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eventId",
+        "attemptId",
+        "taskRevision",
+        "requestHash",
+        "workerInstanceId",
+        "workerBootId",
+        "state",
+        "errorCode",
+        "failureStage",
+        "audio",
+        "providerRequestId",
+        "costSource",
+        "modelRevision"
+      ],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+        },
+        "attemptId": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$"
+        },
+        "taskRevision": {
+          "enum": [
+            1,
+            2
+          ]
+        },
+        "requestHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "workerInstanceId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workerBootId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "SUCCEEDED",
+            "FAILED",
+            "CANCELLED",
+            "UNKNOWN"
+          ]
+        },
+        "errorCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z0-9_]{1,64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failureStage": {
+          "enum": [
+            "BEFORE_DISPATCH",
+            "DISPATCHING",
+            "DEFINITIVE",
+            "RECOVERY"
+          ]
+        },
+        "audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AudioMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "providerRequestId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "costSource": {
+          "enum": [
+            "UNKNOWN",
+            "PROVIDER",
+            "SELF_HOSTED",
+            "TEST"
+          ]
+        },
+        "modelRevision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "SUCCEEDED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "audio": {
+                "$ref": "#/$defs/AudioMetadata"
+              },
+              "modelRevision": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "VoiceCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "providerType",
+        "adapterVersion",
+        "capabilityVersion",
+        "modelId",
+        "modelRevision",
+        "languages",
+        "voices",
+        "maxInputChars",
+        "parameters",
+        "referenceVoice",
+        "audioStreaming",
+        "cancelMode",
+        "queryMode",
+        "fallbackTarget"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "providerType": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+        },
+        "adapterVersion": {
+          "type": "string"
+        },
+        "capabilityVersion": {
+          "type": "string"
+        },
+        "modelId": {
+          "type": "string"
+        },
+        "modelRevision": {
+          "type": "string"
+        },
+        "languages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "voices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "displayName",
+              "languages"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "languages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "maxInputChars": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "minimum",
+              "maximum",
+              "defaultValue"
+            ],
+            "properties": {
+              "minimum": {
+                "type": "number"
+              },
+              "maximum": {
+                "type": "number"
+              },
+              "defaultValue": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "referenceVoice": {
+          "type": "boolean"
+        },
+        "audioStreaming": {
+          "type": "boolean"
+        },
+        "cancelMode": {
+          "enum": [
+            "QUEUED_ONLY",
+            "BEST_EFFORT",
+            "CONFIRMED",
+            "UNSUPPORTED"
+          ]
+        },
+        "queryMode": {
+          "enum": [
+            "PROCESS",
+            "UPSTREAM"
+          ]
+        },
+        "fallbackTarget": {
+          "type": "boolean"
+        },
+        "referenceMaxDurationMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SynthesisAttemptRequest"
+    },
+    {
+      "$ref": "#/$defs/DispatchPermit"
+    },
+    {
+      "$ref": "#/$defs/DispatchAuthorization"
+    },
+    {
+      "$ref": "#/$defs/AttemptEvent"
+    },
+    {
+      "$ref": "#/$defs/VoiceCapability"
+    }
+  ]
+}

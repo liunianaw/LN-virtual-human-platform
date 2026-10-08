@@ -1,5 +1,5 @@
 <template>
-  <div :class="['sidebar-theme-wrapper', {'has-logo':showLogo}, sideTheme]" class="sidebar-container">
+  <div id="console-navigation" :class="['sidebar-theme-wrapper', {'has-logo':showLogo}, sideTheme]" class="sidebar-container">
     <logo v-if="showLogo" :collapse="isCollapse" />
     <el-scrollbar wrap-class="scrollbar-wrapper">
       <el-menu
@@ -7,7 +7,7 @@
         :collapse="isCollapse"
         :background-color="getMenuBackground"
         :text-color="getMenuTextColor"
-        :unique-opened="true"
+        :unique-opened="false"
         :active-text-color="theme"
         :collapse-transition="false"
         mode="vertical"
