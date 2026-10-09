@@ -1,3 +1,4 @@
+import { createRequestId } from '@ln-avatar/sdk'
 import request from '@/utils/request'
 import type { AjaxResult } from '@/types'
 
@@ -5,7 +6,7 @@ export interface Page<T> { items: T[]; total: number; pageNum: number; pageSize:
 export interface GenerationTask { taskId: string; accountId: string; status: string; internalState: string; progress: number; errorCode?: string; createdAt: string; unknown_attempts?: number }
 export interface Attempt { attemptId: string; stepId: string; status: string; providerRequestId?: string; providerTaskId?: string; errorCode?: string; etag: string; allowedOperations: string[] }
 export interface CallRecord { callId: string; accountId: string; operationKey: string; factKind?: 'LOGICAL' | 'ATTEMPT'; capability: string; status: string; usageAvailable: boolean; costAmount?: string | null; currency?: string | null; costSource: string; errorCode?: string; etag: string; createdAt: string }
-const headers = (etag: string) => ({ 'If-Match': etag, 'Idempotency-Key': crypto.randomUUID(), repeatSubmit: false })
+const headers = (etag: string) => ({ 'If-Match': etag, 'Idempotency-Key': createRequestId(), repeatSubmit: false })
 
 export const listTasks = (params: Record<string, unknown>): Promise<AjaxResult<Page<GenerationTask>>> => request({ url: '/api/v1/admin/generation-tasks', method: 'get', params })
 export const getTask = (taskId: string): Promise<AjaxResult<{ task: GenerationTask; attempts: Attempt[]; allowedOperations: string[] }>> => request({ url: `/api/v1/admin/generation-tasks/${taskId}`, method: 'get' })

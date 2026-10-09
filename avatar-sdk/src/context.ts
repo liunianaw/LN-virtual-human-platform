@@ -1,3 +1,4 @@
+import { createRequestId } from "./request-id.js";
 /** Optional browser page capture. Importing the core SDK does not load the renderer. */
 export type ContextSource = "ELEMENT" | "PAGE" | "HYBRID";
 export type ContextCoverage = "VIEWPORT" | "FULL_PAGE";
@@ -94,7 +95,7 @@ export class PageContext {
       dom: { allow: [], deny: denied, excludePassword: true },
       fullPageEnabled: true, highlightMode: "AUTO", allowScroll: false,
     };
-    return this.capture({ captureRequestId: crypto.randomUUID(), turnId: "", source: options.source,
+    return this.capture({ captureRequestId: createRequestId(), turnId: "", source: options.source,
       elementSelector: options.elementSelector, coverage: options.coverage ?? "VIEWPORT", resultMode: "PARTIAL",
       deadlineAt: new Date(Date.now() + 12000).toISOString(), fixedPolicy: policy, currentPolicy: policy }, "local", signal, options.screenshot !== false);
   }
@@ -208,7 +209,7 @@ export class PageContext {
           bytes += next;
           pieces.push(text);
           if (elements.length < 100) {
-            const ref = crypto.randomUUID();
+            const ref = createRequestId();
             this.refs.set(ref, { element, node: walker.currentNode as Text, text,
               captureRequestId: request.captureRequestId, policies,
               root, box, coverage, scrollX, scrollY, url: location.href });

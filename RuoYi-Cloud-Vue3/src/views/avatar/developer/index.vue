@@ -260,6 +260,7 @@
 </template>
 
 <script setup lang="ts" name="DeveloperAvatarProduction">
+import { createRequestId } from '@ln-avatar/sdk'
 import {
   assembleAvatarVersion,
   createAvatarGenerationTask,
@@ -367,7 +368,7 @@ function createTask() {
     sourceFileId: reference.value.fileId,
     officialServiceId: taskForm.officialServiceId,
     expectedServiceRevision: selectedService.revision,
-    requestId: crypto.randomUUID(),
+    requestId: createRequestId(),
     name: taskForm.name.trim()
   }
   createAvatarGenerationTask(createRequest).then(response => {
@@ -434,7 +435,7 @@ function createInheritedVersion(task: AvatarGenerationTask) {
     const detail = response.data
     if (!detail?.currentVersionId || !detail.revision) throw new Error('角色尚无可继承的已发布版本。')
     return createAvatarVersion(task.avatarId, {
-      requestId: crypto.randomUUID(), expectedAvatarRevision: detail.revision, baseVersionId: detail.currentVersionId
+      requestId: createRequestId(), expectedAvatarRevision: detail.revision, baseVersionId: detail.currentVersionId
     })
   }).then(response => {
     if (!response.data?.versionId) throw new Error('新版本接口未返回候选版本。')
@@ -529,7 +530,7 @@ function acceptAction(action: AvatarProductionAction) {
   const resultId = latestResult(action)
   if (!resultId || !production.value) return
   selectAvatarActionResult(production.value.avatarId, production.value.versionId, action.actionCode, {
-    requestId: crypto.randomUUID(), resultId, expectedActionRevision: action.actionRevision, visualAccepted: true
+    requestId: createRequestId(), resultId, expectedActionRevision: action.actionRevision, visualAccepted: true
   }).then(() => {
     proxy?.$modal.msgSuccess(`${actionLabel(action.actionCode)}已确认。`)
     loadProduction()
@@ -546,7 +547,7 @@ async function regenerateAction(action: AvatarProductionAction) {
     supersedesAttemptId = action.latestAttemptId || undefined
   }
   regenerateAvatarAction(production.value.avatarId, production.value.versionId, action.actionCode, {
-    requestId: crypto.randomUUID(), expectedActionRevision: action.actionRevision,
+    requestId: createRequestId(), expectedActionRevision: action.actionRevision,
     acknowledgeUncertainCharge, supersedesAttemptId
   }).then(() => {
     proxy?.$modal.msgSuccess(`已提交${actionLabel(action.actionCode)}重做。`)
@@ -558,7 +559,7 @@ async function regenerateAction(action: AvatarProductionAction) {
 function recoverAction(action: AvatarProductionAction) {
   if (!production.value || !action.latestAttemptId) return
   recoverAvatarActionAttempt(production.value.avatarId, production.value.versionId, action.actionCode, action.latestAttemptId, {
-    requestId: crypto.randomUUID(), expectedActionRevision: action.actionRevision
+    requestId: createRequestId(), expectedActionRevision: action.actionRevision
   }).then(() => {
     proxy?.$modal.msgSuccess(`已安排核对${actionLabel(action.actionCode)}的原任务，不会重新发起生成。`)
     loadProduction()
@@ -570,7 +571,7 @@ async function discardAction(action: AvatarProductionAction) {
   if (!production.value || !action.latestAttemptId || !action.acceptedResultId) return
   await proxy?.$modal.confirm('确认保留上一次已采用结果，并关闭本轮选用吗？已提交给厂商的请求无法保证取消。')
   discardAvatarActionAttempt(production.value.avatarId, production.value.versionId, action.actionCode, action.latestAttemptId, {
-    requestId: crypto.randomUUID(), expectedActionRevision: action.actionRevision, retainResultId: action.acceptedResultId
+    requestId: createRequestId(), expectedActionRevision: action.actionRevision, retainResultId: action.acceptedResultId
   }).then(() => {
     proxy?.$modal.msgSuccess(`已保留${actionLabel(action.actionCode)}的旧结果。`)
     loadProduction()
@@ -585,7 +586,7 @@ function assembleProduction() {
   if (selectedResults.some((item: { actionCode: string; resultId: string }) => !item.resultId)) return
   assembling.value = true
   assembleAvatarVersion(production.value.avatarId, production.value.versionId, {
-    requestId: crypto.randomUUID(), expectedCandidateRevision: production.value.candidateRevision, selectedResults
+    requestId: createRequestId(), expectedCandidateRevision: production.value.candidateRevision, selectedResults
   }).then(() => {
     proxy?.$modal.msgSuccess('八动作已组装，可以进行整套预览。')
     loadProduction()

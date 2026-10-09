@@ -36,19 +36,20 @@
   </div>
 </template>
 <script setup lang="ts" name="OfficialVoices">
+import { createRequestId } from '@ln-avatar/sdk'
 import { voiceReferences, uploadVoiceReference, type OfficialVoiceVersion, createOfficialVoiceVersion, auditionOfficialVoice, createOfficialVoice, getOfficialVoice, listOfficialVoiceServices, listOfficialVoices, publishOfficialVoice, type OfficialVoice, type OfficialVoiceService, type OfficialVoiceSummary } from '@/api/asset/official-voice'
 const { proxy } = getCurrentInstance()
 const pageNum = ref(1), pageSize = ref(20), total = ref(0)
 const loading = ref(false); const services = ref<OfficialVoiceService[]>([]); const voices = ref<OfficialVoiceSummary[]>([]); const detail = ref<OfficialVoice>(); const detailOpen = ref(false)
 const editingVoiceId = ref(''); const editingRevision = ref('');
 const voiceMode = ref<'NORMAL' | 'CLONE'>('NORMAL')
-const auditionKey = ref(crypto.randomUUID()); const auditionRequest = ref('');
+const auditionKey = ref(createRequestId()); const auditionRequest = ref('');
 const references = ref<{ id: string; name: string }[]>([])
 async function uploadReference(event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (!file || voiceMode.value !== 'CLONE' || !selectedService.value?.capability.referenceVoice) return; const serviceId = form.officialServiceId; const result = await uploadVoiceReference(file); references.value = (await voiceReferences()).data || []; if (voiceMode.value === 'CLONE' && form.officialServiceId === serviceId) form.referenceAssetId = result.data?.referenceAssetId || '' }
 const auditionText = ref('你好，这是官方声音试听。'); const auditionUrl = ref(''); const auditionVersion = ref(''); const auditionComplete = ref(false); const auditionBusy = ref(false)
 function clearAudition() { if (auditionUrl.value) URL.revokeObjectURL(auditionUrl.value); auditionUrl.value = ''; auditionVersion.value = ''; auditionComplete.value = false }
-function audition(versionId: string) { if (!detail.value || auditionBusy.value) return; proxy?.$modal.confirm('试听可能产生云服务费用；相同请求重读不会重新合成。确认继续？').then(async () => { clearAudition(); auditionBusy.value = true; try { const request = `${versionId}:${auditionText.value}`; if (auditionRequest.value !== request) { auditionKey.value = crypto.randomUUID(); auditionRequest.value = request }; const blob = await auditionOfficialVoice(detail.value!.voiceId, versionId, auditionText.value, auditionKey.value); auditionUrl.value = URL.createObjectURL(blob); auditionVersion.value = versionId } finally { auditionBusy.value = false } }) }
-function newAudition() { clearAudition(); auditionRequest.value = ''; auditionKey.value = crypto.randomUUID(); proxy?.$modal.msgSuccess('下次试听将创建新请求，可能产生新费用。') }
+function audition(versionId: string) { if (!detail.value || auditionBusy.value) return; proxy?.$modal.confirm('试听可能产生云服务费用；相同请求重读不会重新合成。确认继续？').then(async () => { clearAudition(); auditionBusy.value = true; try { const request = `${versionId}:${auditionText.value}`; if (auditionRequest.value !== request) { auditionKey.value = createRequestId(); auditionRequest.value = request }; const blob = await auditionOfficialVoice(detail.value!.voiceId, versionId, auditionText.value, auditionKey.value); auditionUrl.value = URL.createObjectURL(blob); auditionVersion.value = versionId } finally { auditionBusy.value = false } }) }
+function newAudition() { clearAudition(); auditionRequest.value = ''; auditionKey.value = createRequestId(); proxy?.$modal.msgSuccess('下次试听将创建新请求，可能产生新费用。') }
 onBeforeUnmount(clearAudition)
 const form = reactive({ name: '', description: '', officialServiceId: '', voiceAlias: '', language: 'zh-CN', parameters: {} as Record<string, number>, fallbackVoiceVersionId: '', allowVoiceChange: false, referenceAssetId: '', referenceText: '' })
 const selectedService = computed(() => services.value.find((item: OfficialVoiceService) => item.serviceId === form.officialServiceId))

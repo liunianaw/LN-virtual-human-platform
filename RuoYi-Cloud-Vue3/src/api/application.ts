@@ -1,3 +1,4 @@
+import { createRequestId } from '@ln-avatar/sdk'
 import request from '@/utils/request'
 import type { AjaxResult } from '@/types'
 import type { PageResult, PageQuery } from '@/types/page'
@@ -22,7 +23,7 @@ export interface ApplicationSecretSummary {
 }
 
 const commandHeaders = (revision?: string) => ({
-  'Idempotency-Key': crypto.randomUUID(), ...(revision ? { 'If-Match': revision } : {})
+  'Idempotency-Key': createRequestId(), ...(revision ? { 'If-Match': revision } : {})
 })
 
 export const listApplications = (params: PageQuery & { status?: string; keyword?: string } = {}): Promise<AjaxResult<PageResult<ApplicationSummary>>> =>

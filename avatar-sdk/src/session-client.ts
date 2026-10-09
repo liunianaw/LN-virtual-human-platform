@@ -1,3 +1,4 @@
+import { createRequestId } from "./request-id.js";
 import { AvatarPlayer } from "./avatar-player.js";
 import type { CaptureOptions, ContextCapture, PageContext } from "./context.js";
 
@@ -584,7 +585,7 @@ export class SessionClient {
     if (this.destroyed || generation !== this.generation) throw new SessionClientError("CLIENT_DESTROYED", "Connection attempt was superseded.");
   }
   private assertLive(): void { if (this.destroyed) throw new SessionClientError("CLIENT_DESTROYED", "SessionClient has been destroyed."); }
-  private requestId(): string { return crypto.randomUUID(); }
+  private requestId(): string { return createRequestId(); }
   private emit(event: SessionClientEvent): void {
     for (const listener of this.listeners) {
       try { listener(event); } catch { /* UI listener failures must not close the runtime connection. */ }
