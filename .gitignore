@@ -38,6 +38,8 @@ upstream/
 /docs/
 /logs/
 *.md
+# Public repository entry point; other project documentation stays local.
+!/README.md
 *.doc
 *.docx
 *.pdf
