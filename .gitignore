@@ -9,7 +9,7 @@
 !**/.env.example
 RuoYi-Cloud/ruoyi-modules/ruoyi-system/src/main/resources/application-local.yml
 RuoYi-Cloud/sql/备份/
-validation/workspace/
+/validation/
 **/__pycache__/
 **/.venv/
 **/node_modules/
@@ -46,10 +46,3 @@ upstream/
 *.ppt
 *.pptx
 **/[Rr][Ee][Aa][Dd][Mm][Ee].txt
-
-# Local console acceptance scripts and evidence; production tests remain tracked
-/validation/console-ui/
-/validation/console-experience-check.mjs
-/validation/header-navigation-check.mjs
-/validation/menu-management-check.mjs
-/validation/system-permission-check.py

@@ -131,6 +131,7 @@
   </div>
 </template>
 <script setup lang="ts" name="AccountQuotaGovernance">
+import { createRequestId } from '@ln-avatar/sdk'
 import { getAdminAccountUsage, getAdminUsageAccounts, getAdminUsageOverview, getPointRates, grantAccountPoints,
   grantAccountQuota, publishPointRate, saveAccountLimits, type AccountLimitInput, type AdminAccountUsageDetail,
   type AdminAccountUsageRow, type AdminUsageOverview, type Page, type PointRate, type PointRateInput,
@@ -207,7 +208,7 @@ async function saveAdminLimits() {
 async function submitGrant() {
   if (!loadedAccountId.value || loadedAccountId.value !== accountId()) return
   if (!grant.reason.trim()) { ElMessage.warning('请填写授予依据'); return }
-  if (!grantKey.value) grantKey.value = crypto.randomUUID()
+  if (!grantKey.value) grantKey.value = createRequestId()
   adminBusy.value = true
   try {
     const result = await grantAccountQuota(loadedAccountId.value, { ...grant }, grantKey.value)
@@ -220,7 +221,7 @@ async function submitGrant() {
 async function submitPointGrant() {
   if (!loadedAccountId.value || loadedAccountId.value !== accountId()) return
   if (!pointGrant.reason.trim()) { ElMessage.warning('请填写授予依据'); return }
-  if (!pointGrantKey.value) pointGrantKey.value = crypto.randomUUID()
+  if (!pointGrantKey.value) pointGrantKey.value = createRequestId()
   adminBusy.value = true
   try {
     const result = await grantAccountPoints(loadedAccountId.value, pointGrant.points, pointGrant.reason, pointGrantKey.value)

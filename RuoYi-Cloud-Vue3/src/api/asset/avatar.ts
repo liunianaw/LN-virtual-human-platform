@@ -1,3 +1,4 @@
+import { createRequestId } from '@ln-avatar/sdk'
 import request from '@/utils/request'
 const assetBase = () => '/system/asset'
 const avatarBase = () => assetBase() + '/avatars'
@@ -272,7 +273,7 @@ export function getAvatarReferences(avatarId: string): Promise<AjaxResult<Avatar
 }
 
 export function deleteOwnedAvatar(avatarId: string, revision: string): Promise<AjaxResult<{ avatarId: string; status: string }>> {
-  return request({ url: `${avatarBase()}/${avatarId}`, method: 'delete', headers: { 'If-Match': revision, 'Idempotency-Key': crypto.randomUUID() } })
+  return request({ url: `${avatarBase()}/${avatarId}`, method: 'delete', headers: { 'If-Match': revision, 'Idempotency-Key': createRequestId() } })
 }
 
 export function unpublishOfficialAvatar(avatarId: string, reason: string): Promise<AjaxResult> {

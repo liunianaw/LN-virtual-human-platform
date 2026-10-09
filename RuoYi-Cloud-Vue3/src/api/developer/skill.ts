@@ -1,3 +1,4 @@
+import { createRequestId } from '@ln-avatar/sdk'
 import request from '@/utils/request'
 import type { AjaxResult } from '@/types'
 import type { PageResult, PageQuery } from '@/types/page'
@@ -38,7 +39,7 @@ export interface SkillDetail extends SkillSummary, Omit<SkillInput, 'name' | 'de
 }
 const base = (admin: boolean) => admin ? '/api/v1/admin/public-skills' : '/api/v1/developer/skills'
 const headers = (revision?: string) => ({
-  'Idempotency-Key': crypto.randomUUID(),
+  'Idempotency-Key': createRequestId(),
   ...(revision ? { 'If-Match': revision } : {})
 })
 export const listSkills = (admin = false, params: PageQuery = {}): Promise<AjaxResult<PageResult<SkillSummary>>> =>

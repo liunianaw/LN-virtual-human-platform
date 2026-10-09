@@ -1,3 +1,4 @@
+import { createRequestId } from '@ln-avatar/sdk'
 import request from '@/utils/request'
 import type { AjaxResult } from '@/types'
 import type { PageResult, PageQuery } from '@/types/page'
@@ -12,7 +13,7 @@ export interface OfficialVoice { voiceId: string; name: string; description?: st
 export interface OfficialVoiceSummary { voiceId: string; name: string; description?: string; status: string; currentVersionId?: string; revision: string; voiceAlias?: string }
 export interface OfficialVoiceInput { name: string; description?: string; officialServiceId: string; expectedServiceRevision: string; voiceAlias: string; language?: string; parameters: Record<string, number>; fallbackVoiceVersionId?: string; allowVoiceChange?: boolean; referenceAssetId?: string; referenceText?: string }
 
-const headers = (extra: Record<string, string> = {}) => ({ ...extra, 'Idempotency-Key': crypto.randomUUID() })
+const headers = (extra: Record<string, string> = {}) => ({ ...extra, 'Idempotency-Key': createRequestId() })
 export const listOfficialVoiceServices = (): Promise<AjaxResult<OfficialVoiceService[]>> => request({ url: '/api/v1/admin/public-voices/services', method: 'get' })
 export const listOfficialVoices = (params: PageQuery & { status?: string } = {}): Promise<AjaxResult<PageResult<OfficialVoiceSummary>>> => request({ url: '/api/v1/admin/public-voices', method: 'get', params })
 export const getOfficialVoice = (voiceId: string): Promise<AjaxResult<OfficialVoice>> => request({ url: `/api/v1/admin/public-voices/${voiceId}`, method: 'get' })
