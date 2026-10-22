@@ -66,23 +66,28 @@ flowchart TD
 
 ```text
 LN-virtual-human-platform/
+├── README.md                    # 项目介绍与开发入口
+├── 启动整个项目.cmd             # Windows 本机启动入口
 ├── RuoYi-Cloud/                  # Java 后端
+│   ├── ruoyi-api/                # 服务间调用接口
 │   ├── ruoyi-gateway/            # API 网关
 │   ├── ruoyi-auth/               # 登录与认证
 │   ├── ruoyi-modules/
 │   │   ├── ruoyi-system/         # 平台管理与资产业务
 │   │   └── ruoyi-session/        # 会话与语音运行
 │   ├── ruoyi-common/             # 公共模块与语音协议
+│   ├── bin/                      # 启动、构建与配置辅助脚本
 │   ├── config/nacos/             # Nacos 配置模板
 │   ├── sql/                      # 数据库参考与初始化脚本
 │   └── docker/                   # 容器部署模板
 ├── RuoYi-Cloud-Vue3/             # 管理员 / 开发者控制台
 ├── avatar-sdk/                   # TypeScript 播放器与会话 SDK
 ├── ruoyi-media/                  # 媒体 API、Worker 与素材加工
-├── ruoyi-voice/                  # 轻量语音执行服务
-│   └── model-runtimes/           # 模型源码锁、依赖、许可证与容器入口
-└── validation/                  # 制作验证工具及相关测试
+└── ruoyi-voice/                  # 轻量语音执行服务
+    └── model-runtimes/           # 模型源码锁、依赖、许可证与容器入口
 ```
+
+以上列出仓库中的主要源码与运行入口。`target/`（部署产物）、`upstream/`（上游源码）、`validation/`（实验与验证资料）以及 `项目文档/`、日志和本地配置仅在本机按需保留，不随源码仓库交付。旧的 `tools/local-relay/` 已移除。
 
 ## 开发与运行
 
