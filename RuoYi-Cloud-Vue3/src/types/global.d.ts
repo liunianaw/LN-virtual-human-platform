@@ -65,12 +65,6 @@ declare module 'file-saver' {
   export default saveAs
 }
 
-// jsencrypt
-declare module 'jsencrypt/bin/jsencrypt.min' {
-  import JSEncrypt from 'jsencrypt'
-  export default JSEncrypt
-}
-
 // axios
 declare module 'axios'
 
