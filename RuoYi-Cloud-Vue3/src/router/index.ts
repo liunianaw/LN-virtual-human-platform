@@ -109,6 +109,20 @@ export const constantRoutes = [
 // 动态路由，基于用户权限动态去加载
 export const dynamicRoutes = [
   {
+    path: '/system/config',
+    component: Layout,
+    hidden: true,
+    permissions: ['system:config:list'],
+    children: [
+      {
+        path: '',
+        component: () => import('@/views/system/config/index.vue'),
+        name: 'Config',
+        meta: { title: '参数设置', activeMenu: '/operations/account-quotas', noCache: true }
+      }
+    ]
+  },
+  {
     path: '/asset/avatar',
     component: Layout,
     hidden: true,
