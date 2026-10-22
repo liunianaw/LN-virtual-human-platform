@@ -6,7 +6,7 @@ LN 是一个面向开发者的虚拟角色制作、资产管理与运行平台�
 
 你可以在平台中制作全身角色、配置声音和 Skills，将它们组合为 Application，再通过业务后端与 SDK 接入自己的应用，实现角色动作、语音识别和文本播报。角色使用 **2D 透明动作图集 + Canvas** 播放。
 
-> 本文对应 `LN_v1.0` 分支，当前处于 v1.0 发布准备阶段。核心链路已完成开发并进行过本机验证，生产部署与容量验证仍在完善中。
+> 本文对应 `LN_v2.0` 开发分支，以 v1.0 现有能力为起点。v2.0 新功能尚未实施；生产部署与容量验证的既有边界仍需按实际环境核对。
 
 [功能概览](#功能概览) · [架构](#架构) · [技术栈](#技术栈) · [目录结构](#目录结构) · [开发与运行](#开发与运行) · [SDK 接入](#sdk-接入) · [贡献](#贡献) · [许可证与致谢](#许可证与致谢)
 
@@ -94,7 +94,7 @@ LN-virtual-human-platform/
 ### 1. 获取源码
 
 ```bash
-git clone --branch LN_v1.0 https://github.com/liunianaw/LN-virtual-human-platform.git
+git clone --branch LN_v2.0 https://github.com/liunianaw/LN-virtual-human-platform.git
 cd LN-virtual-human-platform
 ```
 
